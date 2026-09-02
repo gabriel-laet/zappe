@@ -39,6 +39,7 @@ pub enum ChromeCmd {
     },
     Pause,
     Play,
+    PlayPause,
     Search {
         query: String,
         service: Service,
@@ -226,6 +227,9 @@ async fn chrome_worker(
             ChromeCmd::Play => {
                 run_skill(&page, active_service.skill(), SkillOp::Play).await;
             }
+            ChromeCmd::PlayPause => {
+                run_skill(&page, active_service.skill(), SkillOp::PlayPause).await;
+            }
             ChromeCmd::Search { query, service } => {
                 active_service = service;
                 let url = service.search_url(&query);
@@ -342,6 +346,7 @@ async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> 
 enum SkillOp {
     Pause,
     Play,
+    PlayPause,
     Fullscreen,
     Back,
 }
@@ -350,6 +355,7 @@ async fn run_skill(page: &Page, skill: &dyn SiteSkill, op: SkillOp) {
     let js = match op {
         SkillOp::Pause => skill.pause_js().to_string(),
         SkillOp::Play => skill.play_js().to_string(),
+        SkillOp::PlayPause => skill.play_pause_js().to_string(),
         SkillOp::Fullscreen => skill.fullscreen_js().to_string(),
         SkillOp::Back => skill.back_js().to_string(),
     };

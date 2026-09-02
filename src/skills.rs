@@ -88,6 +88,9 @@ pub trait SiteSkill: Send + Sync {
     fn play_js(&self) -> &'static str {
         self.pause_js()
     }
+    fn play_pause_js(&self) -> &'static str {
+        self.pause_js()
+    }
     fn fullscreen_js(&self) -> &'static str;
     fn back_js(&self) -> &'static str;
 }
@@ -215,6 +218,10 @@ impl SiteSkill for Youtube {
         "(function(){var v=document.querySelector('video'); if(v) v.play();})()"
     }
 
+    fn play_pause_js(&self) -> &'static str {
+        "(function(){var v=document.querySelector('video'); if(!v) return; if(v.paused) v.play(); else v.pause();})()"
+    }
+
     fn fullscreen_js(&self) -> &'static str {
         // FRAGILE: YouTube player chrome.
         click!("button.ytp-fullscreen-button, button[aria-label='Full screen']")
@@ -321,6 +328,7 @@ mod tests {
         let yt = Service::Youtube.skill();
         assert!(yt.pause_js().contains("video"));
         assert!(yt.play_js().contains("play"));
+        assert!(yt.play_pause_js().contains("paused"));
         assert!(
             yt.fullscreen_js().contains("ytp-fullscreen")
                 || yt.fullscreen_js().contains("aria-label")

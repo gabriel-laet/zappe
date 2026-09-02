@@ -55,6 +55,22 @@ fn rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let kind = in.extra.x;
+    if kind > 1.5 {
+        // TV focus ring: fat rounded stroke, not a 1px outline.
+        let half = in.size * 0.5;
+        let p = (in.local - vec2<f32>(0.5, 0.5)) * in.size;
+        let radius = max(in.extra.y, 6.0);
+        let d = rounded_box(p, half, radius);
+        let thick = max(in.extra.z, 10.0);
+        let aa = 1.8;
+        let ring = 1.0 - smoothstep(0.0, aa, abs(d) - thick * 0.5);
+        let halo = 0.35 * (1.0 - smoothstep(thick * 0.5, thick * 2.4, abs(d)));
+        let alpha = max(ring, halo);
+        if alpha < 0.02 {
+            discard;
+        }
+        return vec4<f32>(in.color.rgb, in.color.a * alpha);
+    }
     if kind > 0.5 {
         let atlas = vec2<f32>(16.0, 6.0);
         let glyph = in.extra.yz;

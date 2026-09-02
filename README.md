@@ -8,6 +8,7 @@ This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide 
 
 - A always-on-top native HUD (`winit` + `wgpu`) with a scanline / phosphor shader and a tiny immediate-mode tile grid. No Electron, no Tauri, no in-process webview.
 - A remote control for a **separate Chrome process** with a dedicated `--user-data-dir` (`…/zappe/chrome-profile`). You log in by hand, once. Zappe then opens first-party URLs and sends a few CDP / DOM pokes.
+- Living-room input: a dummy TV remote that looks like a keyboard, plus a constrained command language (on-screen bar / stdin / whisper.cpp hook). Not a chat bot.
 - Window control via CDP `Browser.setWindowBounds` (fullscreen / raise). macOS `osascript` and Linux `wmctrl` are documented best-effort stubs for when the OS still needs a nudge.
 
 ## What it is not
@@ -31,7 +32,7 @@ sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
 cargo run
 ```
 
-That is HUD-only. Arrow keys move the focus, Enter "zaps" (logs the URL if Chrome is off), `q` quits, `esc` / `h` show the HUD again.
+That is HUD-only. A cheap HDMI-CEC / USB / 2.4 GHz dummy remote that enumerates as a keyboard works on first run — see the keymap below.
 
 Drive a real Chrome profile:
 
@@ -54,20 +55,44 @@ cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
 
 `--chrome` / `ZAPPE_CHROME` and `--cdp` / `ZAPPE_CDP` are the feature flags. `cargo run` never requires Chrome.
 
-### Keys
+### Remote / keyboard (must-have)
 
-| Key | Action |
+Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them in `winit` (physical `KeyCode` plus `NamedKey` aliases). Volume stays with the OS.
+
+| Remote / key | Action |
 | --- | --- |
-| arrows | move the guide focus |
-| enter | open the focused tile's first-party URL |
-| s | search via official URL (`/results?search_query=` on YouTube) |
-| space | pause skill (fragile per-site selector) |
-| p | play skill |
-| f | fullscreen via CDP `setWindowBounds` + site skill |
-| backspace | history back |
-| esc | show HUD (Chrome stays running) |
-| h | hide / show HUD so you can use the Chrome window |
-| q | quit HUD |
+| Arrows | move the **big amber focus ring** across tiles and rows |
+| Enter / Return | activate the focused tile (open its first-party URL) |
+| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, Chrome history back) |
+| Home / BrowserHome | root of the guide (first tile of Continue) |
+| Space / MediaPlayPause | play-pause the Chrome player skill |
+| `p` | play (keyboard extra) |
+| `/` | open the on-screen command bar |
+| `h` | hide / show HUD so you can use the Chrome window |
+| `q` | quit HUD (keyboard only) |
+| 0–9 | reserved for later |
+| Volume | OS / AVR — Zappe does not eat these keys |
+
+Point a dummy remote at the HUD and use arrows + OK + Back. The focus ring is a fat stroke, not a 1px outline.
+
+### Voice and the command bar
+
+Voice is **local whisper.cpp only**, not a chat LLM and not an unconstrained agent. After transcription, text is parsed with a tiny grammar — the same parser as the on-screen bar, `--say`, and stdin:
+
+```text
+play <query> [on youtube|netflix|prime|disney]
+search <query> [on youtube|netflix|prime|disney]
+pause | fullscreen | back | home
+```
+
+whisper.cpp is a stub/hook in this sketch (`--whisper` / `ZAPPE_WHISPER` / `ZAPPE_WHISPER_BIN`). It does not download a model. Until a binary is on PATH, type into the HUD (`/` then Enter) or:
+
+```bash
+cargo run -- --say "play lofi on youtube"
+echo "pause" | cargo run -- --cmd-stdin
+```
+
+Unknown utterances (`what's the weather`) are rejected. No general-purpose tool calling.
 
 ## How login works
 
@@ -91,8 +116,10 @@ cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
 ## Layout
 
 ```
-src/main.rs       CLI + winit event loop
-src/hud.rs        wgpu CRT pass + immediate tiles / bitmap font
+src/main.rs       CLI + winit remote/keyboard loop
+src/command.rs    constrained play/pause/search grammar
+src/voice.rs      whisper.cpp hook (no model, no LLM)
+src/hud.rs        wgpu CRT pass + tiles + fat focus ring
 src/shaders/      crt.wgsl, quad.wgsl
 src/chrome.rs     spawn / attach, CDP window bounds, OS stubs
 src/catalog.rs    placeholder rows + MetadataSource stub

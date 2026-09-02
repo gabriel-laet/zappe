@@ -73,6 +73,8 @@ pub struct Guide {
     pub status: String,
     pub chrome_line: String,
     pub hidden: bool,
+    /// On-screen command bar. Same grammar as stdin / whisper.
+    pub command: Option<String>,
 }
 
 impl Guide {
@@ -81,11 +83,10 @@ impl Guide {
             catalog,
             row: 0,
             col: 0,
-            status:
-                "arrows move  enter zap  s search  space pause  p play  f full  esc hud  q quit"
-                    .into(),
+            status: "arrows move  enter zap  / cmd  space play-pause  esc back  home root".into(),
             chrome_line: "CHROME: off".into(),
             hidden: false,
+            command: None,
         }
     }
 
@@ -103,8 +104,25 @@ impl Guide {
         self.col = ((self.col as isize + dcol).rem_euclid(cols)) as usize;
     }
 
+    pub fn go_home(&mut self) {
+        self.row = 0;
+        self.col = 0;
+        self.command = None;
+        self.status = "home".into();
+    }
+
     pub fn focused(&self) -> Option<&crate::catalog::Tile> {
         self.catalog.tile(self.row, self.col)
+    }
+
+    pub fn open_command(&mut self) {
+        self.command = Some(String::new());
+        self.status =
+            "play <query> [on youtube|netflix|prime|disney]  /  pause fullscreen back home".into();
+    }
+
+    pub fn close_command(&mut self) {
+        self.command = None;
     }
 }
 
@@ -557,7 +575,19 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
 
     push_text(&mut out, 36.0, 28.0, 4.0, "ZAPPE", amber);
     push_text(&mut out, res[0] - 420.0, 32.0, 2.0, &guide.chrome_line, dim);
-    push_text(&mut out, 36.0, res[1] - 42.0, 2.0, &guide.status, dim);
+    if let Some(cmd) = &guide.command {
+        let bar_y = res[1] - 78.0;
+        out.push(Instance {
+            rect: [24.0, bar_y - 8.0, res[0] - 48.0, 36.0],
+            color: [0.02, 0.08, 0.07, 0.92],
+            extra: [0.0, 6.0, 0.0, 0.0],
+        });
+        let prompt = format!("> {cmd}_");
+        push_text(&mut out, 36.0, bar_y, 2.0, &prompt, amber);
+        push_text(&mut out, 36.0, res[1] - 36.0, 2.0, &guide.status, dim);
+    } else {
+        push_text(&mut out, 36.0, res[1] - 42.0, 2.0, &guide.status, dim);
+    }
 
     let mut y = 80.0;
     for (ri, row) in guide.catalog.rows.iter().enumerate() {
@@ -568,6 +598,13 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
             let focused = ri == guide.row && ci == guide.col;
             let w = 220.0;
             let h = 72.0;
+            if focused {
+                out.push(Instance {
+                    rect: [x - 14.0, y - 14.0, w + 28.0, h + 28.0],
+                    color: [1.0, 0.86, 0.25, 1.0],
+                    extra: [2.0, 16.0, 12.0, 0.0],
+                });
+            }
             out.push(Instance {
                 rect: [x, y, w, h],
                 color: if focused { tile_focus } else { tile_idle },
@@ -655,8 +692,11 @@ fn glyph(code: u8) -> [u8; 8] {
         b'_' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7E],
         b'+' => [0x00, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x00, 0x00],
         b'-' => [0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00],
+        b'\'' => [0x18, 0x18, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00],
+        b',' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x30],
         b'.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00],
         b'/' => [0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x00, 0x00],
+        b'>' => [0x0C, 0x18, 0x30, 0x60, 0x30, 0x18, 0x0C, 0x00],
         b':' => [0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 0x00],
         b'0' => [0x3C, 0x66, 0x6E, 0x76, 0x66, 0x66, 0x3C, 0x00],
         b'1' => [0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00],
@@ -721,5 +761,8 @@ mod tests {
         guide.move_by(1, 0);
         assert_eq!(guide.row, 0);
         assert!(guide.focused().is_some());
+        guide.move_by(1, 0);
+        guide.go_home();
+        assert_eq!((guide.row, guide.col), (0, 0));
     }
 }
