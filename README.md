@@ -21,6 +21,12 @@ This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide 
 
 Needs Rust 1.88+ (the `rust-toolchain.toml` pins `stable`). Builds on macOS and Linux.
 
+On Linux you need a working GPU stack at **runtime** (Vulkan ICD or GL/EGL) plus `libxkbcommon-x11`. Debian/Ubuntu:
+
+```bash
+sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
+```
+
 ```bash
 cargo run
 ```
@@ -57,7 +63,8 @@ cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
 | space | pause skill (fragile per-site selector) |
 | f | fullscreen via CDP `setWindowBounds` + site skill |
 | backspace | history back |
-| esc / h | show HUD (Chrome stays running) |
+| esc | show HUD (Chrome stays running) |
+| h | hide / show HUD so you can use the Chrome window |
 | q | quit HUD |
 
 ## How login works

@@ -99,6 +99,7 @@ impl App {
         let Some(tile) = self.guide.focused().cloned() else {
             return;
         };
+        let _ = self.guide.catalog.public_meta(&tile.title);
         if !self.chrome.enabled {
             self.guide.status = format!(
                 "would open {} on {} (pass --chrome)",
