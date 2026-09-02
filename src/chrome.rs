@@ -1,6 +1,6 @@
 //! Dedicated Google Chrome process, driven over CDP.
 //!
-//! Zappe never embeds Netflix / Prime / Disney, never scrapes their HTML into
+//! Zappe never embeds Netflix / Prime / Disney / YouTube, never scrapes their HTML into
 //! a catalog, and never extracts or re-encodes DRM video. The user logs in by
 //! hand once inside this profile. Cookies stay in Chrome's user-data-dir.
 
@@ -38,6 +38,11 @@ pub enum ChromeCmd {
         title: String,
     },
     Pause,
+    Play,
+    Search {
+        query: String,
+        service: Service,
+    },
     Fullscreen,
     Back,
     ShowHud,
@@ -218,6 +223,33 @@ async fn chrome_worker(
             ChromeCmd::Pause => {
                 run_skill(&page, active_service.skill(), SkillOp::Pause).await;
             }
+            ChromeCmd::Play => {
+                run_skill(&page, active_service.skill(), SkillOp::Play).await;
+            }
+            ChromeCmd::Search { query, service } => {
+                active_service = service;
+                let url = service.search_url(&query);
+                if crate::skills::is_official_deep_link(&url) {
+                    match open_service(&page, service, &url, &query).await {
+                        Ok(()) => {
+                            let _ = events.send(ChromeEvent::Opened(url));
+                        }
+                        Err(err) => {
+                            let _ = events.send(ChromeEvent::Failed(format!("{err:#}")));
+                        }
+                    }
+                } else {
+                    match search_via_skill(&page, service, &query).await {
+                        Ok(()) => {
+                            let _ = events.send(ChromeEvent::Opened(url));
+                        }
+                        Err(err) => {
+                            log::warn!("search skill missed (expected): {err}");
+                            let _ = events.send(ChromeEvent::Failed(format!("{err:#}")));
+                        }
+                    }
+                }
+            }
             ChromeCmd::Fullscreen => {
                 let _ = raise_fullscreen(&page).await;
                 run_skill(&page, active_service.skill(), SkillOp::Fullscreen).await;
@@ -284,10 +316,21 @@ async fn attach_existing(cdp: &str) -> Result<(Browser, Page)> {
     Ok((browser, page))
 }
 
+async fn search_via_skill(page: &Page, service: Service, query: &str) -> Result<()> {
+    page.goto(service.home_url()).await?;
+    page.evaluate(service.skill().search_js(query)).await?;
+    Ok(())
+}
+
 async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> Result<()> {
     log::info!("opening {} ({title}) -> {url}", service.label());
     page.goto(url).await?;
-    if title != "Home" && title != service.label() {
+    // Deep links already express intent. Do not scrape search results into a pick.
+    if !crate::skills::is_official_deep_link(url)
+        && title != "Home"
+        && title != service.label()
+        && title != "Subscriptions"
+    {
         let js = service.skill().open_title_js(title);
         if let Err(err) = page.evaluate(js).await {
             log::debug!("open-title skill missed (expected): {err}");
@@ -298,6 +341,7 @@ async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> 
 
 enum SkillOp {
     Pause,
+    Play,
     Fullscreen,
     Back,
 }
@@ -305,6 +349,7 @@ enum SkillOp {
 async fn run_skill(page: &Page, skill: &dyn SiteSkill, op: SkillOp) {
     let js = match op {
         SkillOp::Pause => skill.pause_js().to_string(),
+        SkillOp::Play => skill.play_js().to_string(),
         SkillOp::Fullscreen => skill.fullscreen_js().to_string(),
         SkillOp::Back => skill.back_js().to_string(),
     };

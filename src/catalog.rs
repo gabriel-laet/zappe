@@ -2,7 +2,7 @@
 //!
 //! Real streaming libraries stay inside first-party Chrome. Public metadata
 //! (JustWatch-style) is a stub trait so a later crate can fill posters/titles
-//! without scraping Netflix / Prime / Disney HTML.
+//! without scraping Netflix / Prime / Disney / YouTube HTML.
 
 use crate::skills::Service;
 
@@ -36,6 +36,11 @@ impl Catalog {
                         tile("The Night Agent", Service::Netflix),
                         tile("Reacher", Service::Prime),
                         tile("Andor", Service::Disney),
+                        Tile {
+                            title: "Subscriptions".into(),
+                            service: Service::Youtube,
+                            url: Service::Youtube.subscriptions_url().unwrap().into(),
+                        },
                     ],
                 },
                 Row {
@@ -60,6 +65,29 @@ impl Catalog {
                         tile("Home", Service::Disney),
                         tile("Loki", Service::Disney),
                         tile("Shogun", Service::Disney),
+                    ],
+                },
+                Row {
+                    label: "YOUTUBE".into(),
+                    tiles: vec![
+                        tile("Home", Service::Youtube),
+                        Tile {
+                            title: "Subscriptions".into(),
+                            service: Service::Youtube,
+                            url: Service::Youtube.subscriptions_url().unwrap().into(),
+                        },
+                        Tile {
+                            title: "Search lofi".into(),
+                            service: Service::Youtube,
+                            url: Service::Youtube.search_url("lofi"),
+                        },
+                        Tile {
+                            title: "Me at the zoo".into(),
+                            service: Service::Youtube,
+                            url: Service::Youtube
+                                .watch_url("jNQXAC9IVRw")
+                                .expect("placeholder watch id"),
+                        },
                     ],
                 },
                 Row {
@@ -125,10 +153,31 @@ mod tests {
         let labels: Vec<_> = catalog.rows.iter().map(|r| r.label.as_str()).collect();
         assert_eq!(
             labels,
-            ["CONTINUE", "NETFLIX", "PRIME VIDEO", "DISNEY+", "JELLYFIN"]
+            [
+                "CONTINUE",
+                "NETFLIX",
+                "PRIME VIDEO",
+                "DISNEY+",
+                "YOUTUBE",
+                "JELLYFIN",
+            ]
         );
         assert!(catalog.tile(0, 0).is_some());
         assert!(catalog.tile(0, 0).unwrap().url.starts_with("https://"));
+        let yt = catalog
+            .rows
+            .iter()
+            .find(|r| r.label == "YOUTUBE")
+            .expect("youtube row");
+        assert!(yt
+            .tiles
+            .iter()
+            .any(|t| t.url.contains("/feed/subscriptions")));
+        assert!(yt
+            .tiles
+            .iter()
+            .any(|t| t.url.contains("/results?search_query=")));
+        assert!(yt.tiles.iter().any(|t| t.url.contains("/watch?v=")));
         assert!(catalog.public_meta("andor").is_none());
     }
 

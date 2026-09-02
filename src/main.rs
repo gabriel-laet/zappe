@@ -116,6 +116,27 @@ impl App {
             title: tile.title,
         });
     }
+
+    fn search_focused(&mut self) {
+        let Some(tile) = self.guide.focused().cloned() else {
+            return;
+        };
+        let query = tile.title;
+        let url = tile.service.search_url(&query);
+        if !self.chrome.enabled {
+            self.guide.status = format!(
+                "would search {query} on {} (pass --chrome)",
+                tile.service.label()
+            );
+            log::info!("{} -> {url}", self.guide.status);
+            return;
+        }
+        self.guide.status = format!("search {query} …");
+        self.chrome.send(ChromeCmd::Search {
+            query,
+            service: tile.service,
+        });
+    }
 }
 
 impl ApplicationHandler for App {
@@ -191,6 +212,8 @@ impl ApplicationHandler for App {
                 KeyCode::ArrowRight => self.guide.move_by(0, 1),
                 KeyCode::Enter | KeyCode::NumpadEnter => self.zap(),
                 KeyCode::Space => self.chrome.send(ChromeCmd::Pause),
+                KeyCode::KeyP => self.chrome.send(ChromeCmd::Play),
+                KeyCode::KeyS => self.search_focused(),
                 KeyCode::KeyF => self.chrome.send(ChromeCmd::Fullscreen),
                 KeyCode::Backspace => self.chrome.send(ChromeCmd::Back),
                 KeyCode::KeyH => self.set_hud_visible(self.guide.hidden),

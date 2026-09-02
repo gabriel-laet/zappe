@@ -81,8 +81,9 @@ impl Guide {
             catalog,
             row: 0,
             col: 0,
-            status: "arrows move   enter zap   space pause   f fullscreen   esc hud   q quit"
-                .into(),
+            status:
+                "arrows move  enter zap  s search  space pause  p play  f full  esc hud  q quit"
+                    .into(),
             chrome_line: "CHROME: off".into(),
             hidden: false,
         }
@@ -558,7 +559,7 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
     push_text(&mut out, res[0] - 420.0, 32.0, 2.0, &guide.chrome_line, dim);
     push_text(&mut out, 36.0, res[1] - 42.0, 2.0, &guide.status, dim);
 
-    let mut y = 96.0;
+    let mut y = 80.0;
     for (ri, row) in guide.catalog.rows.iter().enumerate() {
         push_text(&mut out, 40.0, y, 2.5, &row.label, [0.35, 0.85, 0.55, 1.0]);
         y += 28.0;
@@ -566,7 +567,7 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
         for (ci, tile) in row.tiles.iter().enumerate() {
             let focused = ri == guide.row && ci == guide.col;
             let w = 220.0;
-            let h = 88.0;
+            let h = 72.0;
             out.push(Instance {
                 rect: [x, y, w, h],
                 color: if focused { tile_focus } else { tile_idle },
@@ -591,7 +592,7 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
             );
             x += w + 16.0;
         }
-        y += 110.0;
+        y += 96.0;
     }
     out
 }
@@ -646,8 +647,12 @@ fn glyph(code: u8) -> [u8; 8] {
     match code {
         b' ' => [0; 8],
         b'!' => [0x18, 0x18, 0x18, 0x18, 0x18, 0x00, 0x18, 0x00],
+        b'&' => [0x38, 0x44, 0x28, 0x10, 0x28, 0x44, 0x3A, 0x00],
         b'(' => [0x0C, 0x18, 0x30, 0x30, 0x30, 0x18, 0x0C, 0x00],
         b')' => [0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x18, 0x30, 0x00],
+        b'=' => [0x00, 0x00, 0x7E, 0x00, 0x7E, 0x00, 0x00, 0x00],
+        b'?' => [0x3C, 0x66, 0x06, 0x0C, 0x18, 0x00, 0x18, 0x00],
+        b'_' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7E],
         b'+' => [0x00, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x00, 0x00],
         b'-' => [0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00],
         b'.' => [0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00],
