@@ -146,7 +146,7 @@ impl ApplicationHandler for App {
         }
         let attrs = WindowAttributes::default()
             .with_title("ZAPPE")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
+            .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 900.0))
             .with_window_level(WindowLevel::AlwaysOnTop);
         match event_loop.create_window(attrs) {
             Ok(window) => {
