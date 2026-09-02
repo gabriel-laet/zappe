@@ -35,11 +35,13 @@ impl WhisperHook {
 
     /// Run whisper.cpp on a wav file, then parse the transcript with the
     /// constrained grammar. No tool-calling, no general model.
+    #[allow(dead_code)]
     pub fn transcribe_and_parse(&self, wav: &Path) -> Result<command::Command> {
         let text = self.transcribe(wav)?;
         command::parse(&text).map_err(|err: ParseError| anyhow!("{err}"))
     }
 
+    #[allow(dead_code)]
     pub fn transcribe(&self, wav: &Path) -> Result<String> {
         let bin = self
             .bin
