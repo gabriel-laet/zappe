@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+.DS_Store
+*.swp
+# Never commit a Chrome profile (cookies live there).
+chrome-profile/
