@@ -154,8 +154,12 @@ export function Home() {
       .getCatalog()
       .then(setCatalog)
       .catch(() => undefined);
-    void api.harvestNow().catch((e) => {
-      toast.message(String(e));
+    // Never auto-harvest on mount — that steals focus into the Netflix nest.
+    // Opt in only for debugging: ZAPPE_AUTO_HARVEST=1
+    void api.autoHarvestEnabled().then((on) => {
+      if (on) {
+        void api.harvestNow().catch((e) => toast.message(String(e)));
+      }
     });
     let unlistenFocus: (() => void) | undefined;
     let unlistenCatalog: (() => void) | undefined;

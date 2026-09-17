@@ -106,6 +106,11 @@ fn get_catalog(state: State<AppState>) -> CatalogView {
 }
 
 #[tauri::command]
+fn auto_harvest_enabled() -> bool {
+    harvest::auto_harvest_enabled()
+}
+
+#[tauri::command]
 async fn harvest_now(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -323,6 +328,7 @@ pub fn run() {
             ota_enabled,
             list_ota_channels,
             get_catalog,
+            auto_harvest_enabled,
             harvest_now,
             begin_teach,
             cancel_teach,

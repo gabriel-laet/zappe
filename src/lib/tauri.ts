@@ -80,6 +80,7 @@ export const api = {
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
   getCatalog: () => invoke<CatalogView>("get_catalog"),
+  autoHarvestEnabled: () => invoke<boolean>("auto_harvest_enabled"),
   harvestNow: (skillId?: string) =>
     invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),
   beginTeach: (skillId: string) => invoke<TeachView>("begin_teach", { skillId }),

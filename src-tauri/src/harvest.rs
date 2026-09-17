@@ -32,6 +32,21 @@ pub struct HarvestRequest {
     pub skip_nest: bool,
 }
 
+/// Home must not harvest on mount unless this is set (debug / old behavior).
+pub fn auto_harvest_enabled() -> bool {
+    parse_auto_harvest(std::env::var("ZAPPE_AUTO_HARVEST").ok().as_deref())
+}
+
+fn parse_auto_harvest(raw: Option<&str>) -> bool {
+    match raw {
+        Some(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        None => false,
+    }
+}
+
 impl HarvestRequest {
     pub fn for_skill(id: impl Into<String>) -> Self {
         Self {
@@ -254,6 +269,7 @@ pub async fn run_cli(req: HarvestRequest) -> Result<HarvestOutcome> {
 
 #[cfg(test)]
 mod tests {
+    use super::parse_auto_harvest;
     use crate::a11y::load_dump;
     use crate::skill::{extract_rows, load_skill, NETFLIX_CONTINUE_WATCHING_V1};
 
@@ -272,5 +288,16 @@ mod tests {
         assert!(!titles.contains(&"Play"));
         assert!(!titles.contains(&"More Info"));
         assert!(!titles.contains(&"Trending Now"));
+    }
+
+    #[test]
+    fn auto_harvest_is_off_unless_explicitly_enabled() {
+        assert!(!parse_auto_harvest(None));
+        assert!(!parse_auto_harvest(Some("")));
+        assert!(!parse_auto_harvest(Some("0")));
+        assert!(!parse_auto_harvest(Some("false")));
+        assert!(parse_auto_harvest(Some("1")));
+        assert!(parse_auto_harvest(Some("true")));
+        assert!(parse_auto_harvest(Some("YES")));
     }
 }

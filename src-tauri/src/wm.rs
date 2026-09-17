@@ -8,7 +8,14 @@ const MPV_WINDOW: &str = "class:^(mpv)$";
 const GUIDE_CLASS: &str = "class:^(zappe)$";
 const GUIDE_TITLE: &str = "title:^Zappe$";
 
+/// Hyprland 0.56: only `hyprctl eval` + `hl.dsp.*`. Never `hyprctl dispatch …`
+/// (including `dispatch exec`) — that path is rejected on Lua sessions.
+/// Processes are spawned from Rust (`nest`, `ota`), not via the compositor.
 fn hypr_eval(lua: &str) -> bool {
+    debug_assert!(
+        !lua.contains("dispatch exec") && !lua.contains("hyprctl dispatch"),
+        "legacy hyprctl dispatch is forbidden on Hyprland 0.56"
+    );
     match Command::new("hyprctl").arg("eval").arg(lua).output() {
         Ok(out) if out.status.success() => true,
         Ok(out) => {
@@ -122,6 +129,19 @@ mod tests {
         assert!(lua.contains("special:zappe-nest"));
         assert!(!lua.contains("movetoworkspacesilent"));
         assert!(!lua.contains("hl.dsp.window.movetoworkspacesilent"));
+    }
+
+    #[test]
+    fn never_uses_legacy_hyprctl_dispatch_exec() {
+        let src = include_str!("wm.rs");
+        assert!(
+            !src.contains(".arg(\"dispatch\")"),
+            "do not invoke `hyprctl dispatch` (0.56 breaks); use eval + hl.dsp.*"
+        );
+        assert!(src.contains(".arg(\"eval\")"));
+        let lua = hypr_move_to_workspace_lua("pid:1", "special:zappe-nest", false);
+        assert!(lua.starts_with("hl.dispatch(hl.dsp."));
+        assert!(!lua.contains("dispatch exec"));
     }
 }
 

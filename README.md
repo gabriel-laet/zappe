@@ -76,7 +76,7 @@ Production build: `npm run tauri build`.
 
 ### Harvest Continue Watching (Linux)
 
-From the guide: Home auto-runs the Netflix skill on load, or focus **Sync Netflix**.
+From the guide: focus **Sync Netflix** (Home does **not** harvest on launch — that stole focus into the nest). `ZAPPE_AUTO_HARVEST=1` restores the old auto-sync for debugging.
 
 From a terminal (same store the UI reads):
 
@@ -143,7 +143,7 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 | Back / Escape | Hide nest or stop mpv → guide fullscreen + focus |
 | Quit | Stop OTA; kill a Zappe-launched nest |
 
-Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` (not legacy `dispatch focuswindow`). Failures are logged and ignored.
+Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
 
 ## Remote (ALTONEX-style keyboard)
 
@@ -167,6 +167,7 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` (not legacy `dispatch focus
 | `ZAPPE_HARVEST_FIXTURE` | a11y JSON dump (skip live AT-SPI) |
 | `ZAPPE_A11Y_DUMP` | write the live tree to this path |
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
+| `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
 
 ## OTA
 
