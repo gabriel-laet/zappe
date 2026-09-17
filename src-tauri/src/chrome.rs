@@ -194,7 +194,8 @@ async fn chrome_worker(
                     log::warn!("open: {err:#}");
                 } else {
                     let _ = raise_fullscreen(&st.page).await;
-                    crate::wm::nudge_chrome_fullscreen();
+                    let pids = chrome_pids_for_profile(&profile_dir());
+                    crate::wm::nudge_chrome_fullscreen(pids.first().copied());
                 }
             }
             ChromeCmd::Pause => {
@@ -208,7 +209,8 @@ async fn chrome_worker(
             }
             ChromeCmd::Fullscreen => {
                 let _ = raise_fullscreen(&st.page).await;
-                crate::wm::nudge_chrome_fullscreen();
+                let pids = chrome_pids_for_profile(&profile_dir());
+                crate::wm::nudge_chrome_fullscreen(pids.first().copied());
                 run_skill(&st.page, st.active_service.skill(), SkillOp::Fullscreen).await;
             }
             ChromeCmd::Back => {
@@ -216,7 +218,8 @@ async fn chrome_worker(
             }
             ChromeCmd::ExitFullscreen => {
                 let _ = restore_windowed(&st.page).await;
-                crate::wm::nudge_chrome_unfullscreen();
+                let pids = chrome_pids_for_profile(&profile_dir());
+                crate::wm::nudge_chrome_unfullscreen(pids.first().copied());
             }
             ChromeCmd::Shutdown => {
                 break;

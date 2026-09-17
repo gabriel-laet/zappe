@@ -140,13 +140,10 @@ async fn play_ota(
     }
     let conf_path = std::path::PathBuf::from(conf);
     if let Err(err) = state.ota.play(&channel, &conf_path).await {
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.show();
-            let _ = win.set_focus();
-        }
+        playback::restore_guide_fullscreen(&app);
         return Err(err.to_string());
     }
-    wm::nudge_mpv_fullscreen();
+    wm::nudge_mpv_fullscreen(state.ota.latest_mpv_pid());
     let mut playback = state.playback.lock().unwrap();
     playback.surface = PlaybackSurface::Ota;
     let _ = app.emit("playback-changed", playback.status());
@@ -261,6 +258,12 @@ pub fn run() {
             let back = Shortcut::new(None, Code::BrowserBack);
             let _ = app.global_shortcut().register(esc);
             let _ = app.global_shortcut().register(back);
+
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_decorations(false);
+                let _ = win.set_fullscreen(true);
+            }
+            wm::nudge_guide_fullscreen(None);
             Ok(())
         })
         .manage(AppState {

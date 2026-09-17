@@ -16,9 +16,9 @@
         "title": "Zappe",
         "width": 1280,
         "height": 720,
-        "fullscreen": false,
-        "resizable": true,
-        "decorations": true
+        "fullscreen": true,
+        "resizable": false,
+        "decorations": false
       }
     ],
     "security": {

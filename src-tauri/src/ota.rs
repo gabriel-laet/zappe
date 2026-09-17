@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct OtaChannel {
@@ -175,6 +176,7 @@ pub struct OtaSession {
     pipeline_child: Mutex<Option<Child>>,
     active_channel: Mutex<Option<String>>,
     active_conf: Mutex<Option<PathBuf>>,
+    mpv_pid: Mutex<Option<u32>>,
 }
 
 impl OtaSession {
@@ -183,7 +185,16 @@ impl OtaSession {
             pipeline_child: Mutex::new(None),
             active_channel: Mutex::new(None),
             active_conf: Mutex::new(None),
+            mpv_pid: Mutex::new(None),
         }
+    }
+
+    pub fn latest_mpv_pid(&self) -> Option<u32> {
+        self.mpv_pid
+            .try_lock()
+            .ok()
+            .and_then(|g| *g)
+            .or_else(crate::wm::find_mpv_pid)
     }
 
     pub async fn is_playing(&self) -> bool {
@@ -221,6 +232,10 @@ impl OtaSession {
         *self.pipeline_child.lock().await = Some(child);
         *self.active_channel.lock().await = Some(channel.to_string());
         *self.active_conf.lock().await = Some(conf.to_path_buf());
+        *self.mpv_pid.lock().await = None;
+
+        sleep(Duration::from_millis(350)).await;
+        *self.mpv_pid.lock().await = crate::wm::find_mpv_pid();
 
         Ok(())
     }
@@ -232,6 +247,7 @@ impl OtaSession {
         }
         *self.active_channel.lock().await = None;
         *self.active_conf.lock().await = None;
+        *self.mpv_pid.lock().await = None;
     }
 
     pub async fn mpv_pid(&self) -> Option<u32> {

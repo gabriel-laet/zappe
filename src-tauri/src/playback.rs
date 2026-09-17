@@ -52,12 +52,16 @@ fn hide_guide(app: &AppHandle) {
     }
 }
 
-fn show_guide(app: &AppHandle) {
+/// Show guide, Tauri fullscreen, and Hyprland focus (best-effort).
+pub fn restore_guide_fullscreen(app: &AppHandle) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.unminimize();
         let _ = win.show();
+        let _ = win.set_decorations(false);
+        let _ = win.set_fullscreen(true);
         let _ = win.set_focus();
     }
+    wm::nudge_guide_fullscreen(None);
 }
 
 pub fn begin_chrome(
@@ -87,27 +91,6 @@ pub fn begin_chrome(
     Ok(())
 }
 
-pub async fn begin_ota(
-    app: &AppHandle,
-    ota: &OtaSession,
-    playback: &mut PlaybackController,
-    channel: String,
-    conf: std::path::PathBuf,
-    focus: GuideFocus,
-) -> Result<(), String> {
-    playback.focus_snapshot = Some(focus);
-    hide_guide(app);
-    if let Err(err) = ota.play(&channel, &conf).await {
-        playback.surface = PlaybackSurface::Idle;
-        show_guide(app);
-        return Err(err.to_string());
-    }
-    wm::nudge_mpv_fullscreen();
-    playback.surface = PlaybackSurface::Ota;
-    let _ = app.emit("playback-changed", playback.status());
-    Ok(())
-}
-
 pub async fn stop_playback_surface(
     chrome: &ChromeManager,
     ota: &OtaSession,
@@ -119,38 +102,22 @@ pub async fn stop_playback_surface(
             chrome.send(ChromeCmd::Back);
         }
         PlaybackSurface::Ota => {
-            wm::nudge_mpv_stop();
+            let pid = ota.latest_mpv_pid();
+            wm::nudge_mpv_stop(pid);
             ota.stop().await;
         }
         PlaybackSurface::Idle => {}
     }
 }
 
-pub fn finish_return_to_guide(
-    app: &AppHandle,
-    playback: &mut PlaybackController,
-) {
+pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController) {
     playback.surface = PlaybackSurface::Idle;
-    show_guide(app);
+    restore_guide_fullscreen(app);
     let status = playback.status();
     let _ = app.emit("playback-changed", &status);
     if let Some(focus) = status.focus.clone() {
         let _ = app.emit("focus-restore", focus);
     }
-}
-
-pub async fn end_playback(
-    app: &AppHandle,
-    chrome: &ChromeManager,
-    ota: &OtaSession,
-    playback: &mut PlaybackController,
-) {
-    let surface = playback.surface.clone();
-    if surface == PlaybackSurface::Idle {
-        return;
-    }
-    stop_playback_surface(chrome, ota, surface).await;
-    finish_return_to_guide(app, playback);
 }
 
 pub fn toggle_play_pause(chrome: &ChromeManager, playback: &PlaybackController) {

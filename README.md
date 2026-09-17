@@ -60,7 +60,7 @@ Dedicated user-data-dir:
 - Linux: `~/.local/share/zappe/chrome-profile`
 - macOS: `~/Library/Application Support/zappe/chrome-profile`
 
-Zappe launches Chrome headed, navigates via CDP, fullscreen via `Browser.getWindowForTarget` + `Browser.setWindowBounds`. On Hyprland, **best-effort** `hyprctl` focus/fullscreen nudges are used when CDP alone is not enough.
+Zappe launches Chrome headed, navigates via CDP, fullscreen via `Browser.getWindowForTarget` + `Browser.setWindowBounds`. On **Hyprland 0.56+**, window nudges use `hyprctl eval` with `hl.dsp.*` (not legacy `dispatch focuswindow …`). Failures are logged and ignored — they never crash the app. The guide window is always fullscreen (no decorations).
 
 ## Window handoff (guide ↔ playback)
 
