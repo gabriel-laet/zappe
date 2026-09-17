@@ -7,8 +7,11 @@ mod catalog;
 mod chrome;
 mod command;
 mod hud;
+mod ota;
 mod skills;
 mod voice;
+
+use std::path::PathBuf;
 
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
@@ -26,6 +29,7 @@ use catalog::Catalog;
 use chrome::{ChromeCmd, ChromeEvent, ChromeHandle, ChromeOpts};
 use command::Command;
 use hud::{Gpu, Guide};
+use ota::{parse_channels_conf, OtaConfig, OtaEvent, OtaHandle};
 use skills::Service;
 use voice::WhisperHook;
 
@@ -64,6 +68,11 @@ struct Args {
     /// Arm the local whisper.cpp hook. Does not download a model or start a chat LLM.
     #[arg(long, env = "ZAPPE_WHISPER")]
     whisper: bool,
+
+    /// Path to a dvbv5 `channels.conf` (ISDB-T / DVB OTA). Also `ZAPPE_OTA_CHANNELS`
+    /// or `~/tv/channels.conf` when present.
+    #[arg(long, env = "ZAPPE_OTA_CHANNELS")]
+    ota_channels: Option<PathBuf>,
 }
 
 struct App {
@@ -71,11 +80,39 @@ struct App {
     gpu: Option<Gpu>,
     guide: Guide,
     chrome: ChromeHandle,
+    ota: OtaHandle,
+    ota_playing: bool,
     started: Instant,
     pending: Receiver<String>,
 }
 
 impl App {
+    fn apply_ota_events(&mut self) {
+        for ev in self.ota.poll_events() {
+            match ev {
+                OtaEvent::Playing { channel } => {
+                    self.ota_playing = true;
+                    self.guide.status = format!("OTA: {channel}");
+                    self.guide.ota_line = format!("OTA: {channel}");
+                    self.set_hud_visible(false);
+                }
+                OtaEvent::Stopped => {
+                    self.ota_playing = false;
+                    self.guide.ota_line = "OTA: ready".into();
+                    self.set_hud_visible(true);
+                    self.guide.status = "OTA stopped".into();
+                }
+                OtaEvent::Failed(msg) => {
+                    self.ota_playing = false;
+                    self.guide.status = msg.clone();
+                    self.guide.ota_line = "OTA: error".into();
+                    self.set_hud_visible(true);
+                    log::warn!("{msg}");
+                }
+            }
+        }
+    }
+
     fn apply_chrome_events(&mut self) {
         for ev in self.chrome.poll_events() {
             match ev {
@@ -211,6 +248,13 @@ impl App {
             self.guide.status = "back".into();
             return;
         }
+        if self.ota_playing {
+            self.ota.stop();
+            self.ota_playing = false;
+            self.set_hud_visible(true);
+            self.guide.status = "back".into();
+            return;
+        }
         self.set_hud_visible(true);
         self.chrome.send(ChromeCmd::Back);
         self.chrome.send(ChromeCmd::ShowHud);
@@ -221,6 +265,20 @@ impl App {
         let Some(tile) = self.guide.focused().cloned() else {
             return;
         };
+        if tile.service == Service::Ota {
+            let Some(channel) = catalog::Catalog::ota_channel_name(&tile) else {
+                return;
+            };
+            if !self.ota.enabled {
+                self.guide.status =
+                    "OTA not configured — set ZAPPE_OTA_CHANNELS or ~/tv/channels.conf".into();
+                return;
+            }
+            let _ = self.guide.catalog.public_meta(&tile.title);
+            self.guide.status = format!("zapping {channel} …");
+            self.ota.play(channel);
+            return;
+        }
         let _ = self.guide.catalog.public_meta(&tile.title);
         self.open_url(tile.service, &tile.title, tile.url);
     }
@@ -342,6 +400,7 @@ impl App {
         ) {
             log::debug!("digit pad reserved for later");
         } else if matches!(code, Some(KeyCode::KeyQ)) {
+            self.ota.shutdown();
             self.chrome.send(ChromeCmd::Shutdown);
             event_loop.exit();
         } else if matches!(code, Some(KeyCode::KeyH)) {
@@ -394,6 +453,7 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
+                self.ota.shutdown();
                 self.chrome.send(ChromeCmd::Shutdown);
                 event_loop.exit();
             }
@@ -405,6 +465,7 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.drain_text_commands();
                 self.apply_chrome_events();
+                self.apply_ota_events();
                 if let Some(gpu) = &mut self.gpu {
                     if let Err(err) = gpu.render(&self.guide, self.started) {
                         log::error!("render: {err:#}");
@@ -428,6 +489,7 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
         self.drain_text_commands();
         self.apply_chrome_events();
+        self.apply_ota_events();
         if let Some(window) = &self.window {
             window.request_redraw();
         }
@@ -476,11 +538,35 @@ fn main() -> Result<()> {
         },
     );
 
-    let mut guide = Guide::new(Catalog::placeholder());
+    let ota_config = OtaConfig::resolve(args.ota_channels.clone());
+    let ota_channels = ota_config
+        .as_ref()
+        .and_then(|cfg| parse_channels_conf(&cfg.channels_conf).ok())
+        .unwrap_or_default();
+    if let Some(cfg) = &ota_config {
+        if ota_channels.is_empty() {
+            log::warn!(
+                "OTA: no channels in {}",
+                cfg.channels_conf.display()
+            );
+        }
+    }
+    let ota = OtaHandle::start(ota_config);
+
+    let mut guide = Guide::new(Catalog::with_ota(&ota_channels));
     guide.chrome_line = if chrome.enabled {
         "CHROME: attaching…".into()
     } else {
         "CHROME: off".into()
+    };
+    guide.ota_line = if ota.enabled {
+        if ota_channels.is_empty() {
+            format!("OTA: 0 ch")
+        } else {
+            format!("OTA: {} ch", ota_channels.len())
+        }
+    } else {
+        "OTA: off".into()
     };
 
     let pending = {
@@ -511,6 +597,8 @@ fn main() -> Result<()> {
         gpu: None,
         guide,
         chrome,
+        ota,
+        ota_playing: false,
         started: Instant::now(),
         pending,
     };

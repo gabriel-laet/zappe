@@ -321,12 +321,18 @@ async fn attach_existing(cdp: &str) -> Result<(Browser, Page)> {
 }
 
 async fn search_via_skill(page: &Page, service: Service, query: &str) -> Result<()> {
+    let Some(skill) = service.skill() else {
+        anyhow::bail!("{} is not a Chrome service", service.label());
+    };
     page.goto(service.home_url()).await?;
-    page.evaluate(service.skill().search_js(query)).await?;
+    page.evaluate(skill.search_js(query)).await?;
     Ok(())
 }
 
 async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> Result<()> {
+    if !service.uses_chrome() {
+        anyhow::bail!("{} uses the OTA tuner, not Chrome", service.label());
+    }
     log::info!("opening {} ({title}) -> {url}", service.label());
     page.goto(url).await?;
     // Deep links already express intent. Do not scrape search results into a pick.
@@ -335,9 +341,11 @@ async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> 
         && title != service.label()
         && title != "Subscriptions"
     {
-        let js = service.skill().open_title_js(title);
-        if let Err(err) = page.evaluate(js).await {
-            log::debug!("open-title skill missed (expected): {err}");
+        if let Some(skill) = service.skill() {
+            let js = skill.open_title_js(title);
+            if let Err(err) = page.evaluate(js).await {
+                log::debug!("open-title skill missed (expected): {err}");
+            }
         }
     }
     Ok(())
@@ -351,7 +359,10 @@ enum SkillOp {
     Back,
 }
 
-async fn run_skill(page: &Page, skill: &dyn SiteSkill, op: SkillOp) {
+async fn run_skill(page: &Page, skill: Option<&dyn SiteSkill>, op: SkillOp) {
+    let Some(skill) = skill else {
+        return;
+    };
     let js = match op {
         SkillOp::Pause => skill.pause_js().to_string(),
         SkillOp::Play => skill.play_js().to_string(),

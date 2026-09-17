@@ -1,6 +1,6 @@
 # Zappe
 
-Personal living-room / desktop launcher. A native **HUD** sits on top of the room; **Netflix, Prime Video, Disney+, and YouTube play in a real Google Chrome window** you already logged into.
+Personal living-room / desktop launcher. A native **HUD** sits on top of the room; **Netflix, Prime Video, Disney+, and YouTube play in a real Google Chrome window** you already logged into. On Linux, **terrestrial ISDB-Tb / DVB channels** (MyGica-class USB tuners) can appear as an **OTA TV** row and play through **`dvbv5-zap` + `mpv`**, locally over RF — not through Chrome.
 
 This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide rows, and optional Chrome attach over CDP.
 
@@ -8,6 +8,7 @@ This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide 
 
 - A always-on-top native HUD (`winit` + `wgpu`) with a scanline / phosphor shader and a tiny immediate-mode tile grid. No Electron, no Tauri, no in-process webview.
 - A remote control for a **separate Chrome process** with a dedicated `--user-data-dir` (`…/zappe/chrome-profile`). You log in by hand, once. Zappe then opens first-party URLs and sends a few CDP / DOM pokes.
+- **OTA TV (Linux):** when `channels.conf` is configured, tiles list scanned terrestrial channels. Enter runs `dvbv5-zap` piped into `mpv`; Back / Escape tears down both processes cleanly.
 - Living-room input: a dummy TV remote that looks like a keyboard, plus a constrained command language (on-screen bar / stdin / whisper.cpp hook). Not a chat bot.
 - Window control via CDP `Browser.setWindowBounds` (fullscreen / raise). macOS `osascript` and Linux `wmctrl` are documented best-effort stubs for when the OS still needs a nudge.
 
@@ -55,6 +56,35 @@ cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
 
 `--chrome` / `ZAPPE_CHROME` and `--cdp` / `ZAPPE_CDP` are the feature flags. `cargo run` never requires Chrome.
 
+### Terrestrial OTA (ISDB-Tb / DVB on Linux)
+
+Zappe does **not** decode broadcast MPEG itself. It spawns the same tools you would use from a shell: **`dvbv5-zap`** (from [v4l-utils](https://www.linuxtv.org/wiki/index.php/V4l-utils)) writes a transport stream to stdout; **`mpv`** reads that pipe. That keeps the Chrome CDP path untouched — OTA is additive.
+
+Typical setup (Brazil ISDB-Tb, MyGica S270-class stick with `smsusb` / `smsdvb`, adapter `/dev/dvb/adapter0`):
+
+```bash
+sudo apt install v4l-utils mpv libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
+# scan once with your stick (example — use your local transponder list):
+# dvbv5-scan … > ~/tv/channels.conf
+export ZAPPE_OTA_CHANNELS="$HOME/tv/channels.conf"
+cargo run
+```
+
+Channel tiles are built from **`[Channel Name]`** sections in `channels.conf`. The name passed to `dvbv5-zap -p` must match exactly (e.g. `Globo HD`).
+
+| Variable / flag | Meaning |
+| --- | --- |
+| `--ota-channels` / `ZAPPE_OTA_CHANNELS` | Path to `channels.conf` |
+| (default) | `~/tv/channels.conf` when that file exists |
+| `ZAPPE_DVB_ADAPTER` | DVB adapter index for `dvbv5-zap -a` (default `0`) |
+| `ZAPPE_DVBV5_ZAP` | `dvbv5-zap` binary (default: on `PATH`) |
+| `ZAPPE_MPV` | `mpv` binary (default: on `PATH`) |
+| `ZAPPE_OTA_ZAP_LOG` | stderr log from zap (default `/tmp/zappe-zap.log`) |
+
+Do **not** open `/dev/dvb/adapter0/dvr0` from a second process while zap holds the tuner via `-o -`. Avoid `dvbv5-zap -P` (full mux) if it confuses the demuxer — Zappe uses `-r -o -` like a manual pipe.
+
+Focus an **OTA TV** tile and press **Enter** to tune; **Escape / Back** stops playback and returns to the HUD. A few seconds of black video until the H.264 IDR is normal on live OTA.
+
 ### Remote / keyboard (must-have)
 
 Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them in `winit` (physical `KeyCode` plus `NamedKey` aliases). Volume stays with the OS.
@@ -62,8 +92,8 @@ Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them
 | Remote / key | Action |
 | --- | --- |
 | Arrows | move the **big amber focus ring** across tiles and rows |
-| Enter / Return | activate the focused tile (open its first-party URL) |
-| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, Chrome history back) |
+| Enter / Return | activate the focused tile (Chrome URL or OTA tune) |
+| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, stop OTA or Chrome history back) |
 | Home / BrowserHome | root of the guide (first tile of Continue) |
 | Space / MediaPlayPause | play-pause the Chrome player skill |
 | `p` | play (keyboard extra) |
@@ -122,7 +152,8 @@ src/voice.rs      whisper.cpp hook (no model, no LLM)
 src/hud.rs        wgpu CRT pass + tiles + fat focus ring
 src/shaders/      crt.wgsl, quad.wgsl
 src/chrome.rs     spawn / attach, CDP window bounds, OS stubs
-src/catalog.rs    placeholder rows + MetadataSource stub
+src/catalog.rs    placeholder rows + OTA row from channels.conf
+src/ota.rs        dvbv5-zap → mpv pipeline, process lifecycle
 src/skills.rs     per-site search / open / pause / play / fullscreen / back
 ```
 
@@ -130,4 +161,4 @@ egui was skipped: a fullscreen WGSL pass plus a few instanced quads is enough fo
 
 ## Status
 
-First sketch. The HUD is real. Chrome attach is real, and feature-flagged. Catalog, metadata, and site skills are placeholders by design.
+First sketch. The HUD is real. Chrome attach is real, and feature-flagged. **OTA TV** is real on Linux when `channels.conf` is present. Catalog metadata and site skills are placeholders by design.

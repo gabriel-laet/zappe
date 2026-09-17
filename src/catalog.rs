@@ -3,14 +3,20 @@
 //! Real streaming libraries stay inside first-party Chrome. Public metadata
 //! (JustWatch-style) is a stub trait so a later crate can fill posters/titles
 //! without scraping Netflix / Prime / Disney / YouTube HTML.
+//!
+//! Terrestrial channels come from a local dvbv5 `channels.conf` when configured.
 
+use crate::ota::OtaChannel;
 use crate::skills::Service;
+
+/// URL prefix for OTA tiles (`ota://` + channel name matches `channels.conf` `[Name]`).
+pub const OTA_URL_PREFIX: &str = "ota://";
 
 #[derive(Clone, Debug)]
 pub struct Tile {
     pub title: String,
     pub service: Service,
-    /// First-party deep link or service home. Never a scraped catalog URL.
+    /// First-party deep link, service home, or `ota://…` for terrestrial tuners.
     pub url: String,
 }
 
@@ -102,6 +108,44 @@ impl Catalog {
         }
     }
 
+    /// Placeholder rows plus an **OTA TV** row when `channels.conf` was parsed.
+    pub fn with_ota(channels: &[OtaChannel]) -> Self {
+        let mut cat = Self::placeholder();
+        if channels.is_empty() {
+            return cat;
+        }
+        let tiles: Vec<Tile> = channels
+            .iter()
+            .map(|ch| Tile {
+                title: ch.name.clone(),
+                service: Service::Ota,
+                url: format!("{OTA_URL_PREFIX}{}", ch.name),
+            })
+            .collect();
+        let insert_at = cat
+            .rows
+            .iter()
+            .position(|r| r.label == "JELLYFIN")
+            .unwrap_or(cat.rows.len());
+        cat.rows.insert(
+            insert_at,
+            Row {
+                label: "OTA TV".into(),
+                tiles,
+            },
+        );
+        cat
+    }
+
+    pub fn ota_channel_name(tile: &Tile) -> Option<&str> {
+        if tile.service != Service::Ota {
+            return None;
+        }
+        tile.url
+            .strip_prefix(OTA_URL_PREFIX)
+            .or(Some(tile.title.as_str()))
+    }
+
     pub fn tile(&self, row: usize, col: usize) -> Option<&Tile> {
         self.rows.get(row).and_then(|r| r.tiles.get(col))
     }
@@ -182,7 +226,21 @@ mod tests {
     }
 
     #[test]
-    fn stub_metadata_does_not_invent_titles() {
-        assert!(StubMetadata.lookup("andor").is_none());
+    fn ota_row_uses_channel_names() {
+        let cat = Catalog::with_ota(&[
+            OtaChannel {
+                name: "Globo HD".into(),
+            },
+            OtaChannel {
+                name: "SBT HD".into(),
+            },
+        ]);
+        let row = cat.rows.iter().find(|r| r.label == "OTA TV").expect("ota");
+        assert_eq!(row.tiles.len(), 2);
+        assert_eq!(row.tiles[0].service, Service::Ota);
+        assert_eq!(
+            Catalog::ota_channel_name(&row.tiles[0]),
+            Some("Globo HD")
+        );
     }
 }

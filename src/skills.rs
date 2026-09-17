@@ -15,6 +15,8 @@ pub enum Service {
     Disney,
     Youtube,
     Jellyfin,
+    /// Terrestrial ISDB-Tb / DVB via local tuner (not Chrome).
+    Ota,
 }
 
 impl Service {
@@ -25,6 +27,7 @@ impl Service {
             Self::Disney => "https://www.disneyplus.com",
             Self::Youtube => "https://www.youtube.com",
             Self::Jellyfin => "http://localhost:8096",
+            Self::Ota => "ota://local",
         }
     }
 
@@ -35,16 +38,22 @@ impl Service {
             Self::Disney => "DISNEY+",
             Self::Youtube => "YOUTUBE",
             Self::Jellyfin => "JELLYFIN",
+            Self::Ota => "OTA TV",
         }
     }
 
-    pub fn skill(self) -> &'static dyn SiteSkill {
+    pub fn uses_chrome(self) -> bool {
+        !matches!(self, Self::Ota)
+    }
+
+    pub fn skill(self) -> Option<&'static dyn SiteSkill> {
         match self {
-            Self::Netflix => &NETFLIX,
-            Self::Prime => &PRIME,
-            Self::Disney => &DISNEY,
-            Self::Youtube => &YOUTUBE,
-            Self::Jellyfin => &JELLYFIN,
+            Self::Netflix => Some(&NETFLIX),
+            Self::Prime => Some(&PRIME),
+            Self::Disney => Some(&DISNEY),
+            Self::Youtube => Some(&YOUTUBE),
+            Self::Jellyfin => Some(&JELLYFIN),
+            Self::Ota => None,
         }
     }
 
@@ -315,17 +324,17 @@ mod tests {
         assert!(is_official_deep_link(
             "https://www.youtube.com/results?search_query=lofi"
         ));
-        let open = Service::Youtube.skill().open_title_js("jNQXAC9IVRw");
+        let open = Service::Youtube.skill().unwrap().open_title_js("jNQXAC9IVRw");
         assert!(open.contains("/watch?v=jNQXAC9IVRw"));
         assert!(!open.contains("querySelectorAll"));
     }
 
     #[test]
     fn selectors_stay_isolated_in_skills() {
-        let js = Service::Netflix.skill().pause_js();
+        let js = Service::Netflix.skill().unwrap().pause_js();
         assert!(js.contains("querySelector"));
         assert!(js.contains("data-uia") || js.contains("aria-label"));
-        let yt = Service::Youtube.skill();
+        let yt = Service::Youtube.skill().unwrap();
         assert!(yt.pause_js().contains("video"));
         assert!(yt.play_js().contains("play"));
         assert!(yt.play_pause_js().contains("paused"));

@@ -72,6 +72,7 @@ pub struct Guide {
     pub col: usize,
     pub status: String,
     pub chrome_line: String,
+    pub ota_line: String,
     pub hidden: bool,
     /// On-screen command bar. Same grammar as stdin / whisper.
     pub command: Option<String>,
@@ -85,6 +86,7 @@ impl Guide {
             col: 0,
             status: "arrows move  enter zap  / cmd  space play-pause  esc back  home root".into(),
             chrome_line: "CHROME: off".into(),
+            ota_line: "OTA: off".into(),
             hidden: false,
             command: None,
         }
@@ -575,6 +577,7 @@ fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
 
     push_text(&mut out, 36.0, 28.0, 4.0, "ZAPPE", amber);
     push_text(&mut out, res[0] - 420.0, 32.0, 2.0, &guide.chrome_line, dim);
+    push_text(&mut out, res[0] - 420.0, 52.0, 2.0, &guide.ota_line, dim);
     if let Some(cmd) = &guide.command {
         let bar_y = res[1] - 78.0;
         out.push(Instance {
