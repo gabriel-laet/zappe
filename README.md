@@ -1,133 +1,113 @@
 # Zappe
 
-Personal living-room / desktop launcher. A native **HUD** sits on top of the room; **Netflix, Prime Video, Disney+, and YouTube play in a real Google Chrome window** you already logged into.
+Living-room launcher for Linux (Omarchy / Hyprland / Wayland first): a **Tauri guide** that hands off to **real Chrome** for streaming and **mpv** for OTA live TV.
 
-This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide rows, and optional Chrome attach over CDP.
+Netflix, Prime, Disney+, and YouTube always run in a Zappe-owned Chrome profile over CDP — not in a webview, not scraped into a catalog.
 
-## What it is
+## Stack
 
-- A always-on-top native HUD (`winit` + `wgpu`) with a scanline / phosphor shader and a tiny immediate-mode tile grid. No Electron, no Tauri, no in-process webview.
-- A remote control for a **separate Chrome process** with a dedicated `--user-data-dir` (`…/zappe/chrome-profile`). You log in by hand, once. Zappe then opens first-party URLs and sends a few CDP / DOM pokes.
-- Living-room input: a dummy TV remote that looks like a keyboard, plus a constrained command language (on-screen bar / stdin / whisper.cpp hook). Not a chat bot.
-- Window control via CDP `Browser.setWindowBounds` (fullscreen / raise). macOS `osascript` and Linux `wmctrl` are documented best-effort stubs for when the OS still needs a nudge.
+- **UI:** Tauri 2, React, Vite, TypeScript, Tailwind, shadcn-style components
+- **Playback:** Google Chrome / Chromium (CDP) + optional `dvbv5-zap` → `mpv` for OTA
+- **Legacy:** the old wgpu HUD is archived under `legacy-hud/` (not the default run path)
 
-## What it is not
+## Dependencies (Omarchy / Arch)
 
-- Not an unofficial Netflix / Prime / Disney / YouTube player.
-- Not a scraper. Catalog rows are placeholders. Public metadata is a stub trait (`StubMetadata`) for a later JustWatch-style source.
-- Not an embed of those sites, and not a DRM unpacker. Zappe does not extract, record, or re-encode protected video.
-- Not a cookie harvester. Session state stays inside Chrome's profile directory. This repo ships no secrets.
+**Required**
 
-## How to run
+- [Node.js](https://nodejs.org/) 20+ and npm
+- Rust 1.88+ (`rust-toolchain.toml` pins stable)
+- Tauri Linux system deps — on Arch:
 
-Needs Rust 1.88+ (the `rust-toolchain.toml` pins `stable`). Builds on macOS and Linux.
+  ```bash
+  sudo pacman -S webkit2gtk-4.1 base-devel curl wget openssl pkg-config libappindicator-gtk3 librsvg
+  ```
 
-On Linux you need a working GPU stack at **runtime** (Vulkan ICD or GL/EGL) plus `libxkbcommon-x11`. Debian/Ubuntu:
+- **Google Chrome or Chromium** on `PATH` (or set `CHROME_PATH`)
 
-```bash
-sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
-```
+**Optional (OTA / MyGica)**
 
-```bash
-cargo run
-```
+- `dvbv5-tools` (`dvbv5-zap`), `mpv`
+- Channel list via `ZAPPE_OTA_CHANNELS` (colon-separated paths to `channels.conf`)
 
-That is HUD-only. A cheap HDMI-CEC / USB / 2.4 GHz dummy remote that enumerates as a keyboard works on first run — see the keymap below.
+Qt is **not** required for the current app.
 
-Drive a real Chrome profile:
+## Run (development)
 
 ```bash
-# first time: Chrome opens the Zappe profile. Log into Netflix / Prime / Disney / YouTube yourself.
-cargo run -- --chrome --service youtube
-
-# later sessions reuse ~/.local/share/zappe/chrome-profile (macOS: ~/Library/Application Support/zappe/chrome-profile)
-ZAPPE_CHROME=1 cargo run -- --service prime
+npm install
+npm run tauri dev
 ```
 
-If Chrome is missing, the HUD still starts and the status line says so. Override the binary with `CHROME_PATH`.
-
-Attach to an already-running DevTools endpoint instead of launching:
+Production build:
 
 ```bash
-# you started Chrome yourself with the zappe user-data-dir and --remote-debugging-port=9222
-cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
+npm run tauri build
 ```
 
-`--chrome` / `ZAPPE_CHROME` and `--cdp` / `ZAPPE_CDP` are the feature flags. `cargo run` never requires Chrome.
+## First-run setup
 
-### Remote / keyboard (must-have)
+1. **Browser required** — Zappe fails clearly if Chrome is missing; install hint for Arch/Omarchy.
+2. **1Password optional** — opens the Chrome Web Store in Zappe Chrome (never reads vault/cookies).
+3. **Accounts** — sign in inside orchestrated Chrome.
+4. **Home** — TV-style shelves, remote-friendly focus.
 
-Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them in `winit` (physical `KeyCode` plus `NamedKey` aliases). Volume stays with the OS.
+Setup state is stored in `~/.config/zappe/setup.json`.
 
-| Remote / key | Action |
+## Chrome profile
+
+Dedicated user-data-dir:
+
+- Linux: `~/.local/share/zappe/chrome-profile`
+- macOS: `~/Library/Application Support/zappe/chrome-profile`
+
+Zappe launches Chrome headed, navigates via CDP, fullscreen via `Browser.getWindowForTarget` + `Browser.setWindowBounds`. On Hyprland, **best-effort** `hyprctl` focus/fullscreen nudges are used when CDP alone is not enough.
+
+## Window handoff (guide ↔ playback)
+
+| Phase | Behavior |
 | --- | --- |
-| Arrows | move the **big amber focus ring** across tiles and rows |
-| Enter / Return | activate the focused tile (open its first-party URL) |
-| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, Chrome history back) |
-| Home / BrowserHome | root of the guide (first tile of Continue) |
-| Space / MediaPlayPause | play-pause the Chrome player skill |
-| `p` | play (keyboard extra) |
-| `/` | open the on-screen command bar |
-| `h` | hide / show HUD so you can use the Chrome window |
-| `q` | quit HUD (keyboard only) |
-| 0–9 | reserved for later |
-| Volume | OS / AVR — Zappe does not eat these keys |
+| Guide | Tauri window visible, D-pad navigation on shelves |
+| Stream tile / OTA | Tauri hides → Chrome or mpv fullscreen + raised |
+| Back / Escape / BrowserBack | Exit playback surface → show + focus Tauri, restore shelf focus |
+| Quit | Clean kill of OTA pipeline; close Zappe-launched Chrome |
 
-Point a dummy remote at the HUD and use arrows + OK + Back. The focus ring is a fat stroke, not a 1px outline.
+Global shortcuts (Escape, BrowserBack) call back to the guide even when Tauri is hidden.
 
-### Voice and the command bar
-
-Voice is **local whisper.cpp only**, not a chat LLM and not an unconstrained agent. After transcription, text is parsed with a tiny grammar — the same parser as the on-screen bar, `--say`, and stdin:
-
-```text
-play <query> [on youtube|netflix|prime|disney]
-search <query> [on youtube|netflix|prime|disney]
-pause | fullscreen | back | home
-```
-
-whisper.cpp is a stub/hook in this sketch (`--whisper` / `ZAPPE_WHISPER` / `ZAPPE_WHISPER_BIN`). It does not download a model. Until a binary is on PATH, type into the HUD (`/` then Enter) or:
+## OTA
 
 ```bash
-cargo run -- --say "play lofi on youtube"
-echo "pause" | cargo run -- --cmd-stdin
+export ZAPPE_OTA_CHANNELS="$HOME/.config/dvbv5/channels.conf"
 ```
 
-Unknown utterances (`what's the weather`) are rejected. No general-purpose tool calling.
+Playback pipeline (no `mpegts://` URLs):
 
-## How login works
-
-1. Zappe launches **Google Chrome or Chromium**, not a webview, with a dedicated user-data-dir. It does not touch your default Chrome profile.
-2. You sign in to Netflix / Prime / Disney / YouTube in that window, the same way you would in any Chrome. MFA, passwords, cookies — all Chrome's problem.
-3. Next `cargo run -- --chrome` reuses the same profile. Zappe never reads or copies those cookies.
-
-## How CDP attaches
-
-1. **Launch path:** `chromiumoxide` starts Chrome headed (`with_head()`), points `--user-data-dir` at the Zappe profile, and talks to the DevTools WebSocket it advertised.
-2. **Attach path:** `--cdp http://127.0.0.1:9222` connects to a Chrome you started yourself (same profile, `--remote-debugging-port=9222`).
-3. After attach, Zappe `Page.navigate`s to a first-party URL (`https://www.netflix.com`, `https://www.primevideo.com`, `https://www.disneyplus.com`, `https://www.youtube.com`, or a tile deep-link). YouTube prefers official `/watch?v=`, `/feed/subscriptions`, and `/results?search_query=` links. It does not pull their HTML into the catalog.
-4. A tiny **site skill** (`src/skills.rs`) may then search / open / pause / play / fullscreen / back. Selectors are isolated in that file and treated as fragile — they will break; that is expected.
-5. Raise / fullscreen uses **`Browser.getWindowForTarget` + `Browser.setWindowBounds`**. If the window manager ignores that:
-
-   - macOS stub: `osascript` to front the Chrome process
-   - Linux stub: `wmctrl -a 'Google Chrome'`
-
-   Both are best-effort and must not be required to build or to show the HUD.
-
-## Layout
-
-```
-src/main.rs       CLI + winit remote/keyboard loop
-src/command.rs    constrained play/pause/search grammar
-src/voice.rs      whisper.cpp hook (no model, no LLM)
-src/hud.rs        wgpu CRT pass + tiles + fat focus ring
-src/shaders/      crt.wgsl, quad.wgsl
-src/chrome.rs     spawn / attach, CDP window bounds, OS stubs
-src/catalog.rs    placeholder rows + MetadataSource stub
-src/skills.rs     per-site search / open / pause / play / fullscreen / back
+```bash
+dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --demuxer-lavf-format=mpegts --fs --no-terminal -
 ```
 
-egui was skipped: a fullscreen WGSL pass plus a few instanced quads is enough for a TV-guide HUD and keeps the shaders in-tree.
+Back stops `mpv` and `dvbv5-zap`.
 
-## Status
+## Remote (ALTONEX-style keyboard)
 
-First sketch. The HUD is real. Chrome attach is real, and feature-flagged. Catalog, metadata, and site skills are placeholders by design.
+| Key | Action |
+| --- | --- |
+| Arrows | move focus across tiles / shelves |
+| Enter | activate tile |
+| Escape / Backspace / BrowserBack | back to guide |
+| Home | end playback and return to guide |
+| Space / MediaPlayPause | play/pause in Chrome |
+
+## Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `CHROME_PATH` | Override Chrome/Chromium binary |
+| `ZAPPE_OTA_CHANNELS` | Colon-separated `channels.conf` paths |
+
+## Legacy HUD
+
+```bash
+cd legacy-hud && cargo run -- --chrome
+```
+
+For reference only; use `npm run tauri dev` for the product UI.

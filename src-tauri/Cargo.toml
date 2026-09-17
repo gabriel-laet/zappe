@@ -1,0 +1,33 @@
+[package]
+name = "zappe"
+version = "0.2.0"
+description = "Living-room launcher: Tauri guide + Chrome CDP + OTA"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "zappe_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+chromiumoxide = "0.9"
+dirs = "6"
+futures = "0.3"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true
