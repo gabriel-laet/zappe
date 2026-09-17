@@ -1,0 +1,57 @@
+# Harvest Netflix Continue Watching from the Chrome nest a11y tree.
+# More services plug in as sibling files (prime.*.v1.yaml, …).
+id: netflix.continue_watching.v1
+service: netflix
+kind: harvest
+version: 1
+description: Open Netflix browse, wait for Continue Watching, extract title rows.
+shelf_id: continue
+shelf_title: Continue watching
+open:
+  url: https://www.netflix.com/browse
+  wait_ms: 8000
+  retries: 1
+anchors:
+  - id: continue_watching
+    match_mode: contains
+    names:
+      - Continue Watching
+      - Keep Watching
+      - Continuar assistindo
+      - Continuar viendo
+      - Continuar a ver
+    roles:
+      - heading
+      - label
+      - panel
+      - section
+      - push button
+extract:
+  from: section
+  item_roles:
+    - list item
+    - link
+    - push button
+    - heading
+    - image
+    - article
+  max_items: 24
+  skip_names:
+    - Play
+    - Pause
+    - More Info
+    - My List
+    - Home
+    - TV Shows
+    - Movies
+    - New & Popular
+    - Browse
+    - Search
+    - Kids
+    - Sign In
+    - Sign Out
+    - Entrar
+    - Início
+on_fail:
+  mark_stale: true
+  teach: true

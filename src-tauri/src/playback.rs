@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::chrome::{ChromeCmd, ChromeManager, find_chrome};
+use crate::nest::{find_chrome, NestManager, NestMode};
 use crate::ota::OtaSession;
 use crate::wm;
 
@@ -64,42 +64,32 @@ pub fn restore_guide_fullscreen(app: &AppHandle) {
     wm::nudge_guide_fullscreen(None);
 }
 
-pub fn begin_chrome(
+pub fn begin_nest(
     app: &AppHandle,
-    chrome: &ChromeManager,
+    nest: &NestManager,
     playback: &mut PlaybackController,
-    service: crate::skills::Service,
     url: String,
-    title: String,
     focus: GuideFocus,
 ) -> Result<(), String> {
     if find_chrome().is_none() {
         return Err(
-            "Google Chrome or Chromium is required. On Arch/Omarchy: sudo pacman -S google-chrome or chromium."
+            "Google Chrome is required. On Arch/Omarchy: sudo pacman -S google-chrome (or set CHROME_PATH)."
                 .into(),
         );
     }
     playback.focus_snapshot = Some(focus);
     playback.surface = PlaybackSurface::Chrome;
     hide_guide(app);
-    chrome.send(ChromeCmd::Open {
-        url,
-        service,
-        title,
-    });
+    nest.open_url_detached(url, NestMode::Play);
     let _ = app.emit("playback-changed", playback.status());
     Ok(())
 }
 
-pub async fn stop_playback_surface(
-    chrome: &ChromeManager,
-    ota: &OtaSession,
-    surface: PlaybackSurface,
-) {
+pub async fn stop_playback_surface(nest: &NestManager, ota: &OtaSession, surface: PlaybackSurface) {
     match surface {
         PlaybackSurface::Chrome => {
-            chrome.send(ChromeCmd::ExitFullscreen);
-            chrome.send(ChromeCmd::Back);
+            nest.send_key("escape").await;
+            nest.hide().await;
         }
         PlaybackSurface::Ota => {
             let pid = ota.latest_mpv_pid();
@@ -120,8 +110,11 @@ pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController
     }
 }
 
-pub fn toggle_play_pause(chrome: &ChromeManager, playback: &PlaybackController) {
+pub fn toggle_play_pause(nest: &NestManager, playback: &PlaybackController) {
     if playback.surface == PlaybackSurface::Chrome {
-        chrome.send(ChromeCmd::PlayPause);
+        let nest = nest.clone();
+        tauri::async_runtime::spawn(async move {
+            nest.send_key("space").await;
+        });
     }
 }

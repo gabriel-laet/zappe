@@ -3,6 +3,7 @@
 use std::process::Command;
 
 const CHROME_WINDOW: &str = "class:^(chromium|google-chrome|Chromium|chrome)$";
+const NEST_WINDOW: &str = "class:^(gamescope|gamescope-wl)$";
 const MPV_WINDOW: &str = "class:^(mpv)$";
 const GUIDE_CLASS: &str = "class:^(zappe)$";
 const GUIDE_TITLE: &str = "title:^Zappe$";
@@ -61,27 +62,46 @@ pub fn find_mpv_pid() -> Option<u32> {
     pgrep_newest("mpv")
 }
 
-pub fn nudge_chrome_fullscreen(pid: Option<u32>) {
+/// Raise the gamescope nest (or Chrome fallback when `ZAPPE_NEST=chrome`).
+pub fn nudge_nest_show(pid: Option<u32>) {
     #[cfg(target_os = "linux")]
     {
-        let window = window_target(pid, CHROME_WINDOW);
-        let ok = hypr_focus(&window) && hypr_fullscreen(&window, true);
-        if !ok {
-            let fallback = window_target(None, CHROME_WINDOW);
-            let _ = hypr_focus(&fallback);
-            let _ = hypr_fullscreen(&fallback, true);
+        if try_focus_fullscreen(pid, NEST_WINDOW) {
+            return;
+        }
+        if try_focus_fullscreen(None, NEST_WINDOW) {
+            return;
+        }
+        // Fallback only when Chrome is not nested in gamescope.
+        if !try_focus_fullscreen(pid, CHROME_WINDOW) {
+            let _ = try_focus_fullscreen(None, CHROME_WINDOW);
+            wmctrl_activate("gamescope");
             wmctrl_activate("Google Chrome");
-            wmctrl_activate("Chromium");
         }
     }
 }
 
-pub fn nudge_chrome_unfullscreen(pid: Option<u32>) {
+pub fn nudge_nest_hide(pid: Option<u32>) {
     #[cfg(target_os = "linux")]
     {
-        let window = window_target(pid, CHROME_WINDOW);
-        let _ = hypr_fullscreen(&window, false);
+        let nest = window_target(pid, NEST_WINDOW);
+        if hypr_fullscreen(&nest, false) {
+            let _ = hypr_eval(&format!(
+                "hl.dispatch(hl.dsp.window.movetoworkspacesilent({{ workspace = \"special:zappe-nest\", window = \"{nest}\" }}))"
+            ));
+            return;
+        }
+        let chrome = window_target(pid, CHROME_WINDOW);
+        let _ = hypr_fullscreen(&chrome, false);
+        let _ = hypr_eval(&format!(
+            "hl.dispatch(hl.dsp.window.movetoworkspacesilent({{ workspace = \"special:zappe-nest\", window = \"{chrome}\" }}))"
+        ));
     }
+}
+
+fn try_focus_fullscreen(pid: Option<u32>, class_or_title: &str) -> bool {
+    let window = window_target(pid, class_or_title);
+    hypr_focus(&window) && hypr_fullscreen(&window, true)
 }
 
 pub fn nudge_mpv_fullscreen(pid: Option<u32>) {

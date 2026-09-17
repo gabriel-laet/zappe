@@ -1,8 +1,14 @@
-mod chrome;
+mod a11y;
+mod catalog;
+mod harvest;
+mod nest;
 mod ota;
+mod paths;
 mod playback;
 mod setup;
+mod skill;
 mod skills;
+mod teach;
 mod wm;
 
 use std::sync::Mutex;
@@ -10,17 +16,25 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
-use chrome::{find_chrome, profile_dir, ChromeManager};
+use catalog::{CatalogStore, CatalogView};
+use nest::{NestManager, NestStatus};
+
+pub use catalog::ShelfStatus;
+pub use harvest::{HarvestOutcome, HarvestRequest};
 use ota::{ota_available, OtaChannel};
 use playback::{GuideFocus, PlaybackController, PlaybackStatus, PlaybackSurface};
 use setup::{load_setup, save_setup, SetupState};
+use skill::NETFLIX_CONTINUE_WATCHING_V1;
 use skills::Service;
+use teach::{TeachMode, TeachState};
 
 struct AppState {
-    chrome: ChromeManager,
+    nest: NestManager,
     ota: ota::OtaSession,
     playback: Mutex<PlaybackController>,
     setup: Mutex<SetupState>,
+    catalog: CatalogStore,
+    teach: TeachMode,
 }
 
 #[derive(Serialize)]
@@ -31,6 +45,23 @@ struct ChromeStatus {
     ready: bool,
     launched_by_zappe: bool,
     pids: Vec<u32>,
+    gamescope: Option<String>,
+    using_gamescope: bool,
+}
+
+impl From<NestStatus> for ChromeStatus {
+    fn from(s: NestStatus) -> Self {
+        Self {
+            available: s.available,
+            path: s.chrome_path,
+            profile: s.profile,
+            ready: s.ready,
+            launched_by_zappe: s.launched_by_zappe,
+            pids: s.pids,
+            gamescope: s.gamescope_path,
+            using_gamescope: s.using_gamescope,
+        }
+    }
 }
 
 #[tauri::command]
@@ -55,17 +86,8 @@ fn complete_setup(state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn chrome_status(state: State<AppState>) -> ChromeStatus {
-    let path = find_chrome().map(|p| p.display().to_string());
-    let profile = profile_dir();
-    ChromeStatus {
-        available: path.is_some(),
-        path,
-        profile: profile.display().to_string(),
-        ready: state.chrome.is_ready(),
-        launched_by_zappe: state.chrome.launched_by_zappe(),
-        pids: chrome::chrome_pids_for_profile(&profile),
-    }
+async fn chrome_status(state: State<'_, AppState>) -> Result<ChromeStatus, String> {
+    Ok(state.nest.status().await.into())
 }
 
 #[tauri::command]
@@ -79,6 +101,46 @@ fn list_ota_channels() -> Result<Vec<OtaChannel>, String> {
 }
 
 #[tauri::command]
+fn get_catalog(state: State<AppState>) -> CatalogView {
+    state.catalog.view(state.teach.view())
+}
+
+#[tauri::command]
+async fn harvest_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    skill_id: Option<String>,
+) -> Result<HarvestOutcome, String> {
+    let id = skill_id.unwrap_or_else(|| NETFLIX_CONTINUE_WATCHING_V1.to_string());
+    let surface = state.playback.lock().unwrap().surface.clone();
+    let outcome = harvest::run_harvest(
+        &state.nest,
+        &state.catalog,
+        &state.teach,
+        surface,
+        HarvestRequest::for_skill(id),
+    )
+    .await;
+    let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
+    Ok(outcome)
+}
+
+#[tauri::command]
+fn begin_teach(app: AppHandle, state: State<AppState>, skill_id: String) -> TeachState {
+    let reason = "user asked to teach this path";
+    let teach = state.teach.begin(&skill_id, reason);
+    let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
+    teach
+}
+
+#[tauri::command]
+fn cancel_teach(app: AppHandle, state: State<AppState>) -> TeachState {
+    let teach = state.teach.cancel();
+    let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
+    teach
+}
+
+#[tauri::command]
 fn open_app(
     app: AppHandle,
     state: State<'_, AppState>,
@@ -88,15 +150,7 @@ fn open_app(
     let service = Service::parse_id(&service_id).ok_or("unknown service")?;
     let url = service.home_url().to_string();
     let mut playback = state.playback.lock().unwrap();
-    playback::begin_chrome(
-        &app,
-        &state.chrome,
-        &mut *playback,
-        service,
-        url,
-        service.label().to_string(),
-        focus,
-    )?;
+    playback::begin_nest(&app, &state.nest, &mut *playback, url, focus)?;
     Ok(())
 }
 
@@ -106,20 +160,12 @@ fn open_chrome_url(
     state: State<'_, AppState>,
     service_id: String,
     url: String,
-    title: String,
+    _title: String,
     focus: GuideFocus,
 ) -> Result<(), String> {
-    let service = Service::parse_id(&service_id).ok_or("unknown service")?;
+    let _ = Service::parse_id(&service_id).ok_or("unknown service")?;
     let mut playback = state.playback.lock().unwrap();
-    playback::begin_chrome(
-        &app,
-        &state.chrome,
-        &mut *playback,
-        service,
-        url,
-        title,
-        focus,
-    )?;
+    playback::begin_nest(&app, &state.nest, &mut *playback, url, focus)?;
     Ok(())
 }
 
@@ -164,7 +210,7 @@ async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     if surface == PlaybackSurface::Idle {
         return Ok(());
     }
-    playback::stop_playback_surface(&state.chrome, &state.ota, surface).await;
+    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
     playback::finish_return_to_guide(&app, &mut *playback);
     Ok(())
@@ -173,7 +219,7 @@ async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
 #[tauri::command]
 fn remote_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     let playback = state.playback.lock().unwrap();
-    playback::toggle_play_pause(&state.chrome, &*playback);
+    playback::toggle_play_pause(&state.nest, &*playback);
     Ok(())
 }
 
@@ -186,7 +232,7 @@ async fn remote_home(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     if surface == PlaybackSurface::Idle {
         return Ok(());
     }
-    playback::stop_playback_surface(&state.chrome, &state.ota, surface).await;
+    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
     playback::finish_return_to_guide(&app, &mut *playback);
     Ok(())
@@ -200,15 +246,7 @@ fn open_onepassword_extension(
 ) -> Result<(), String> {
     let url = "https://chromewebstore.google.com/detail/1password-%E2%80%93-password-mana/aeblfdkhhhdcdjpifhhbdiojplfjncoa";
     let mut playback = state.playback.lock().unwrap();
-    playback::begin_chrome(
-        &app,
-        &state.chrome,
-        &mut *playback,
-        Service::Youtube,
-        url.to_string(),
-        "1Password".to_string(),
-        focus,
-    )?;
+    playback::begin_nest(&app, &state.nest, &mut *playback, url.to_string(), focus)?;
     Ok(())
 }
 
@@ -221,7 +259,7 @@ async fn return_to_guide(app: &AppHandle) {
     if surface == PlaybackSurface::Idle {
         return;
     }
-    playback::stop_playback_surface(&state.chrome, &state.ota, surface).await;
+    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
     playback::finish_return_to_guide(app, &mut *playback);
 }
@@ -229,13 +267,16 @@ async fn return_to_guide(app: &AppHandle) {
 async fn app_shutdown(app: &AppHandle) {
     return_to_guide(app).await;
     let state = app.state::<AppState>();
-    state.chrome.shutdown_if_owned().await;
+    state.nest.shutdown_if_owned().await;
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = env_logger::try_init();
     let setup = load_setup();
-    let chrome = ChromeManager::start();
+    let nest = NestManager::start();
+    let catalog = CatalogStore::load();
+    let teach = TeachMode::new();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -267,10 +308,12 @@ pub fn run() {
             Ok(())
         })
         .manage(AppState {
-            chrome,
+            nest,
             ota: ota::OtaSession::new(),
             playback: Mutex::new(PlaybackController::new()),
             setup: Mutex::new(setup),
+            catalog,
+            teach,
         })
         .invoke_handler(tauri::generate_handler![
             get_setup_state,
@@ -279,6 +322,10 @@ pub fn run() {
             chrome_status,
             ota_enabled,
             list_ota_channels,
+            get_catalog,
+            harvest_now,
+            begin_teach,
+            cancel_teach,
             open_app,
             open_chrome_url,
             play_ota,
@@ -298,4 +345,9 @@ pub fn run() {
                 });
             }
         });
+}
+
+/// CLI / tests: harvest without starting the Tauri shell.
+pub async fn harvest_cli(req: HarvestRequest) -> anyhow::Result<HarvestOutcome> {
+    harvest::run_cli(req).await
 }

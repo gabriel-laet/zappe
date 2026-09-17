@@ -17,6 +17,8 @@ export type ChromeStatus = {
   ready: boolean;
   launched_by_zappe: boolean;
   pids: number[];
+  gamescope: string | null;
+  using_gamescope: boolean;
 };
 
 export type OtaChannel = { name: string; source: string };
@@ -26,6 +28,50 @@ export type PlaybackStatus = {
   focus: GuideFocus | null;
 };
 
+export type ShelfStatus =
+  | "ok"
+  | "empty"
+  | "stale"
+  | "error"
+  | "teach"
+  | "harvesting";
+
+export type CatalogRow = {
+  title: string;
+  service: string;
+  href?: string | null;
+  artwork?: string | null;
+  skill_id: string;
+};
+
+export type CatalogShelf = {
+  id: string;
+  skill_id: string;
+  title: string;
+  status: ShelfStatus;
+  message?: string | null;
+  rows: CatalogRow[];
+};
+
+export type TeachView = {
+  active: boolean;
+  skill_id: string | null;
+  message: string | null;
+};
+
+export type CatalogView = {
+  shelves: CatalogShelf[];
+  teach: TeachView;
+};
+
+export type HarvestOutcome = {
+  skill_id: string;
+  status: ShelfStatus;
+  message: string;
+  rows: number;
+  teach: boolean;
+};
+
 export const api = {
   getSetupState: () => invoke<SetupState>("get_setup_state"),
   updateSetup: (patch: SetupState) => invoke<void>("update_setup", { patch }),
@@ -33,6 +79,11 @@ export const api = {
   chromeStatus: () => invoke<ChromeStatus>("chrome_status"),
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
+  getCatalog: () => invoke<CatalogView>("get_catalog"),
+  harvestNow: (skillId?: string) =>
+    invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),
+  beginTeach: (skillId: string) => invoke<TeachView>("begin_teach", { skillId }),
+  cancelTeach: () => invoke<TeachView>("cancel_teach"),
   openApp: (serviceId: string, focus: GuideFocus) =>
     invoke<void>("open_app", { serviceId, focus }),
   openChromeUrl: (
@@ -57,4 +108,8 @@ export function onFocusRestore(cb: (focus: GuideFocus) => void) {
 
 export function onPlaybackChanged(cb: (status: PlaybackStatus) => void) {
   return listen<PlaybackStatus>("playback-changed", (e) => cb(e.payload));
+}
+
+export function onCatalogChanged(cb: (catalog: CatalogView) => void) {
+  return listen<CatalogView>("catalog-changed", (e) => cb(e.payload));
 }

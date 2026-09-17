@@ -62,7 +62,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const open1Password = async () => {
     try {
       await api.open1Password(noopFocus);
-      toast.message("Install 1Password in Zappe Chrome, then press Back to return.");
+      toast.message("Install 1Password in the Chrome nest, then press Back to return.");
     } catch (e) {
       toast.error(String(e));
     }
@@ -71,7 +71,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const openAccounts = async () => {
     try {
       await api.openApp("netflix", noopFocus);
-      toast.message("Sign in in Zappe Chrome. Back returns here — then Continue to Home.");
+      toast.message("Sign in inside the Chrome nest. Back returns here — then Continue to Home.");
     } catch (e) {
       toast.error(String(e));
     }
@@ -82,7 +82,8 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       <div className="max-w-2xl space-y-4">
         <h1 className="text-4xl font-semibold tracking-tight">Welcome to Zappe</h1>
         <p className="text-xl text-muted-foreground">
-          Streaming apps use your Zappe Chrome profile. Live TV appears on Home when{" "}
+          Streaming plays in a gamescope nest wrapping Google Chrome (your Zappe
+          profile). Live TV appears on Home when{" "}
           <code className="text-base">channels.conf</code> is found — no extra setup step.
         </p>
       </div>
@@ -91,8 +92,9 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
         <div className="space-y-6">
           <h2 className="text-2xl">Browser required</h2>
           <p className="max-w-lg text-muted-foreground">
-            Zappe orchestrates a dedicated Chrome user-data-dir. Netflix, Prime, Disney+, and YouTube
-            always play there — never in a webview.
+            Zappe launches a dedicated Chrome profile inside gamescope — no CDP,
+            no automation flags. Netflix Continue Watching is harvested through
+            the accessibility tree into this guide.
           </p>
           <p className="text-sm text-muted-foreground">
             {chromeOk ? "Chrome detected — you can continue." : "Chrome not detected yet."}
@@ -134,15 +136,16 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
         <div className="space-y-6">
           <h2 className="text-2xl">Sign in to your accounts (optional)</h2>
           <p className="max-w-lg text-muted-foreground">
-            Use orchestrated Chrome once per service, or go straight to Home — TV aberta and Canais
-            are on the guide when your channel list is present.
+            Sign in inside the Chrome nest once per service so harvest can see
+            Continue Watching. Or go straight to Home — TV aberta and Canais
+            stay on the guide when your channel list is present.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
             <Button size="lg" onClick={() => void goHome({ accountsDone: true })}>
               Continue to Home
             </Button>
             <Button size="lg" variant="secondary" onClick={() => void openAccounts()}>
-              Open Netflix in Chrome
+              Open Netflix in the nest
             </Button>
           </div>
         </div>

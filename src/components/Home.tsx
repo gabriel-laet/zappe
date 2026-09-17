@@ -5,7 +5,10 @@ import { cn } from "@/lib/utils";
 import { primaryOtaChannel } from "@/lib/otaDisplay";
 import {
   api,
+  onCatalogChanged,
   onFocusRestore,
+  type CatalogShelf,
+  type CatalogView,
   type GuideFocus,
   type OtaChannel,
 } from "@/lib/tauri";
@@ -17,7 +20,7 @@ type Tile = {
   serviceId?: string;
   url?: string;
   ota?: { channel: string; conf: string };
-  kind: "app" | "placeholder" | "ota";
+  kind: "app" | "catalog" | "empty" | "teach" | "ota" | "sync";
 };
 
 type Shelf = {
@@ -33,15 +36,6 @@ const APP_TILES: Tile[] = [
   { id: "youtube", title: "YouTube", serviceId: "youtube", kind: "app" },
 ];
 
-function placeholders(label: string): Tile[] {
-  return Array.from({ length: 6 }, (_, i) => ({
-    id: `${label}-${i}`,
-    title: `${label} ${i + 1}`,
-    subtitle: "Placeholder",
-    kind: "placeholder",
-  }));
-}
-
 function otaTiles(channels: OtaChannel[]): Tile[] {
   return channels.map((c) => ({
     id: `ota-${c.name}`,
@@ -51,12 +45,78 @@ function otaTiles(channels: OtaChannel[]): Tile[] {
   }));
 }
 
+function continueTiles(shelf?: CatalogShelf, teachActive?: boolean): Tile[] {
+  if (!shelf || shelf.status === "empty") {
+    return [
+      {
+        id: "continue-empty",
+        title: "Nothing yet",
+        subtitle: "Sign in to Netflix, then Sync",
+        kind: "empty",
+      },
+      {
+        id: "continue-sync",
+        title: "Sync Netflix",
+        subtitle: "Harvest Continue Watching",
+        kind: "sync",
+      },
+    ];
+  }
+  if (shelf.status === "harvesting") {
+    return [
+      {
+        id: "continue-harvesting",
+        title: "Syncing…",
+        subtitle: shelf.message ?? "Reading Chrome a11y",
+        kind: "empty",
+      },
+    ];
+  }
+  if (shelf.status === "teach" || shelf.status === "stale" || shelf.status === "error") {
+    return [
+      {
+        id: "continue-teach",
+        title: teachActive ? "Waiting…" : "Teach me",
+        subtitle: shelf.message ?? "Skill stale — finish the path with the air mouse",
+        kind: "teach",
+        serviceId: shelf.skill_id,
+      },
+      {
+        id: "continue-sync",
+        title: "Retry sync",
+        subtitle: "Run harvest again",
+        kind: "sync",
+      },
+    ];
+  }
+  const rows: Tile[] = shelf.rows.map((row, i) => ({
+    id: `cw-${i}-${row.title}`,
+    title: row.title,
+    subtitle: "Netflix",
+    serviceId: row.service,
+    url: row.href ?? undefined,
+    kind: "catalog",
+  }));
+  rows.push({
+    id: "continue-sync",
+    title: "Sync",
+    subtitle: "Refresh from Chrome",
+    kind: "sync",
+  });
+  return rows;
+}
+
 export function Home() {
   const [otaChannels, setOtaChannels] = useState<OtaChannel[]>([]);
+  const [catalog, setCatalog] = useState<CatalogView>({
+    shelves: [],
+    teach: { active: false, skill_id: null, message: null },
+  });
   const [focus, setFocus] = useState<GuideFocus>({ shelf_id: "apps", index: 0 });
 
   const hasOta = otaChannels.length > 0;
   const primary = primaryOtaChannel(otaChannels);
+  const continueShelf = catalog.shelves.find((s) => s.id === "continue");
 
   const shelves: Shelf[] = useMemo(() => {
     const apps: Tile[] = [...APP_TILES];
@@ -76,22 +136,39 @@ export function Home() {
     };
     return [
       { id: "apps", title: "Apps", tiles: apps },
-      { id: "continue", title: "Continue watching", tiles: placeholders("Resume") },
+      {
+        id: "continue",
+        title: continueShelf?.title ?? "Continue watching",
+        tiles: continueTiles(continueShelf, catalog.teach.active),
+      },
       ...(hasOta ? [canaisShelf] : []),
-      { id: "movies", title: "Movies", tiles: placeholders("Movie") },
     ];
-  }, [otaChannels, hasOta, primary]);
+  }, [otaChannels, hasOta, primary, continueShelf, catalog.teach.active]);
 
   useEffect(() => {
     void api
       .listOtaChannels()
       .then(setOtaChannels)
       .catch(() => setOtaChannels([]));
-    let unlisten: (() => void) | undefined;
-    void onFocusRestore((f) => setFocus(f)).then((fn) => {
-      unlisten = fn;
+    void api
+      .getCatalog()
+      .then(setCatalog)
+      .catch(() => undefined);
+    void api.harvestNow().catch((e) => {
+      toast.message(String(e));
     });
-    return () => unlisten?.();
+    let unlistenFocus: (() => void) | undefined;
+    let unlistenCatalog: (() => void) | undefined;
+    void onFocusRestore((f) => setFocus(f)).then((fn) => {
+      unlistenFocus = fn;
+    });
+    void onCatalogChanged(setCatalog).then((fn) => {
+      unlistenCatalog = fn;
+    });
+    return () => {
+      unlistenFocus?.();
+      unlistenCatalog?.();
+    };
   }, []);
 
   const shelfIndex = shelves.findIndex((s) => s.id === focus.shelf_id);
@@ -103,10 +180,24 @@ export function Home() {
       try {
         if (tile.kind === "app" && tile.serviceId) {
           await api.openApp(tile.serviceId, f);
+        } else if (tile.kind === "catalog") {
+          if (tile.url && tile.serviceId) {
+            await api.openChromeUrl(tile.serviceId, tile.url, tile.title, f);
+          } else {
+            await api.openApp(tile.serviceId ?? "netflix", f);
+          }
         } else if (tile.kind === "ota" && tile.ota) {
           await api.playOta(tile.ota.channel, tile.ota.conf, f);
-        } else if (tile.kind === "placeholder") {
-          toast.message("Catalog placeholders — pick an app above to stream.");
+        } else if (tile.kind === "sync") {
+          toast.message("Harvesting Continue Watching from Chrome…");
+          const out = await api.harvestNow();
+          toast.message(out.message);
+        } else if (tile.kind === "teach") {
+          const skillId = tile.serviceId ?? "netflix.continue_watching.v1";
+          const state = await api.beginTeach(skillId);
+          toast.message(state.message ?? "Teach-mode waiting.");
+        } else if (tile.kind === "empty") {
+          toast.message("Sign into Netflix in the player nest, then Sync.");
         }
       } catch (e) {
         toast.error(String(e));
@@ -163,6 +254,11 @@ export function Home() {
           <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">Zappe</p>
           <h1 className="text-3xl font-semibold">Home</h1>
         </div>
+        {catalog.teach.active && (
+          <p className="max-w-md text-right text-sm text-muted-foreground">
+            {catalog.teach.message}
+          </p>
+        )}
       </header>
 
       <div className="flex-1 space-y-8 overflow-y-auto pb-10">
