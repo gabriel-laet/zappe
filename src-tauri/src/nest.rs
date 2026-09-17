@@ -187,7 +187,15 @@ fn spawn_nest(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Resul
         ));
     }
     let argv = plan.argv();
-    log::info!("starting nest: {}", argv.join(" "));
+    log::info!(
+        "starting nest chrome={} gamescope={}: {}",
+        chrome.display(),
+        plan.gamescope
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "none".into()),
+        argv.join(" ")
+    );
 
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -309,38 +317,78 @@ pub fn has_no_cdp_flags(args: &[String]) -> bool {
     })
 }
 
+/// Preferred first. Chromium is last-resort — Omarchy often has both, and
+/// `which` alone can miss `/usr/bin/google-chrome-stable` / `/opt/google/chrome`.
+const CHROME_BIN_NAMES: &[&str] = &[
+    "google-chrome-stable",
+    "google-chrome",
+    "chromium",
+    "chromium-browser",
+    "chrome",
+];
+
+fn well_known_chrome_paths() -> Vec<PathBuf> {
+    #[allow(unused_mut)]
+    let mut paths = vec![
+        PathBuf::from("/usr/bin/google-chrome-stable"),
+        PathBuf::from("/opt/google/chrome/google-chrome"),
+        PathBuf::from("/usr/bin/google-chrome"),
+        PathBuf::from("/usr/local/bin/google-chrome-stable"),
+        PathBuf::from("/usr/local/bin/google-chrome"),
+        PathBuf::from("/usr/bin/chromium"),
+        PathBuf::from("/usr/bin/chromium-browser"),
+        PathBuf::from("/usr/bin/chrome"),
+    ];
+    #[cfg(target_os = "macos")]
+    {
+        paths.extend([
+            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        ]);
+    }
+    paths
+}
+
 pub fn find_chrome() -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("CHROME_PATH") {
         let path = PathBuf::from(explicit);
-        if path.exists() {
+        if is_runnable(&path) {
             return Some(path);
         }
     }
-    const NAMES: &[&str] = &[
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium",
-        "chromium-browser",
-        "chrome",
-    ];
-    for name in NAMES {
+
+    for path in well_known_chrome_paths() {
+        if is_preferred_chrome_name(&path) && is_runnable(&path) {
+            return Some(path);
+        }
+    }
+    for name in ["google-chrome-stable", "google-chrome"] {
         if let Some(path) = which(name) {
             return Some(path);
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        for path in [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ] {
-            let p = PathBuf::from(path);
-            if p.exists() {
-                return Some(p);
-            }
+    for path in well_known_chrome_paths() {
+        if is_runnable(&path) {
+            return Some(path);
+        }
+    }
+    for name in CHROME_BIN_NAMES {
+        if let Some(path) = which(name) {
+            return Some(path);
         }
     }
     None
+}
+
+fn is_preferred_chrome_name(path: &Path) -> bool {
+    match path.file_name().and_then(|s| s.to_str()) {
+        Some("google-chrome-stable") | Some("google-chrome") | Some("Google Chrome") => true,
+        _ => false,
+    }
+}
+
+fn is_runnable(path: &Path) -> bool {
+    path.is_file()
 }
 
 pub fn find_gamescope() -> Option<PathBuf> {
@@ -415,20 +463,28 @@ fn send_key_best_effort(key: &str) {
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("which")
-        .arg(name)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
+    if let Some(found) = lookup_on_path(name) {
+        return Some(found);
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.trim();
-    if line.is_empty() {
-        None
-    } else {
-        Some(PathBuf::from(line))
+    // Extra dirs GUI sessions sometimes omit from PATH.
+    for dir in ["/usr/bin", "/usr/local/bin", "/opt/google/chrome"] {
+        let candidate = PathBuf::from(dir).join(name);
+        if is_runnable(&candidate) {
+            return Some(candidate);
+        }
     }
+    None
+}
+
+fn lookup_on_path(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(name);
+        if is_runnable(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn pgrep_f(needle: &str) -> Vec<u32> {
@@ -478,6 +534,41 @@ mod tests {
         assert!(argv.contains(&"--".into()));
         assert!(argv.iter().any(|a| a.ends_with("google-chrome-stable")));
         assert!(launch.has_no_cdp_flags());
+    }
+
+    #[test]
+    fn chrome_search_prefers_google_chrome_stable_over_chromium() {
+        let names = CHROME_BIN_NAMES;
+        let stable = names
+            .iter()
+            .position(|n| *n == "google-chrome-stable")
+            .unwrap();
+        let google = names.iter().position(|n| *n == "google-chrome").unwrap();
+        let chromium = names.iter().position(|n| *n == "chromium").unwrap();
+        assert!(stable < google && google < chromium);
+
+        let known = well_known_chrome_paths();
+        let first = known[0].to_string_lossy();
+        assert!(
+            first.ends_with("google-chrome-stable"),
+            "well-known paths must start with google-chrome-stable, got {first}"
+        );
+        let chromium_i = known
+            .iter()
+            .position(|p| p.file_name().and_then(|s| s.to_str()) == Some("chromium"))
+            .unwrap();
+        let stable_i = known
+            .iter()
+            .position(|p| p.file_name().and_then(|s| s.to_str()) == Some("google-chrome-stable"))
+            .unwrap();
+        assert!(stable_i < chromium_i);
+        assert!(is_preferred_chrome_name(Path::new(
+            "/usr/bin/google-chrome-stable"
+        )));
+        assert!(is_preferred_chrome_name(Path::new(
+            "/opt/google/chrome/google-chrome"
+        )));
+        assert!(!is_preferred_chrome_name(Path::new("/usr/bin/chromium")));
     }
 
     #[test]

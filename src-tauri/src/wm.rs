@@ -86,16 +86,42 @@ pub fn nudge_nest_hide(pid: Option<u32>) {
     {
         let nest = window_target(pid, NEST_WINDOW);
         if hypr_fullscreen(&nest, false) {
-            let _ = hypr_eval(&format!(
-                "hl.dispatch(hl.dsp.window.movetoworkspacesilent({{ workspace = \"special:zappe-nest\", window = \"{nest}\" }}))"
-            ));
+            let _ = hypr_move_to_workspace(&nest, "special:zappe-nest", false);
             return;
         }
         let chrome = window_target(pid, CHROME_WINDOW);
         let _ = hypr_fullscreen(&chrome, false);
-        let _ = hypr_eval(&format!(
-            "hl.dispatch(hl.dsp.window.movetoworkspacesilent({{ workspace = \"special:zappe-nest\", window = \"{chrome}\" }}))"
-        ));
+        let _ = hypr_move_to_workspace(&chrome, "special:zappe-nest", false);
+    }
+}
+
+/// Hyprland 0.56: `hl.dsp.window.move` (legacy `movetoworkspacesilent` / `hl.dsp.window.movetoworkspacesilent` is nil).
+fn hypr_move_to_workspace(window: &str, workspace: &str, follow: bool) -> bool {
+    hypr_eval(&hypr_move_to_workspace_lua(window, workspace, follow))
+}
+
+fn hypr_move_to_workspace_lua(window: &str, workspace: &str, follow: bool) -> String {
+    format!(
+        "hl.dispatch(hl.dsp.window.move({{ workspace = \"{workspace}\", follow = {follow}, window = \"{window}\" }}))"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hide_nudge_uses_056_window_move_not_movetoworkspacesilent() {
+        let lua = hypr_move_to_workspace_lua(
+            "class:^(gamescope|gamescope-wl)$",
+            "special:zappe-nest",
+            false,
+        );
+        assert!(lua.contains("hl.dsp.window.move"));
+        assert!(lua.contains("follow = false"));
+        assert!(lua.contains("special:zappe-nest"));
+        assert!(!lua.contains("movetoworkspacesilent"));
+        assert!(!lua.contains("hl.dsp.window.movetoworkspacesilent"));
     }
 }
 
