@@ -182,7 +182,7 @@ pub struct TitleMeta {
 }
 
 /// Public catalog metadata. Implementations must not scrape logged-in service HTML.
-pub trait MetadataSource {
+pub trait MetadataSource: Send {
     fn lookup(&self, query: &str) -> Option<TitleMeta>;
 }
 

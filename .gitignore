@@ -4,3 +4,4 @@
 *.swp
 # Never commit a Chrome profile (cookies live there).
 chrome-profile/
+aqtinstall.log

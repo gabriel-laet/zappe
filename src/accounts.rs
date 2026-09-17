@@ -55,14 +55,14 @@ pub fn accounts_label(index: usize) -> &'static str {
         1 => "Prime Video",
         2 => "Disney+",
         3 => "YouTube",
-        4 => "Continue to guide",
+        4 => "Continuar para o guia",
         _ => "?",
     }
 }
 
-pub const ONBOARDING_HEADLINE: &str = "Sign in once in the Zappe Chrome window";
+pub const ONBOARDING_HEADLINE: &str = "Entre uma vez na janela Chrome do Zappe";
 pub const ONBOARDING_BODY: &str =
-    "Pick a service, log in with your account (1Password extension OK). Next launch reuses that profile.";
+    "Escolha um serviço e faça login (extensão 1Password OK). Na próxima vez o perfil é reutilizado.";
 
 #[cfg(test)]
 mod tests {
