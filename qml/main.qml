@@ -7,11 +7,26 @@ ApplicationWindow {
     id: root
     width: 1280
     height: 900
-    visible: backend.hudVisible
+    // cxx-qt exposes Q_PROPERTY names as snake_case (not camelCase).
+    visible: backend.hud_visible
     color: "#0e1014"
     title: "Zappe"
 
-    ZappeBackend { id: backend }
+    ZappeBackend {
+        id: backend
+        Component.onCompleted: tick()
+    }
+
+    function parseCatalogJson() {
+        const raw = backend.catalog_json
+        if (raw === undefined || raw === null || raw === "")
+            return ({ rows: [], accounts: [] })
+        try {
+            return JSON.parse(raw)
+        } catch (e) {
+            return ({ rows: [], accounts: [] })
+        }
+    }
 
     Timer {
         interval: 40
@@ -27,7 +42,6 @@ ApplicationWindow {
     onActiveChanged: if (active) Qt.callLater(remoteInput.forceActiveFocus)
     onVisibleChanged: if (visible) Qt.callLater(remoteInput.forceActiveFocus)
 
-    // ApplicationWindow has no `focus` property in Qt 6.11 — remote keys live on Item/FocusScope.
     FocusScope {
         id: remoteInput
         anchors.fill: parent
@@ -36,7 +50,8 @@ ApplicationWindow {
         Component.onCompleted: forceActiveFocus()
 
         Keys.onPressed: function(event) {
-            if (backend.commandText.length > 0 || commandBar.visible) {
+            const cmd = backend.command_text || ""
+            if (cmd.length > 0 || commandBar.visible) {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     backend.commandCommit()
                     event.accepted = true
@@ -60,15 +75,15 @@ ApplicationWindow {
             }
 
             switch (event.key) {
-            case Qt.Key_Up: backend.moveFocus(-1, 0); break
-            case Qt.Key_Down: backend.moveFocus(1, 0); break
-            case Qt.Key_Left: backend.moveFocus(0, -1); break
-            case Qt.Key_Right: backend.moveFocus(0, 1); break
+            case Qt.Key_Up: backend.move_focus(-1, 0); break
+            case Qt.Key_Down: backend.move_focus(1, 0); break
+            case Qt.Key_Left: backend.move_focus(0, -1); break
+            case Qt.Key_Right: backend.move_focus(0, 1); break
             case Qt.Key_Return:
             case Qt.Key_Enter: backend.activate(); break
             case Qt.Key_Escape:
             case Qt.Key_Back: backend.back(); break
-            case Qt.Key_Home: backend.moveFocus(0, 0); break
+            case Qt.Key_Home: backend.move_focus(0, 0); break
             case Qt.Key_Space:
             case Qt.Key_MediaPlay:
             case Qt.Key_MediaPause:
@@ -89,7 +104,7 @@ ApplicationWindow {
 
         RowLayout {
             Layout.fillWidth: true
-            Rectangle { width: 6; height: 44; color: "#fa9428" }
+            Rectangle { Layout.preferredWidth: 6; Layout.preferredHeight: 44; color: "#fa9428" }
             ColumnLayout {
                 spacing: 4
                 Text {
@@ -107,14 +122,14 @@ ApplicationWindow {
             Item { Layout.fillWidth: true }
             ColumnLayout {
                 spacing: 4
-                Text { text: backend.chromeLine; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
-                Text { text: backend.otaLine; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
+                Text { text: backend.chrome_line; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
+                Text { text: backend.ota_line; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
             }
         }
 
         Text {
             Layout.fillWidth: true
-            text: backend.statusMessage
+            text: backend.status_message
             font.pixelSize: 18
             color: "#8c94a6"
             wrapMode: Text.WordWrap
@@ -124,7 +139,6 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            // Setup: Chrome
             ColumnLayout {
                 anchors.centerIn: parent
                 visible: backend.screen === 0
@@ -139,20 +153,20 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: backend.browserMessage
+                    text: backend.browser_message
                     font.pixelSize: 20
                     color: "#8c94a6"
                     wrapMode: Text.WordWrap
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: backend.distroHint
+                    text: backend.distro_hint
                     font.pixelSize: 16
                     color: "#7a9ec7"
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: backend.installCommand
+                    text: backend.install_command
                     font.pixelSize: 18
                     font.family: "monospace"
                     color: "#61b8fa"
@@ -167,7 +181,6 @@ ApplicationWindow {
                 }
             }
 
-            // Setup: 1Password
             ColumnLayout {
                 anchors.centerIn: parent
                 visible: backend.screen === 1
@@ -181,14 +194,14 @@ ApplicationWindow {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: backend.onepasswordSummary
+                    text: backend.onepassword_summary
                     font.pixelSize: 20
                     color: "#8c94a6"
                     wrapMode: Text.WordWrap
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: backend.onepasswordAppHint
+                    text: backend.onepassword_app_hint
                     font.pixelSize: 16
                     color: "#8c94a6"
                     wrapMode: Text.WordWrap
@@ -201,7 +214,6 @@ ApplicationWindow {
                 }
             }
 
-            // Accounts
             ColumnLayout {
                 anchors.fill: parent
                 visible: backend.screen === 2
@@ -225,7 +237,7 @@ ApplicationWindow {
                     Layout.fillHeight: true
                     spacing: 16
                     Repeater {
-                        model: JSON.parse(backend.catalogJson).accounts
+                        model: root.parseCatalogJson().accounts
                         delegate: Tile {
                             title: modelData.label
                             subtitle: "OK abre login"
@@ -235,7 +247,6 @@ ApplicationWindow {
                 }
             }
 
-            // Guide
             Flickable {
                 anchors.fill: parent
                 visible: backend.screen === 3
@@ -248,7 +259,7 @@ ApplicationWindow {
                     spacing: 24
 
                     Repeater {
-                        model: JSON.parse(backend.catalogJson).rows
+                        model: root.parseCatalogJson().rows
                         delegate: Column {
                             width: parent.width
                             spacing: 12
@@ -278,15 +289,15 @@ ApplicationWindow {
         Rectangle {
             id: commandBar
             Layout.fillWidth: true
-            height: commandBar.visible ? 52 : 0
-            visible: backend.commandText.length > 0
+            Layout.preferredHeight: commandBar.visible ? 52 : 0
+            visible: (backend.command_text || "").length > 0
             color: "#141820"
             radius: 8
             Text {
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left
                 anchors.leftMargin: 16
-                text: "> " + backend.commandText + "_"
+                text: "> " + (backend.command_text || "") + "_"
                 font.pixelSize: 20
                 font.family: "monospace"
                 color: "#61b8fa"
@@ -296,6 +307,7 @@ ApplicationWindow {
     }
 
     component ActionButton: Button {
+        id: actionBtn
         property string label
         property bool primary: false
         text: label
@@ -303,36 +315,37 @@ ApplicationWindow {
         padding: 16
         focusPolicy: Qt.NoFocus
         background: Rectangle {
-            color: primary ? "#61b8fa" : "#1c2029"
-            border.color: primary ? "#61b8fa" : "#3a4254"
+            color: actionBtn.primary ? "#61b8fa" : "#1c2029"
+            border.color: actionBtn.primary ? "#61b8fa" : "#3a4254"
             border.width: 2
             radius: 10
         }
         contentItem: Text {
-            text: parent.text
-            font: parent.font
-            color: primary ? "#0e1014" : "#ebeff7"
+            text: actionBtn.text
+            font: actionBtn.font
+            color: actionBtn.primary ? "#0e1014" : "#ebeff7"
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
         }
     }
 
     component Tile: Rectangle {
+        id: tileRoot
         property string title
         property string subtitle
         property bool focused: false
         width: 260
         height: 96
         radius: 10
-        color: focused ? "#262b38" : "#1c1f28"
-        border.width: focused ? 3 : 1
-        border.color: focused ? "#61b8fa" : "#2a3040"
+        color: tileRoot.focused ? "#262b38" : "#1c1f28"
+        border.width: tileRoot.focused ? 3 : 1
+        border.color: tileRoot.focused ? "#61b8fa" : "#2a3040"
         Column {
             anchors.fill: parent
             anchors.margins: 16
             spacing: 8
-            Text { text: subtitle; font.pixelSize: 14; color: focused ? "#61b8fa" : "#8c94a6" }
-            Text { text: title; font.pixelSize: 20; color: "#ebeff7"; elide: Text.ElideRight; width: parent.width }
+            Text { text: tileRoot.subtitle; font.pixelSize: 14; color: tileRoot.focused ? "#61b8fa" : "#8c94a6" }
+            Text { text: tileRoot.title; font.pixelSize: 20; color: "#ebeff7"; elide: Text.ElideRight; width: parent.width }
         }
     }
 }

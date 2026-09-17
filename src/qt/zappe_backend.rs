@@ -15,6 +15,9 @@ use crate::setup::onepassword::{app_install_hint, extension_in_profile, readines
 /// Set before the QML engine loads.
 pub static APP_CORE: Mutex<Option<AppCore>> = Mutex::new(None);
 
+/// Empty catalog JSON for QML `JSON.parse` before the first `tick()`.
+pub const EMPTY_CATALOG_JSON: &str = r#"{"rows":[],"accounts":[]}"#;
+
 #[cxx_qt::bridge]
 pub mod qobject {
     unsafe extern "C++" {
@@ -113,7 +116,6 @@ pub mod qobject {
     }
 }
 
-#[derive(Default)]
 pub struct ZappeBackendRust {
     screen: i32,
     status_message: QString,
@@ -128,6 +130,33 @@ pub struct ZappeBackendRust {
     catalog_json: QString,
     command_text: QString,
     account_index: i32,
+}
+
+impl Default for ZappeBackendRust {
+    fn default() -> Self {
+        let mut rust = Self {
+            screen: 0,
+            status_message: QString::from(""),
+            chrome_line: QString::from("Chrome · …"),
+            ota_line: QString::from("OTA · off"),
+            hud_visible: true,
+            install_command: QString::from(""),
+            browser_message: QString::from(""),
+            distro_hint: QString::from(""),
+            onepassword_summary: QString::from(&readiness_summary()),
+            onepassword_app_hint: QString::from(&app_install_hint()),
+            catalog_json: QString::from(EMPTY_CATALOG_JSON),
+            command_text: QString::from(""),
+            account_index: 0,
+        };
+        refresh_browser_props(&mut rust);
+        if let Ok(guard) = APP_CORE.lock() {
+            if let Some(core) = guard.as_ref() {
+                sync_props(&mut rust, core);
+            }
+        }
+        rust
+    }
 }
 
 fn sync_props(rust: &mut ZappeBackendRust, core: &AppCore) {
