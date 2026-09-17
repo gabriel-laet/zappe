@@ -1,13 +1,13 @@
-//! Dedicated Google Chrome process, driven over CDP.
+//! Zappe-owned Google Chrome: launch, CDP control, clean shutdown.
 //!
-//! Zappe never embeds Netflix / Prime / Disney / YouTube, never scrapes their HTML into
-//! a catalog, and never extracts or re-encodes DRM video. The user logs in by
-//! hand once inside this profile. Cookies stay in Chrome's user-data-dir.
+//! Zappe always launches (or debug-attaches to) a headed Chrome with the dedicated
+//! zappe `--user-data-dir`. Netflix / Prime / Disney / YouTube play there; cookies
+//! never leave Chrome's profile. No embedding, scraping, or DRM work.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use chromiumoxide::browser::{Browser, BrowserConfig};
@@ -18,14 +18,13 @@ use chromiumoxide::page::Page;
 use futures::StreamExt;
 use tokio::sync::mpsc::UnboundedReceiver;
 
+use crate::accounts;
 use crate::skills::{Service, SiteSkill};
-
-const DEFAULT_CDP: &str = "http://127.0.0.1:9222";
 
 #[derive(Clone, Debug)]
 pub struct ChromeOpts {
-    pub enabled: bool,
-    pub cdp: Option<String>,
+    /// When set, connect to existing DevTools (debug only — zappe does not launch).
+    pub cdp_attach: Option<String>,
     pub initial_url: Option<String>,
     pub service: Service,
 }
@@ -37,6 +36,8 @@ pub enum ChromeCmd {
         service: Service,
         title: String,
     },
+    /// Raise Chrome and open a service home so the user can sign in.
+    Login { service: Service },
     Pause,
     Play,
     PlayPause,
@@ -54,49 +55,35 @@ pub enum ChromeCmd {
 pub enum ChromeEvent {
     Ready(String),
     Opened(String),
+    LoginRaised(Service),
     HiddenHud,
     Failed(String),
-    MissingChrome,
 }
 
 pub struct ChromeHandle {
-    pub enabled: bool,
-    tx: Option<tokio::sync::mpsc::UnboundedSender<ChromeCmd>>,
+    tx: tokio::sync::mpsc::UnboundedSender<ChromeCmd>,
     events: Receiver<ChromeEvent>,
 }
 
 impl ChromeHandle {
     pub fn start(rt: tokio::runtime::Handle, opts: ChromeOpts) -> Self {
-        if !opts.enabled {
-            log::info!("Chrome/CDP disabled — HUD only. Pass --chrome to attach.");
-            let (_tx, rx) = mpsc::channel();
-            return Self {
-                enabled: false,
-                tx: None,
-                events: rx,
-            };
-        }
-
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let (ev_tx, ev_rx) = mpsc::channel();
         rt.spawn(async move {
             if let Err(err) = chrome_worker(opts, cmd_rx, ev_tx.clone()).await {
-                log::warn!("chrome worker: {err:#}");
+                log::error!("chrome worker: {err:#}");
                 let _ = ev_tx.send(ChromeEvent::Failed(format!("{err:#}")));
             }
         });
 
         Self {
-            enabled: true,
-            tx: Some(cmd_tx),
+            tx: cmd_tx,
             events: ev_rx,
         }
     }
 
     pub fn send(&self, cmd: ChromeCmd) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.send(cmd);
-        }
+        let _ = self.tx.send(cmd);
     }
 
     pub fn poll_events(&mut self) -> Vec<ChromeEvent> {
@@ -106,13 +93,33 @@ impl ChromeHandle {
         }
         out
     }
+
+    /// Block until Chrome CDP is ready or fail fast on launch errors.
+    pub fn wait_for_ready(&mut self, timeout: Duration) -> Result<()> {
+        let start = Instant::now();
+        loop {
+            for ev in self.poll_events() {
+                match ev {
+                    ChromeEvent::Ready(_) => return Ok(()),
+                    ChromeEvent::Failed(msg) => {
+                        anyhow::bail!("Chrome failed to start: {msg}");
+                    }
+                    _ => {}
+                }
+            }
+            if start.elapsed() >= timeout {
+                anyhow::bail!(
+                    "Timed out after {}s waiting for Chrome/CDP. Install Google Chrome or set CHROME_PATH.",
+                    timeout.as_secs()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(40));
+        }
+    }
 }
 
 pub fn profile_dir() -> PathBuf {
-    dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("zappe")
-        .join("chrome-profile")
+    accounts::zappe_data_dir().join("chrome-profile")
 }
 
 pub fn find_chrome() -> Option<PathBuf> {
@@ -154,6 +161,18 @@ pub fn find_chrome() -> Option<PathBuf> {
     None
 }
 
+pub fn ensure_chrome_binary(opts: &ChromeOpts) -> Result<PathBuf> {
+    if opts.cdp_attach.is_some() {
+        return Ok(PathBuf::from("(attach-debug)"));
+    }
+    find_chrome().ok_or_else(|| {
+        anyhow!(
+            "Google Chrome or Chromium not found. Install Chrome or set CHROME_PATH. \
+             Streaming requires a real browser under zappe control."
+        )
+    })
+}
+
 fn which(name: &str) -> Option<PathBuf> {
     let output = Command::new("which").arg(name).output().ok()?;
     if !output.status.success() {
@@ -173,25 +192,21 @@ async fn chrome_worker(
     mut cmds: UnboundedReceiver<ChromeCmd>,
     events: Sender<ChromeEvent>,
 ) -> Result<()> {
-    let Some(exe) = find_chrome() else {
-        log::warn!("Chrome binary not found; HUD keeps running.");
-        let _ = events.send(ChromeEvent::MissingChrome);
-        return Ok(());
-    };
-
+    let owns_process = opts.cdp_attach.is_none();
     let profile = profile_dir();
     std::fs::create_dir_all(&profile)
         .with_context(|| format!("create profile dir {}", profile.display()))?;
 
-    let (browser, page) = if let Some(cdp) = opts.cdp.clone() {
+    let (mut browser, page) = if let Some(cdp) = opts.cdp_attach.clone() {
+        log::warn!("ZAPPE_CDP attach is a debug escape hatch — normal use launches Chrome automatically");
         attach_existing(&cdp).await?
     } else {
+        let exe = find_chrome().context("Chrome binary missing after preflight")?;
         launch_profile(&exe, &profile).await?
     };
 
     let _ = events.send(ChromeEvent::Ready(format!(
-        "cdp {} profile {}",
-        browser.websocket_address(),
+        "profile {}",
         profile.display()
     )));
 
@@ -215,6 +230,20 @@ async fn chrome_worker(
                         os_raise_stub("Google Chrome");
                         let _ = events.send(ChromeEvent::Opened(url));
                         let _ = events.send(ChromeEvent::HiddenHud);
+                    }
+                    Err(err) => {
+                        let _ = events.send(ChromeEvent::Failed(format!("{err:#}")));
+                    }
+                }
+            }
+            ChromeCmd::Login { service } => {
+                active_service = service;
+                let url = service.home_url();
+                match open_service(&page, service, url, "Login").await {
+                    Ok(()) => {
+                        let _ = raise_login(&page).await;
+                        os_raise_stub("Google Chrome");
+                        let _ = events.send(ChromeEvent::LoginRaised(service));
                     }
                     Err(err) => {
                         let _ = events.send(ChromeEvent::Failed(format!("{err:#}")));
@@ -262,7 +291,14 @@ async fn chrome_worker(
                 run_skill(&page, active_service.skill(), SkillOp::Back).await;
             }
             ChromeCmd::ShowHud => {}
-            ChromeCmd::Shutdown => break,
+            ChromeCmd::Shutdown => {
+                if owns_process {
+                    if let Err(err) = browser.close().await {
+                        log::warn!("Browser.close: {err}");
+                    }
+                }
+                break;
+            }
         }
     }
 
@@ -295,14 +331,13 @@ async fn launch_profile(exe: &Path, profile: &Path) -> Result<(Browser, Page)> {
         }
     });
 
-    // Dedicated profile, first-party sites only. User signs in by hand.
     let page = browser.new_page("about:blank").await?;
     Ok((browser, page))
 }
 
 async fn attach_existing(cdp: &str) -> Result<(Browser, Page)> {
-    log::info!("attaching to existing Chrome at {cdp}");
-    let (mut browser, mut handler) = Browser::connect(cdp).await?;
+    log::info!("debug attach to Chrome at {cdp}");
+    let (browser, mut handler) = Browser::connect(cdp).await?;
     tokio::spawn(async move {
         while let Some(item) = handler.next().await {
             if item.is_err() {
@@ -310,7 +345,6 @@ async fn attach_existing(cdp: &str) -> Result<(Browser, Page)> {
             }
         }
     });
-    let _ = browser.fetch_targets().await;
     tokio::time::sleep(Duration::from_millis(200)).await;
     let pages = browser.pages().await?;
     let page = match pages.into_iter().next() {
@@ -335,9 +369,9 @@ async fn open_service(page: &Page, service: Service, url: &str, title: &str) -> 
     }
     log::info!("opening {} ({title}) -> {url}", service.label());
     page.goto(url).await?;
-    // Deep links already express intent. Do not scrape search results into a pick.
     if !crate::skills::is_official_deep_link(url)
         && title != "Home"
+        && title != "Login"
         && title != service.label()
         && title != "Subscriptions"
     {
@@ -372,13 +406,12 @@ async fn run_skill(page: &Page, skill: Option<&dyn SiteSkill>, op: SkillOp) {
     };
     if let Err(err) = page.evaluate(js).await {
         log::warn!(
-            "fragile {} skill failed (this is expected to break): {err}",
+            "fragile {} skill failed (expected to break sometimes): {err}",
             skill.service().label()
         );
     }
 }
 
-/// CDP `Browser.setWindowBounds` — the supported way to raise / fullscreen Chrome.
 pub async fn raise_fullscreen(page: &Page) -> Result<()> {
     let window = page
         .execute(GetWindowForTargetParams::builder().build())
@@ -393,31 +426,35 @@ pub async fn raise_fullscreen(page: &Page) -> Result<()> {
     Ok(())
 }
 
-/// OS helpers when CDP window bounds are not enough. Best-effort stubs.
+async fn raise_login(page: &Page) -> Result<()> {
+    let window = page
+        .execute(GetWindowForTargetParams::builder().build())
+        .await
+        .context("Browser.getWindowForTarget")?;
+    let bounds = Bounds::builder()
+        .window_state(WindowState::Maximized)
+        .build();
+    page.execute(SetWindowBoundsParams::new(window.window_id, bounds))
+        .await
+        .context("Browser.setWindowBounds")?;
+    Ok(())
+}
+
 pub fn os_raise_stub(title_hint: &str) {
     #[cfg(target_os = "macos")]
     {
-        // tell application "Google Chrome" to activate
-        let script = format!(
-            "tell application \"System Events\" to set frontmost of first process whose name contains \"Chrome\" to true"
-        );
+        let script = "tell application \"System Events\" to set frontmost of first process whose name contains \"Chrome\" to true";
         let _ = Command::new("osascript").arg("-e").arg(script).status();
         let _ = title_hint;
     }
     #[cfg(target_os = "linux")]
     {
-        // Requires wmctrl on PATH. Missing binary is fine.
         let _ = Command::new("wmctrl").args(["-a", title_hint]).status();
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         let _ = title_hint;
     }
-}
-
-#[allow(dead_code)]
-pub fn default_cdp_url() -> &'static str {
-    DEFAULT_CDP
 }
 
 #[cfg(test)]

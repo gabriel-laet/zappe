@@ -1,164 +1,105 @@
 # Zappe
 
-Personal living-room / desktop launcher. A native **HUD** sits on top of the room; **Netflix, Prime Video, Disney+, and YouTube play in a real Google Chrome window** you already logged into. On Linux, **terrestrial ISDB-Tb / DVB channels** (MyGica-class USB tuners) can appear as an **OTA TV** row and play through **`dvbv5-zap` + `mpv`**, locally over RF — not through Chrome.
+Personal living-room launcher: a native **HUD** (remote-friendly guide) plus **zappe-owned Google Chrome** for Netflix, Prime Video, Disney+, and YouTube. On Linux, **OTA TV** (ISDB-Tb / DVB via MyGica-class tuners) plays through **`dvbv5-zap` + `mpv`** — local RF, no Chrome login.
 
-This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide rows, and optional Chrome attach over CDP.
+Zappe **orchestrates Chrome end-to-end**: finds the binary, launches a headed window with a dedicated profile, speaks CDP, navigates first-party URLs, raises/fullscreens the player, sends play/pause/back skills, and **closes the browser process on quit**. The HUD is the remote; Chrome is the streaming surface under zappe control.
 
 ## What it is
 
-- A always-on-top native HUD (`winit` + `wgpu`) with a scanline / phosphor shader and a tiny immediate-mode tile grid. No Electron, no Tauri, no in-process webview.
-- A remote control for a **separate Chrome process** with a dedicated `--user-data-dir` (`…/zappe/chrome-profile`). You log in by hand, once. Zappe then opens first-party URLs and sends a few CDP / DOM pokes.
-- **OTA TV (Linux):** when `channels.conf` is configured, tiles list scanned terrestrial channels. Enter runs `dvbv5-zap` piped into `mpv`; Back / Escape tears down both processes cleanly.
-- Living-room input: a dummy TV remote that looks like a keyboard, plus a constrained command language (on-screen bar / stdin / whisper.cpp hook). Not a chat bot.
-- Window control via CDP `Browser.setWindowBounds` (fullscreen / raise). macOS `osascript` and Linux `wmctrl` are documented best-effort stubs for when the OS still needs a nudge.
+- A modern, flat **wgpu HUD** (`winit` + instanced quads) — large tiles, high contrast, calm focus motion. No Electron, no in-process webview, no retro CRT shader.
+- **Chrome is required** for streaming. `cargo run` launches Chrome automatically (profile under `~/.local/share/zappe/chrome-profile` on Linux). Missing Chrome → clear error and **non-zero exit**.
+- **Accounts screen** on first run (and via the **Accounts** tile): raises Chrome to each service home so you sign in once. Install the **1Password browser extension** in that profile if you use 1Password. Cookies stay in Chrome; zappe never harvests them.
+- **OTA TV** when `channels.conf` is configured: HUD row of terrestrial channels; Enter tunes via `dvbv5-zap | mpv`; Back stops both processes.
+- **ALTONEX-style remotes** (HID keyboard): D-pad + OK, Home, Back, Play/Pause. Volume stays with the OS. Mic button → future local whisper hook.
 
 ## What it is not
 
-- Not an unofficial Netflix / Prime / Disney / YouTube player.
-- Not a scraper. Catalog rows are placeholders. Public metadata is a stub trait (`StubMetadata`) for a later JustWatch-style source.
-- Not an embed of those sites, and not a DRM unpacker. Zappe does not extract, record, or re-encode protected video.
-- Not a cookie harvester. Session state stays inside Chrome's profile directory. This repo ships no secrets.
+- Not an unofficial stream ripper, scraper, or DRM workaround.
+- Not “optional Chrome attach” as the normal path. **`ZAPPE_CDP` attach is debug-only** (you must already have DevTools up); day-to-day use lets zappe launch Chrome.
 
-## How to run
+## Dependencies
 
-Needs Rust 1.88+ (the `rust-toolchain.toml` pins `stable`). Builds on macOS and Linux.
+Rust **1.88+** (`rust-toolchain.toml` pins stable).
 
-On Linux you need a working GPU stack at **runtime** (Vulkan ICD or GL/EGL) plus `libxkbcommon-x11`. Debian/Ubuntu:
+**Linux (HUD + Chrome + optional OTA):**
 
 ```bash
-sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
+sudo apt install google-chrome-stable libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
+# optional OTA:
+sudo apt install v4l-utils mpv
 ```
+
+Set `CHROME_PATH` if Chrome is not on `PATH`.
+
+## Run
 
 ```bash
 cargo run
 ```
 
-That is HUD-only. A cheap HDMI-CEC / USB / 2.4 GHz dummy remote that enumerates as a keyboard works on first run — see the keymap below.
+That **starts Chrome and the HUD**. First launch may show the **Accounts** screen — pick a service, sign in in the Chrome window, then **Continue to guide** or **Back**.
 
-Drive a real Chrome profile:
+Open the guide tile **Accounts** anytime to add another service login.
 
 ```bash
-# first time: Chrome opens the Zappe profile. Log into Netflix / Prime / Disney / YouTube yourself.
-cargo run -- --chrome --service youtube
+# optional: open a specific URL in the zappe profile after launch
+cargo run -- --url https://www.youtube.com
 
-# later sessions reuse ~/.local/share/zappe/chrome-profile (macOS: ~/Library/Application Support/zappe/chrome-profile)
-ZAPPE_CHROME=1 cargo run -- --service prime
+# debug only — attach instead of launch (you must start Chrome yourself with remote debugging)
+cargo run -- --cdp http://127.0.0.1:9222
 ```
 
-If Chrome is missing, the HUD still starts and the status line says so. Override the binary with `CHROME_PATH`.
-
-Attach to an already-running DevTools endpoint instead of launching:
+## OTA (ISDB-Tb / DVB)
 
 ```bash
-# you started Chrome yourself with the zappe user-data-dir and --remote-debugging-port=9222
-cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
-```
-
-`--chrome` / `ZAPPE_CHROME` and `--cdp` / `ZAPPE_CDP` are the feature flags. `cargo run` never requires Chrome.
-
-### Terrestrial OTA (ISDB-Tb / DVB on Linux)
-
-Zappe does **not** decode broadcast MPEG itself. It spawns the same tools you would use from a shell: **`dvbv5-zap`** (from [v4l-utils](https://www.linuxtv.org/wiki/index.php/V4l-utils)) writes a transport stream to stdout; **`mpv`** reads that pipe. That keeps the Chrome CDP path untouched — OTA is additive.
-
-Typical setup (Brazil ISDB-Tb, MyGica S270-class stick with `smsusb` / `smsdvb`, adapter `/dev/dvb/adapter0`):
-
-```bash
-sudo apt install v4l-utils mpv libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
-# scan once with your stick (example — use your local transponder list):
-# dvbv5-scan … > ~/tv/channels.conf
 export ZAPPE_OTA_CHANNELS="$HOME/tv/channels.conf"
 cargo run
 ```
 
-Channel tiles are built from **`[Channel Name]`** sections in `channels.conf`. The name passed to `dvbv5-zap -p` must match exactly (e.g. `Globo HD`).
-
 | Variable / flag | Meaning |
 | --- | --- |
-| `--ota-channels` / `ZAPPE_OTA_CHANNELS` | Path to `channels.conf` |
-| (default) | `~/tv/channels.conf` when that file exists |
-| `ZAPPE_DVB_ADAPTER` | DVB adapter index for `dvbv5-zap -a` (default `0`) |
-| `ZAPPE_DVBV5_ZAP` | `dvbv5-zap` binary (default: on `PATH`) |
-| `ZAPPE_MPV` | `mpv` binary (default: on `PATH`) |
-| `ZAPPE_OTA_ZAP_LOG` | stderr log from zap (default `/tmp/zappe-zap.log`) |
+| `ZAPPE_OTA_CHANNELS` / `--ota-channels` | dvbv5 `channels.conf` |
+| default | `~/tv/channels.conf` if present |
+| `ZAPPE_DVB_ADAPTER` | `dvbv5-zap -a` (default `0`) |
+| `ZAPPE_DVBV5_ZAP`, `ZAPPE_MPV` | binary overrides |
+| `ZAPPE_OTA_ZAP_LOG` | zap stderr (default `/tmp/zappe-zap.log`) |
 
-Do **not** open `/dev/dvb/adapter0/dvr0` from a second process while zap holds the tuner via `-o -`. Avoid `dvbv5-zap -P` (full mux) if it confuses the demuxer — Zappe uses `-r -o -` like a manual pipe.
+Channel names must match `[Name]` sections in `channels.conf`. Zappe uses `dvbv5-zap … -r -o -` piped to `mpv` (not `-P`, not a second opener on `dvr0`).
 
-Focus an **OTA TV** tile and press **Enter** to tune; **Escape / Back** stops playback and returns to the HUD. A few seconds of black video until the H.264 IDR is normal on live OTA.
+## Remote / keyboard
 
-### Remote / keyboard (must-have)
-
-Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them in `winit` (physical `KeyCode` plus `NamedKey` aliases). Volume stays with the OS.
-
-| Remote / key | Action |
+| Key | Action |
 | --- | --- |
-| Arrows | move the **big amber focus ring** across tiles and rows |
-| Enter / Return | activate the focused tile (Chrome URL or OTA tune) |
-| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, stop OTA or Chrome history back) |
-| Home / BrowserHome | root of the guide (first tile of Continue) |
-| Space / MediaPlayPause | play-pause the Chrome player skill |
-| `p` | play (keyboard extra) |
-| `/` | open the on-screen command bar |
-| `h` | hide / show HUD so you can use the Chrome window |
-| `q` | quit HUD (keyboard only) |
-| 0–9 | reserved for later |
-| Volume | OS / AVR — Zappe does not eat these keys |
+| D-pad | move focus (guide rows or accounts tiles) |
+| OK / Enter | open tile, tune OTA, or open login |
+| Back / Esc | stop OTA, Chrome history back, or leave accounts |
+| Home | guide root |
+| Play/Pause | Chrome player skill |
+| `/` | command bar (constrained grammar) |
+| `h` | hide/show HUD |
+| `q` | quit (stops OTA + closes zappe-owned Chrome) |
+| Volume | OS |
 
-Point a dummy remote at the HUD and use arrows + OK + Back. The focus ring is a fat stroke, not a 1px outline.
+## Login & 1Password
 
-### Voice and the command bar
-
-Voice is **local whisper.cpp only**, not a chat LLM and not an unconstrained agent. After transcription, text is parsed with a tiny grammar — the same parser as the on-screen bar, `--say`, and stdin:
-
-```text
-play <query> [on youtube|netflix|prime|disney]
-search <query> [on youtube|netflix|prime|disney]
-pause | fullscreen | back | home
-```
-
-whisper.cpp is a stub/hook in this sketch (`--whisper` / `ZAPPE_WHISPER` / `ZAPPE_WHISPER_BIN`). It does not download a model. Until a binary is on PATH, type into the HUD (`/` then Enter) or:
-
-```bash
-cargo run -- --say "play lofi on youtube"
-echo "pause" | cargo run -- --cmd-stdin
-```
-
-Unknown utterances (`what's the weather`) are rejected. No general-purpose tool calling.
-
-## How login works
-
-1. Zappe launches **Google Chrome or Chromium**, not a webview, with a dedicated user-data-dir. It does not touch your default Chrome profile.
-2. You sign in to Netflix / Prime / Disney / YouTube in that window, the same way you would in any Chrome. MFA, passwords, cookies — all Chrome's problem.
-3. Next `cargo run -- --chrome` reuses the same profile. Zappe never reads or copies those cookies.
-
-## How CDP attaches
-
-1. **Launch path:** `chromiumoxide` starts Chrome headed (`with_head()`), points `--user-data-dir` at the Zappe profile, and talks to the DevTools WebSocket it advertised.
-2. **Attach path:** `--cdp http://127.0.0.1:9222` connects to a Chrome you started yourself (same profile, `--remote-debugging-port=9222`).
-3. After attach, Zappe `Page.navigate`s to a first-party URL (`https://www.netflix.com`, `https://www.primevideo.com`, `https://www.disneyplus.com`, `https://www.youtube.com`, or a tile deep-link). YouTube prefers official `/watch?v=`, `/feed/subscriptions`, and `/results?search_query=` links. It does not pull their HTML into the catalog.
-4. A tiny **site skill** (`src/skills.rs`) may then search / open / pause / play / fullscreen / back. Selectors are isolated in that file and treated as fragile — they will break; that is expected.
-5. Raise / fullscreen uses **`Browser.getWindowForTarget` + `Browser.setWindowBounds`**. If the window manager ignores that:
-
-   - macOS stub: `osascript` to front the Chrome process
-   - Linux stub: `wmctrl -a 'Google Chrome'`
-
-   Both are best-effort and must not be required to build or to show the HUD.
+1. Zappe launches **only** the zappe Chrome profile (`…/zappe/chrome-profile`).
+2. Use **Accounts** in the HUD → pick Netflix / Prime / Disney / YouTube → sign in in Chrome (password manager extension recommended).
+3. Next `cargo run` reuses the same profile — no cookie sync from your phone, no secrets in this repo.
 
 ## Layout
 
 ```
-src/main.rs       CLI + winit remote/keyboard loop
-src/command.rs    constrained play/pause/search grammar
-src/voice.rs      whisper.cpp hook (no model, no LLM)
-src/hud.rs        wgpu CRT pass + tiles + fat focus ring
-src/shaders/      crt.wgsl, quad.wgsl
-src/chrome.rs     spawn / attach, CDP window bounds, OS stubs
-src/catalog.rs    placeholder rows + OTA row from channels.conf
-src/ota.rs        dvbv5-zap → mpv pipeline, process lifecycle
-src/skills.rs     per-site search / open / pause / play / fullscreen / back
+src/main.rs       HUD loop, Chrome boot, OTA, accounts navigation
+src/hud.rs        modern wgpu guide + accounts UI
+src/theme.rs      colors / branding
+src/accounts.rs   first-run onboarding marker + login services
+src/chrome.rs     launch, CDP, skills, Browser.close on quit
+src/ota.rs        dvbv5-zap → mpv
+src/catalog.rs    guide rows + OTA from channels.conf
+src/skills.rs     fragile per-site CDP hooks
+src/shaders/quad.wgsl
 ```
-
-egui was skipped: a fullscreen WGSL pass plus a few instanced quads is enough for a TV-guide HUD and keeps the shaders in-tree.
 
 ## Status
 
-First sketch. The HUD is real. Chrome attach is real, and feature-flagged. **OTA TV** is real on Linux when `channels.conf` is present. Catalog metadata and site skills are placeholders by design.
+Runnable on Linux/macOS with real Chrome. OTA on Linux when `channels.conf` exists. Site skills and catalog metadata remain placeholders by design.

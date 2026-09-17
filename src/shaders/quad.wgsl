@@ -1,6 +1,7 @@
 struct QuadUniforms {
     resolution: vec2<f32>,
-    _pad: vec2<f32>,
+    time: f32,
+    _pad: f32,
 }
 
 struct Instance {
@@ -56,16 +57,15 @@ fn rounded_box(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let kind = in.extra.x;
     if kind > 1.5 {
-        // TV focus ring: fat rounded stroke, not a 1px outline.
         let half = in.size * 0.5;
         let p = (in.local - vec2<f32>(0.5, 0.5)) * in.size;
-        let radius = max(in.extra.y, 6.0);
+        let radius = max(in.extra.y, 8.0);
         let d = rounded_box(p, half, radius);
-        let thick = max(in.extra.z, 10.0);
-        let aa = 1.8;
+        let thick = max(in.extra.z, 8.0);
+        let pulse = 0.85 + 0.15 * sin(u.time * 2.2);
+        let aa = 1.5;
         let ring = 1.0 - smoothstep(0.0, aa, abs(d) - thick * 0.5);
-        let halo = 0.35 * (1.0 - smoothstep(thick * 0.5, thick * 2.4, abs(d)));
-        let alpha = max(ring, halo);
+        let alpha = ring * pulse;
         if alpha < 0.02 {
             discard;
         }
@@ -84,18 +84,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     let half = in.size * 0.5;
     let p = (in.local - vec2<f32>(0.5, 0.5)) * in.size;
-    let radius = max(in.extra.y, 2.0);
+    let radius = max(in.extra.y, 6.0);
     let d = rounded_box(p, half, radius);
     let aa = 1.2;
     var alpha = 1.0 - smoothstep(0.0, aa, d);
     if alpha < 0.01 {
         discard;
     }
-
-    let focused = in.extra.z;
-    let glow = smoothstep(10.0, -2.0, d) * focused * 0.45;
-    var col = in.color.rgb + vec3<f32>(0.25, 0.55, 0.35) * glow;
-    let scan = 0.92 + 0.08 * sin((in.local.y * in.size.y) * 0.7);
-    col = col * scan;
-    return vec4<f32>(col, in.color.a * alpha);
+    return vec4<f32>(in.color.rgb, in.color.a * alpha);
 }

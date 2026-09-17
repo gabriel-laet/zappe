@@ -1,21 +1,22 @@
 //! Zappe — native living-room launcher.
 //!
-//! HUD: winit + wgpu. Playback: a real Chrome process over CDP.
-//! Input: keyboard / dummy TV remote (HID) + a constrained command bar.
+//! HUD: winit + wgpu. Streaming: zappe-owned Chrome over CDP. OTA: dvbv5-zap + mpv.
 
+mod accounts;
 mod catalog;
 mod chrome;
 mod command;
 mod hud;
 mod ota;
 mod skills;
+mod theme;
 mod voice;
 
 use std::path::PathBuf;
-
+use std::process::ExitCode;
 use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use clap::Parser;
@@ -25,10 +26,11 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 
+use accounts::is_accounts_url;
 use catalog::Catalog;
-use chrome::{ChromeCmd, ChromeEvent, ChromeHandle, ChromeOpts};
+use chrome::{ensure_chrome_binary, ChromeCmd, ChromeEvent, ChromeHandle, ChromeOpts};
 use command::Command;
-use hud::{Gpu, Guide};
+use hud::{Gpu, Guide, HudScreen};
 use ota::{parse_channels_conf, OtaConfig, OtaEvent, OtaHandle};
 use skills::Service;
 use voice::WhisperHook;
@@ -36,41 +38,28 @@ use voice::WhisperHook;
 #[derive(Parser, Debug)]
 #[command(
     name = "zappe",
-    about = "Personal living-room launcher. Native wgpu HUD + real Chrome via CDP."
+    about = "Living-room launcher: wgpu HUD + zappe-owned Chrome + optional OTA TV."
 )]
 struct Args {
-    /// Spawn (or attach) the dedicated Zappe Chrome profile over CDP.
-    /// Without this flag the HUD still runs if Chrome is missing.
-    #[arg(long, env = "ZAPPE_CHROME")]
-    chrome: bool,
-
-    /// Attach to an existing DevTools HTTP endpoint instead of launching.
-    /// Example: http://127.0.0.1:9222
-    #[arg(long, env = "ZAPPE_CDP")]
+    /// Debug only: attach to an existing DevTools endpoint instead of launching Chrome.
+    #[arg(long, env = "ZAPPE_CDP", hide_env_values = true)]
     cdp: Option<String>,
 
-    /// Service whose home URL is opened when Chrome starts.
     #[arg(long, value_enum, default_value_t = Service::Netflix)]
     service: Service,
 
-    /// Override the first-party URL Chrome should open (still your profile, still Chrome).
     #[arg(long)]
     url: Option<String>,
 
-    /// Run one line through the constrained command grammar (same as the bar / whisper).
     #[arg(long)]
     say: Option<String>,
 
-    /// Read command lines from stdin (one grammar line per line).
     #[arg(long, env = "ZAPPE_CMD_STDIN")]
     cmd_stdin: bool,
 
-    /// Arm the local whisper.cpp hook. Does not download a model or start a chat LLM.
     #[arg(long, env = "ZAPPE_WHISPER")]
     whisper: bool,
 
-    /// Path to a dvbv5 `channels.conf` (ISDB-T / DVB OTA). Also `ZAPPE_OTA_CHANNELS`
-    /// or `~/tv/channels.conf` when present.
     #[arg(long, env = "ZAPPE_OTA_CHANNELS")]
     ota_channels: Option<PathBuf>,
 }
@@ -92,20 +81,20 @@ impl App {
             match ev {
                 OtaEvent::Playing { channel } => {
                     self.ota_playing = true;
-                    self.guide.status = format!("OTA: {channel}");
-                    self.guide.ota_line = format!("OTA: {channel}");
+                    self.guide.status = format!("OTA · {channel}");
+                    self.guide.ota_line = format!("OTA · {channel}");
                     self.set_hud_visible(false);
                 }
                 OtaEvent::Stopped => {
                     self.ota_playing = false;
-                    self.guide.ota_line = "OTA: ready".into();
+                    self.guide.ota_line = "OTA · ready".into();
                     self.set_hud_visible(true);
                     self.guide.status = "OTA stopped".into();
                 }
                 OtaEvent::Failed(msg) => {
                     self.ota_playing = false;
                     self.guide.status = msg.clone();
-                    self.guide.ota_line = "OTA: error".into();
+                    self.guide.ota_line = "OTA · error".into();
                     self.set_hud_visible(true);
                     log::warn!("{msg}");
                 }
@@ -117,25 +106,23 @@ impl App {
         for ev in self.chrome.poll_events() {
             match ev {
                 ChromeEvent::Ready(msg) => {
-                    self.guide.chrome_line = format!("CHROME: on  {msg}");
+                    self.guide.chrome_line = format!("Chrome · ready ({msg})");
                     log::info!("{msg}");
                 }
                 ChromeEvent::Opened(url) => {
-                    self.guide.status = format!("opened {url}");
+                    self.guide.status = format!("Playing · {url}");
                 }
-                ChromeEvent::HiddenHud => {
-                    self.set_hud_visible(false);
+                ChromeEvent::LoginRaised(service) => {
+                    self.guide.status = format!(
+                        "Sign in to {} in the Chrome window · Back when done",
+                        service.label()
+                    );
                 }
+                ChromeEvent::HiddenHud => self.set_hud_visible(false),
                 ChromeEvent::Failed(msg) => {
-                    self.guide.chrome_line = format!("CHROME: fail");
+                    self.guide.chrome_line = "Chrome · error".into();
                     self.guide.status = msg;
                     self.set_hud_visible(true);
-                }
-                ChromeEvent::MissingChrome => {
-                    self.guide.chrome_line = "CHROME: missing (HUD only)".into();
-                    self.guide.status =
-                        "chrome binary not found — HUD still up. install chrome or set CHROME_PATH"
-                            .into();
                 }
             }
         }
@@ -164,6 +151,7 @@ impl App {
     fn dispatch(&mut self, cmd: Command) {
         match cmd {
             Command::Home => {
+                self.guide.close_accounts();
                 self.guide.go_home();
                 self.set_hud_visible(true);
             }
@@ -202,29 +190,16 @@ impl App {
     fn search_query(&mut self, query: &str, service: Option<Service>) {
         let service = self.resolve_service(service);
         let url = service.search_url(query);
-        if !self.chrome.enabled {
-            self.guide.status = format!(
-                "would search {query} on {} (pass --chrome)",
-                service.label()
-            );
-            log::info!("{} -> {url}", self.guide.status);
-            return;
-        }
         self.guide.status = format!("search {query} …");
         self.chrome.send(ChromeCmd::Search {
             query: query.to_string(),
             service,
         });
+        log::debug!("search -> {url}");
     }
 
     fn open_url(&mut self, service: Service, title: &str, url: String) {
-        if !self.chrome.enabled {
-            self.guide.status =
-                format!("would open {title} on {} (pass --chrome)", service.label());
-            log::info!("{} -> {url}", self.guide.status);
-            return;
-        }
-        self.guide.status = format!("zapping {title} …");
+        self.guide.status = format!("Opening {title} …");
         self.chrome.send(ChromeCmd::Open {
             url,
             service,
@@ -248,6 +223,12 @@ impl App {
             self.guide.status = "back".into();
             return;
         }
+        if self.guide.screen == HudScreen::Accounts {
+            accounts::mark_onboarding_done();
+            self.guide.close_accounts();
+            self.guide.status = "guide".into();
+            return;
+        }
         if self.ota_playing {
             self.ota.stop();
             self.ota_playing = false;
@@ -261,10 +242,30 @@ impl App {
         self.guide.status = "back".into();
     }
 
+    fn activate_focus(&mut self) {
+        if self.guide.screen == HudScreen::Accounts {
+            if self.guide.is_accounts_done() {
+                accounts::mark_onboarding_done();
+                self.guide.close_accounts();
+                self.guide.status = "guide".into();
+                return;
+            }
+            if let Some((_, service)) = self.guide.focused_account() {
+                self.chrome.send(ChromeCmd::Login { service });
+            }
+            return;
+        }
+        self.zap();
+    }
+
     fn zap(&mut self) {
         let Some(tile) = self.guide.focused().cloned() else {
             return;
         };
+        if is_accounts_url(&tile.url) {
+            self.guide.open_accounts();
+            return;
+        }
         if tile.service == Service::Ota {
             let Some(channel) = catalog::Catalog::ota_channel_name(&tile) else {
                 return;
@@ -274,8 +275,7 @@ impl App {
                     "OTA not configured — set ZAPPE_OTA_CHANNELS or ~/tv/channels.conf".into();
                 return;
             }
-            let _ = self.guide.catalog.public_meta(&tile.title);
-            self.guide.status = format!("zapping {channel} …");
+            self.guide.status = format!("Tuning {channel} …");
             self.ota.play(channel);
             return;
         }
@@ -331,6 +331,37 @@ impl App {
             return;
         }
 
+        if self.guide.screen == HudScreen::Accounts {
+            if is_arrow(code, named, NamedKey::ArrowLeft, KeyCode::ArrowLeft) {
+                self.guide.move_accounts(-1);
+            } else if is_arrow(code, named, NamedKey::ArrowRight, KeyCode::ArrowRight) {
+                self.guide.move_accounts(1);
+            } else if is_arrow(code, named, NamedKey::ArrowUp, KeyCode::ArrowUp) {
+                self.guide.move_accounts(-1);
+            } else if is_arrow(code, named, NamedKey::ArrowDown, KeyCode::ArrowDown) {
+                self.guide.move_accounts(1);
+            } else if matches!(code, Some(KeyCode::Enter | KeyCode::NumpadEnter))
+                || matches!(named, Some(NamedKey::Enter))
+            {
+                self.activate_focus();
+            } else if matches!(
+                code,
+                Some(KeyCode::Escape | KeyCode::Backspace | KeyCode::BrowserBack)
+            ) || matches!(
+                named,
+                Some(NamedKey::Escape | NamedKey::Backspace | NamedKey::BrowserBack | NamedKey::GoBack)
+            ) {
+                self.back();
+            } else if matches!(code, Some(KeyCode::Home | KeyCode::BrowserHome))
+                || matches!(named, Some(NamedKey::Home | NamedKey::BrowserHome))
+            {
+                accounts::mark_onboarding_done();
+                self.guide.close_accounts();
+                self.guide.go_home();
+            }
+            return;
+        }
+
         if is_arrow(code, named, NamedKey::ArrowUp, KeyCode::ArrowUp) {
             self.set_hud_visible(true);
             self.guide.move_by(-1, 0);
@@ -346,7 +377,7 @@ impl App {
         } else if matches!(code, Some(KeyCode::Enter | KeyCode::NumpadEnter))
             || matches!(named, Some(NamedKey::Enter))
         {
-            self.zap();
+            self.activate_focus();
         } else if matches!(
             code,
             Some(KeyCode::Escape | KeyCode::Backspace | KeyCode::BrowserBack)
@@ -367,38 +398,11 @@ impl App {
             self.guide.status = "play-pause".into();
         } else if matches!(code, Some(KeyCode::KeyP)) {
             self.chrome.send(ChromeCmd::Play);
-            self.guide.status = "play".into();
         } else if matches!(code, Some(KeyCode::KeyF)) {
             self.chrome.send(ChromeCmd::Fullscreen);
         } else if matches!(code, Some(KeyCode::Slash)) {
             self.set_hud_visible(true);
             self.guide.open_command();
-        } else if matches!(
-            code,
-            Some(
-                KeyCode::Digit0
-                    | KeyCode::Digit1
-                    | KeyCode::Digit2
-                    | KeyCode::Digit3
-                    | KeyCode::Digit4
-                    | KeyCode::Digit5
-                    | KeyCode::Digit6
-                    | KeyCode::Digit7
-                    | KeyCode::Digit8
-                    | KeyCode::Digit9
-                    | KeyCode::Numpad0
-                    | KeyCode::Numpad1
-                    | KeyCode::Numpad2
-                    | KeyCode::Numpad3
-                    | KeyCode::Numpad4
-                    | KeyCode::Numpad5
-                    | KeyCode::Numpad6
-                    | KeyCode::Numpad7
-                    | KeyCode::Numpad8
-                    | KeyCode::Numpad9
-            )
-        ) {
-            log::debug!("digit pad reserved for later");
         } else if matches!(code, Some(KeyCode::KeyQ)) {
             self.ota.shutdown();
             self.chrome.send(ChromeCmd::Shutdown);
@@ -406,7 +410,6 @@ impl App {
         } else if matches!(code, Some(KeyCode::KeyH)) {
             self.set_hud_visible(self.guide.hidden);
         }
-        // VolumeUp / VolumeDown: leave to the OS.
     }
 }
 
@@ -425,7 +428,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = WindowAttributes::default()
-            .with_title("ZAPPE")
+            .with_title("Zappe")
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 900.0))
             .with_window_level(WindowLevel::AlwaysOnTop);
         match event_loop.create_window(attrs) {
@@ -496,7 +499,16 @@ impl ApplicationHandler for App {
     }
 }
 
-fn main() -> Result<()> {
+fn main() -> ExitCode {
+    if let Err(err) = run() {
+        eprintln!("zappe: {err:#}");
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn run() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("zappe=info"))
         .init();
     let args = Args::parse();
@@ -504,69 +516,40 @@ fn main() -> Result<()> {
     let whisper = WhisperHook::from_env();
     if args.whisper {
         if whisper.armed() {
-            log::info!(
-                "whisper.cpp hook armed at {} — transcripts go through the command grammar only",
-                whisper.bin.as_ref().unwrap().display()
-            );
+            log::info!("whisper hook armed — grammar-only commands");
         } else {
-            log::warn!(
-                "whisper.cpp hook requested but no binary found. Set ZAPPE_WHISPER_BIN. Use / or --say for the same grammar."
-            );
+            log::warn!("whisper requested but ZAPPE_WHISPER_BIN not set");
         }
     }
+
+    let chrome_opts = ChromeOpts {
+        cdp_attach: args.cdp.clone(),
+        initial_url: args.url.clone(),
+        service: args.service,
+    };
+    ensure_chrome_binary(&chrome_opts)?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let _enter = rt.enter();
 
-    let initial_url = args.url.or_else(|| {
-        if args.chrome {
-            Some(args.service.home_url().to_string())
-        } else {
-            None
-        }
-    });
-
-    let chrome = ChromeHandle::start(
-        rt.handle().clone(),
-        ChromeOpts {
-            enabled: args.chrome || args.cdp.is_some(),
-            cdp: args.cdp,
-            initial_url,
-            service: args.service,
-        },
-    );
+    let mut chrome = ChromeHandle::start(rt.handle().clone(), chrome_opts);
+    chrome.wait_for_ready(Duration::from_secs(45))?;
 
     let ota_config = OtaConfig::resolve(args.ota_channels.clone());
     let ota_channels = ota_config
         .as_ref()
         .and_then(|cfg| parse_channels_conf(&cfg.channels_conf).ok())
         .unwrap_or_default();
-    if let Some(cfg) = &ota_config {
-        if ota_channels.is_empty() {
-            log::warn!(
-                "OTA: no channels in {}",
-                cfg.channels_conf.display()
-            );
-        }
-    }
     let ota = OtaHandle::start(ota_config);
 
     let mut guide = Guide::new(Catalog::with_ota(&ota_channels));
-    guide.chrome_line = if chrome.enabled {
-        "CHROME: attaching…".into()
-    } else {
-        "CHROME: off".into()
-    };
+    guide.chrome_line = "Chrome · ready".into();
     guide.ota_line = if ota.enabled {
-        if ota_channels.is_empty() {
-            format!("OTA: 0 ch")
-        } else {
-            format!("OTA: {} ch", ota_channels.len())
-        }
+        format!("OTA · {} channels", ota_channels.len())
     } else {
-        "OTA: off".into()
+        "OTA · off".into()
     };
 
     let pending = {
@@ -575,7 +558,6 @@ fn main() -> Result<()> {
             let _ = tx.send(say);
         }
         if args.cmd_stdin {
-            log::info!("reading commands from stdin");
             std::thread::Builder::new()
                 .name("zappe-cmd-stdin".into())
                 .spawn(move || {

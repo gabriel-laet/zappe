@@ -12,6 +12,9 @@ use crate::skills::Service;
 /// URL prefix for OTA tiles (`ota://` + channel name matches `channels.conf` `[Name]`).
 pub const OTA_URL_PREFIX: &str = "ota://";
 
+/// Opens the in-HUD accounts / login screen (not a web URL).
+pub const ACCOUNTS_URL: &str = "zappe://accounts";
+
 #[derive(Clone, Debug)]
 pub struct Tile {
     pub title: String,
@@ -39,6 +42,11 @@ impl Catalog {
                 Row {
                     label: "CONTINUE".into(),
                     tiles: vec![
+                        Tile {
+                            title: "Accounts".into(),
+                            service: Service::Netflix,
+                            url: ACCOUNTS_URL.into(),
+                        },
                         tile("The Night Agent", Service::Netflix),
                         tile("Reacher", Service::Prime),
                         tile("Andor", Service::Disney),
@@ -190,6 +198,7 @@ impl MetadataSource for StubMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+use crate::accounts::is_accounts_url;
 
     #[test]
     fn placeholder_has_guide_rows() {
@@ -207,7 +216,8 @@ mod tests {
             ]
         );
         assert!(catalog.tile(0, 0).is_some());
-        assert!(catalog.tile(0, 0).unwrap().url.starts_with("https://"));
+        assert!(is_accounts_url(catalog.tile(0, 0).unwrap().url.as_str()));
+        assert!(catalog.tile(0, 1).unwrap().url.starts_with("https://"));
         let yt = catalog
             .rows
             .iter()

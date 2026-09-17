@@ -1,6 +1,4 @@
-//! Native HUD: custom WGSL CRT pass + a tiny immediate-mode tile grid.
-//!
-//! No egui, no webview. Shaders stay ours.
+//! Native living-room HUD: flat wgpu tiles + bitmap labels (no webview, no CRT).
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,9 +8,11 @@ use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
+use crate::accounts;
 use crate::catalog::Catalog;
+use crate::skills::Service;
+use crate::theme::Theme;
 
-const CRT_SHADER: &str = include_str!("shaders/crt.wgsl");
 const QUAD_SHADER: &str = include_str!("shaders/quad.wgsl");
 
 const FONT_COLS: u32 = 16;
@@ -21,17 +21,10 @@ const GLYPH: u32 = 8;
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct CrtUniforms {
+struct QuadUniforms {
     resolution: [f32; 2],
     time: f32,
     _pad: f32,
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct QuadUniforms {
-    resolution: [f32; 2],
-    _pad: [f32; 2],
 }
 
 #[repr(C)]
@@ -54,9 +47,6 @@ pub struct Gpu {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    crt_pipeline: wgpu::RenderPipeline,
-    crt_bind: wgpu::BindGroup,
-    crt_uniform: wgpu::Buffer,
     quad_pipeline: wgpu::RenderPipeline,
     quad_bind: wgpu::BindGroup,
     quad_uniform: wgpu::Buffer,
@@ -66,7 +56,15 @@ pub struct Gpu {
     instance_cap: u32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HudScreen {
+    Guide,
+    Accounts,
+}
+
 pub struct Guide {
+    pub screen: HudScreen,
+    pub account_idx: usize,
     pub catalog: Catalog,
     pub row: usize,
     pub col: usize,
@@ -74,22 +72,58 @@ pub struct Guide {
     pub chrome_line: String,
     pub ota_line: String,
     pub hidden: bool,
-    /// On-screen command bar. Same grammar as stdin / whisper.
     pub command: Option<String>,
 }
 
 impl Guide {
     pub fn new(catalog: Catalog) -> Self {
+        let screen = if accounts::needs_onboarding() {
+            HudScreen::Accounts
+        } else {
+            HudScreen::Guide
+        };
         Self {
+            screen,
+            account_idx: 0,
             catalog,
             row: 0,
             col: 0,
-            status: "arrows move  enter zap  / cmd  space play-pause  esc back  home root".into(),
-            chrome_line: "CHROME: off".into(),
-            ota_line: "OTA: off".into(),
+            status: "D-pad move · OK select · Back · Home guide · Play/Pause".into(),
+            chrome_line: "Chrome · starting…".into(),
+            ota_line: "OTA · off".into(),
             hidden: false,
             command: None,
         }
+    }
+
+    pub fn open_accounts(&mut self) {
+        self.screen = HudScreen::Accounts;
+        self.account_idx = 0;
+        self.status = accounts::ONBOARDING_HEADLINE.into();
+    }
+
+    pub fn close_accounts(&mut self) {
+        self.screen = HudScreen::Guide;
+        self.go_home();
+    }
+
+    pub fn move_accounts(&mut self, dcol: isize) {
+        let n = accounts::accounts_tile_count() as isize;
+        self.account_idx = ((self.account_idx as isize + dcol).rem_euclid(n)) as usize;
+    }
+
+    pub fn focused_account(&self) -> Option<(usize, Service)> {
+        if self.screen != HudScreen::Accounts {
+            return None;
+        }
+        if self.account_idx >= accounts::ACCOUNTS_DONE_INDEX {
+            return None;
+        }
+        accounts::login_service(self.account_idx).map(|s| (self.account_idx, s))
+    }
+
+    pub fn is_accounts_done(&self) -> bool {
+        self.screen == HudScreen::Accounts && self.account_idx == accounts::ACCOUNTS_DONE_INDEX
     }
 
     pub fn move_by(&mut self, drow: isize, dcol: isize) {
@@ -107,6 +141,7 @@ impl Guide {
     }
 
     pub fn go_home(&mut self) {
+        self.screen = HudScreen::Guide;
         self.row = 0;
         self.col = 0;
         self.command = None;
@@ -199,72 +234,6 @@ impl Gpu {
         };
         surface.configure(&device, &config);
 
-        let crt_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("crt-uniform"),
-            contents: bytemuck::bytes_of(&CrtUniforms {
-                resolution: [config.width as f32, config.height as f32],
-                time: 0.0,
-                _pad: 0.0,
-            }),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let crt_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("crt-bgl"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let crt_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("crt-bg"),
-            layout: &crt_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: crt_uniform.as_entire_binding(),
-            }],
-        });
-        let crt_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("crt"),
-            source: wgpu::ShaderSource::Wgsl(CRT_SHADER.into()),
-        });
-        let crt_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("crt-pipe"),
-            layout: Some(
-                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("crt-pl"),
-                    bind_group_layouts: &[Some(&crt_layout)],
-                    immediate_size: 0,
-                }),
-            ),
-            vertex: wgpu::VertexState {
-                module: &crt_shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &crt_shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState::default(),
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-
         let vertices = [
             Vertex {
                 pos: [0.0, 0.0],
@@ -346,7 +315,8 @@ impl Gpu {
             label: Some("quad-uniform"),
             contents: bytemuck::bytes_of(&QuadUniforms {
                 resolution: [config.width as f32, config.height as f32],
-                _pad: [0.0; 2],
+                time: 0.0,
+                _pad: 0.0,
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
@@ -455,9 +425,6 @@ impl Gpu {
             device,
             queue,
             config,
-            crt_pipeline,
-            crt_bind,
-            crt_uniform,
             quad_pipeline,
             quad_bind,
             quad_uniform,
@@ -494,25 +461,18 @@ impl Gpu {
             .create_view(&wgpu::TextureViewDescriptor::default());
 
         let res = [self.config.width as f32, self.config.height as f32];
-        self.queue.write_buffer(
-            &self.crt_uniform,
-            0,
-            bytemuck::bytes_of(&CrtUniforms {
-                resolution: res,
-                time: started.elapsed().as_secs_f32(),
-                _pad: 0.0,
-            }),
-        );
+        let time = started.elapsed().as_secs_f32();
         self.queue.write_buffer(
             &self.quad_uniform,
             0,
             bytemuck::bytes_of(&QuadUniforms {
                 resolution: res,
-                _pad: [0.0; 2],
+                time,
+                _pad: 0.0,
             }),
         );
 
-        let instances = layout_guide(guide, res);
+        let instances = layout_ui(guide, res);
         let count = instances.len().min(self.instance_cap as usize) as u32;
         if count > 0 {
             self.queue.write_buffer(
@@ -535,9 +495,9 @@ impl Gpu {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.01,
-                            g: 0.03,
-                            b: 0.03,
+                            r: Theme::BG[0] as f64,
+                            g: Theme::BG[1] as f64,
+                            b: Theme::BG[2] as f64,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -549,10 +509,6 @@ impl Gpu {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.crt_pipeline);
-            pass.set_bind_group(0, &self.crt_bind, &[]);
-            pass.draw(0..3, 0..1);
-
             if count > 0 {
                 pass.set_pipeline(&self.quad_pipeline);
                 pass.set_bind_group(0, &self.quad_bind, &[]);
@@ -568,73 +524,207 @@ impl Gpu {
     }
 }
 
-fn layout_guide(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
+fn layout_ui(guide: &Guide, res: [f32; 2]) -> Vec<Instance> {
     let mut out = Vec::new();
-    let amber = [0.95, 0.72, 0.28, 1.0];
-    let dim = [0.55, 0.78, 0.62, 0.9];
-    let tile_idle = [0.04, 0.12, 0.11, 0.88];
-    let tile_focus = [0.08, 0.28, 0.20, 0.95];
+    push_header(&mut out, guide, res);
 
-    push_text(&mut out, 36.0, 28.0, 4.0, "ZAPPE", amber);
-    push_text(&mut out, res[0] - 420.0, 32.0, 2.0, &guide.chrome_line, dim);
-    push_text(&mut out, res[0] - 420.0, 52.0, 2.0, &guide.ota_line, dim);
-    if let Some(cmd) = &guide.command {
-        let bar_y = res[1] - 78.0;
-        out.push(Instance {
-            rect: [24.0, bar_y - 8.0, res[0] - 48.0, 36.0],
-            color: [0.02, 0.08, 0.07, 0.92],
-            extra: [0.0, 6.0, 0.0, 0.0],
-        });
-        let prompt = format!("> {cmd}_");
-        push_text(&mut out, 36.0, bar_y, 2.0, &prompt, amber);
-        push_text(&mut out, 36.0, res[1] - 36.0, 2.0, &guide.status, dim);
+    if guide.command.is_some() {
+        push_command_bar(&mut out, guide, res);
     } else {
-        push_text(&mut out, 36.0, res[1] - 42.0, 2.0, &guide.status, dim);
+        push_text(
+            &mut out,
+            48.0,
+            res[1] - 48.0,
+            2.2,
+            &guide.status,
+            Theme::TEXT_MUTED,
+        );
     }
 
-    let mut y = 80.0;
+    match guide.screen {
+        HudScreen::Guide => layout_guide_rows(&mut out, guide),
+        HudScreen::Accounts => layout_accounts(&mut out, guide, res),
+    }
+    out
+}
+
+fn push_header(out: &mut Vec<Instance>, guide: &Guide, res: [f32; 2]) {
+    out.push(Instance {
+        rect: [40.0, 36.0, 6.0, 44.0],
+        color: Theme::ACCENT_WARM,
+        extra: [0.0, 4.0, 0.0, 0.0],
+    });
+    push_text(out, 56.0, 40.0, 3.6, "Zappe", Theme::TEXT);
+    push_text(
+        out,
+        56.0,
+        78.0,
+        2.0,
+        "living-room launcher",
+        Theme::TEXT_MUTED,
+    );
+    push_text(
+        out,
+        res[0] - 380.0,
+        44.0,
+        2.0,
+        &guide.chrome_line,
+        Theme::TEXT_MUTED,
+    );
+    push_text(
+        out,
+        res[0] - 380.0,
+        68.0,
+        2.0,
+        &guide.ota_line,
+        Theme::TEXT_MUTED,
+    );
+}
+
+fn push_command_bar(out: &mut Vec<Instance>, guide: &Guide, res: [f32; 2]) {
+    let bar_y = res[1] - 88.0;
+    out.push(Instance {
+        rect: [32.0, bar_y - 10.0, res[0] - 64.0, 44.0],
+        color: Theme::BAR,
+        extra: [0.0, 8.0, 0.0, 0.0],
+    });
+    if let Some(cmd) = &guide.command {
+        let prompt = format!("> {cmd}_");
+        push_text(out, 48.0, bar_y, 2.4, &prompt, Theme::ACCENT);
+    }
+}
+
+fn layout_accounts(out: &mut Vec<Instance>, guide: &Guide, res: [f32; 2]) {
+    push_text(
+        out,
+        48.0,
+        130.0,
+        2.8,
+        "ACCOUNTS",
+        Theme::ROW_LABEL,
+    );
+    push_text(
+        out,
+        48.0,
+        168.0,
+        2.2,
+        accounts::ONBOARDING_HEADLINE,
+        Theme::TEXT,
+    );
+    push_text(
+        out,
+        48.0,
+        200.0,
+        2.0,
+        accounts::ONBOARDING_BODY,
+        Theme::TEXT_MUTED,
+    );
+    push_text(
+        out,
+        48.0,
+        232.0,
+        1.8,
+        "Tip: install 1Password extension in this Chrome profile.",
+        Theme::TEXT_MUTED,
+    );
+
+    let mut x = 48.0;
+    let y = 280.0;
+    let w = 220.0;
+    let h = 100.0;
+    let gap = 20.0;
+    for idx in 0..accounts::accounts_tile_count() {
+        let focused = guide.account_idx == idx;
+        if focused {
+            out.push(Instance {
+                rect: [x - 10.0, y - 10.0, w + 20.0, h + 20.0],
+                color: Theme::FOCUS_RING,
+                extra: [2.0, 12.0, 10.0, 0.0],
+            });
+        }
+        out.push(Instance {
+            rect: [x, y, w, h],
+            color: if focused {
+                Theme::SURFACE_FOCUS
+            } else {
+                Theme::SURFACE
+            },
+            extra: [0.0, 10.0, 0.0, 0.0],
+        });
+        let label = accounts::accounts_label(idx);
+        let service = accounts::login_service(idx);
+        let sub = service.map(|s| s.label()).unwrap_or("GUIDE");
+        push_text(
+            out,
+            x + 16.0,
+            y + 28.0,
+            2.0,
+            sub,
+            if focused {
+                Theme::ACCENT
+            } else {
+                Theme::TEXT_MUTED
+            },
+        );
+        push_text(out, x + 16.0, y + 58.0, 2.2, label, Theme::TEXT);
+        x += w + gap;
+        if x + w > res[0] - 48.0 {
+            x = 48.0;
+            // single row layout for TV — wrap if narrow
+        }
+    }
+}
+
+fn layout_guide_rows(out: &mut Vec<Instance>, guide: &Guide) {
+    let mut y = 120.0;
     for (ri, row) in guide.catalog.rows.iter().enumerate() {
-        push_text(&mut out, 40.0, y, 2.5, &row.label, [0.35, 0.85, 0.55, 1.0]);
-        y += 28.0;
-        let mut x = 40.0;
+        push_text(out, 48.0, y, 2.4, &row.label, Theme::ROW_LABEL);
+        y += 36.0;
+        let mut x = 48.0;
         for (ci, tile) in row.tiles.iter().enumerate() {
             let focused = ri == guide.row && ci == guide.col;
-            let w = 220.0;
-            let h = 72.0;
+            let w = 260.0;
+            let h = 96.0;
             if focused {
                 out.push(Instance {
-                    rect: [x - 14.0, y - 14.0, w + 28.0, h + 28.0],
-                    color: [1.0, 0.86, 0.25, 1.0],
-                    extra: [2.0, 16.0, 12.0, 0.0],
+                    rect: [x - 10.0, y - 10.0, w + 20.0, h + 20.0],
+                    color: Theme::FOCUS_RING,
+                    extra: [2.0, 12.0, 10.0, 0.0],
                 });
             }
             out.push(Instance {
                 rect: [x, y, w, h],
-                color: if focused { tile_focus } else { tile_idle },
-                extra: [0.0, 10.0, if focused { 1.0 } else { 0.0 }, 0.0],
+                color: if focused {
+                    Theme::SURFACE_FOCUS
+                } else {
+                    Theme::SURFACE
+                },
+                extra: [0.0, 10.0, 0.0, 0.0],
             });
-            let label_color = if focused { amber } else { dim };
             push_text(
-                &mut out,
-                x + 14.0,
-                y + 22.0,
+                out,
+                x + 18.0,
+                y + 26.0,
                 2.0,
                 tile.service.label(),
-                label_color,
+                if focused {
+                    Theme::ACCENT
+                } else {
+                    Theme::TEXT_MUTED
+                },
             );
             push_text(
-                &mut out,
-                x + 14.0,
-                y + 48.0,
-                2.0,
-                &tile.title.to_ascii_uppercase(),
-                [0.85, 0.92, 0.86, 1.0],
+                out,
+                x + 18.0,
+                y + 56.0,
+                2.2,
+                &tile.title,
+                Theme::TEXT,
             );
-            x += w + 16.0;
+            x += w + 20.0;
         }
-        y += 96.0;
+        y += 120.0;
     }
-    out
 }
 
 fn push_text(out: &mut Vec<Instance>, mut x: f32, y: f32, scale: f32, text: &str, color: [f32; 4]) {
