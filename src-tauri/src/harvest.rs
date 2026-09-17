@@ -9,7 +9,7 @@ use anyhow::Result;
 use serde::Serialize;
 
 use crate::a11y::{self, A11yNode};
-use crate::catalog::{CatalogShelf, CatalogStore, ShelfStatus, now_secs};
+use crate::catalog::{now_secs, CatalogShelf, CatalogStore, ShelfStatus};
 use crate::nest::{NestManager, NestMode};
 use crate::playback::PlaybackSurface;
 use crate::skill::{self, ExtractError, Skill};
@@ -65,9 +65,8 @@ pub async fn run_harvest(
 
     let outcome = match harvest_skill(nest, playback, &skill, &req).await {
         Ok(rows) if rows.is_empty() => {
-            let message = String::from(
-                "harvest returned no titles (signed-in Continue Watching empty?)",
-            );
+            let message =
+                String::from("harvest returned no titles (signed-in Continue Watching empty?)");
             log::warn!("{}: {message}", skill.id);
             write_shelf(
                 catalog,
@@ -102,7 +101,13 @@ pub async fn run_harvest(
             let (status, teach_now) = classify_fail(&skill, &err);
             let message = err.to_string();
             log::warn!("{} failed: {message}", skill.id);
-            write_shelf(catalog, &skill, status.clone(), Some(message.clone()), Vec::new());
+            write_shelf(
+                catalog,
+                &skill,
+                status.clone(),
+                Some(message.clone()),
+                Vec::new(),
+            );
             if teach_now {
                 teach.begin(&skill.id, &message);
             }
@@ -225,7 +230,12 @@ fn write_shelf(
     }
 }
 
-fn fail_outcome(skill_id: &str, status: ShelfStatus, message: String, teach: bool) -> HarvestOutcome {
+fn fail_outcome(
+    skill_id: &str,
+    status: ShelfStatus,
+    message: String,
+    teach: bool,
+) -> HarvestOutcome {
     HarvestOutcome {
         skill_id: skill_id.to_string(),
         status,

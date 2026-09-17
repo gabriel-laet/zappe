@@ -175,9 +175,16 @@ fn apply_mode(mode: NestMode) {
 }
 
 fn spawn_nest(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Result<Child> {
-    let plan = NestLaunch::new(chrome.to_path_buf(), profile.to_path_buf(), Some(url.to_string()), mode);
+    let plan = NestLaunch::new(
+        chrome.to_path_buf(),
+        profile.to_path_buf(),
+        Some(url.to_string()),
+        mode,
+    );
     if !plan.has_no_cdp_flags() {
-        return Err(anyhow!("refusing to launch Chrome with automation/CDP flags"));
+        return Err(anyhow!(
+            "refusing to launch Chrome with automation/CDP flags"
+        ));
     }
     let argv = plan.argv();
     log::info!("starting nest: {}", argv.join(" "));
@@ -191,13 +198,16 @@ fn spawn_nest(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Resul
         .env("ACCESSIBILITY_ENABLED", "1")
         .env("GTK_A11Y", "atspi");
 
-    cmd.spawn().with_context(|| format!("spawn nest {}", argv[0]))
+    cmd.spawn()
+        .with_context(|| format!("spawn nest {}", argv[0]))
 }
 
 fn navigate_existing(chrome: &Path, profile: &Path, url: &str) -> Result<()> {
     let args = chrome_args(profile, Some(url));
     if !has_no_cdp_flags(&args) {
-        return Err(anyhow!("refusing to launch Chrome with automation/CDP flags"));
+        return Err(anyhow!(
+            "refusing to launch Chrome with automation/CDP flags"
+        ));
     }
     let status = std::process::Command::new(chrome)
         .args(&args)
@@ -387,7 +397,10 @@ fn send_key_best_effort(key: &str) {
     };
     for (bin, args) in [
         ("wtype", vec![mapped.to_string()]),
-        ("ydotool", vec!["key".into(), format!("{mapped}:1"), format!("{mapped}:0")]),
+        (
+            "ydotool",
+            vec!["key".into(), format!("{mapped}:1"), format!("{mapped}:0")],
+        ),
         ("xdotool", vec!["key".into(), mapped.to_string()]),
     ] {
         if which(bin).is_some() {
@@ -402,7 +415,10 @@ fn send_key_best_effort(key: &str) {
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
-    let output = std::process::Command::new("which").arg(name).output().ok()?;
+    let output = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -434,7 +450,10 @@ mod tests {
 
     #[test]
     fn chrome_args_never_include_cdp_or_automation() {
-        let args = chrome_args(Path::new("/tmp/zappe/chrome-profile"), Some("https://www.netflix.com/browse"));
+        let args = chrome_args(
+            Path::new("/tmp/zappe/chrome-profile"),
+            Some("https://www.netflix.com/browse"),
+        );
         assert!(has_no_cdp_flags(&args), "{args:?}");
         assert!(args.iter().any(|a| a.contains("user-data-dir=")));
         assert!(args.iter().any(|a| a == "--force-renderer-accessibility"));

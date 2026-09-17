@@ -147,10 +147,7 @@ pub fn nudge_guide_fullscreen(pid: Option<u32>) {
 }
 
 fn pgrep_newest(name: &str) -> Option<u32> {
-    let output = Command::new("pgrep")
-        .args(["-n", name])
-        .output()
-        .ok()?;
+    let output = Command::new("pgrep").args(["-n", name]).output().ok()?;
     if !output.status.success() {
         return None;
     }

@@ -15,8 +15,7 @@ use crate::paths::skills_override_dir;
 
 pub const NETFLIX_CONTINUE_WATCHING_V1: &str = "netflix.continue_watching.v1";
 
-const BUNDLED_NETFLIX_CW: &str =
-    include_str!("../../skills/netflix.continue_watching.v1.yaml");
+const BUNDLED_NETFLIX_CW: &str = include_str!("../../skills/netflix.continue_watching.v1.yaml");
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -152,11 +151,9 @@ pub enum ExtractError {
 impl std::fmt::Display for ExtractError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AnchorMissing { tried } => write!(
-                f,
-                "skill anchors not found (stale): {}",
-                tried.join(" | ")
-            ),
+            Self::AnchorMissing { tried } => {
+                write!(f, "skill anchors not found (stale): {}", tried.join(" | "))
+            }
             Self::NoRows { anchor } => {
                 write!(f, "anchor '{anchor}' found but no title rows extracted")
             }
@@ -176,8 +173,8 @@ pub fn parse_skill(text: &str) -> Result<Skill> {
 }
 
 pub fn load_skill_file(path: &Path) -> Result<Skill> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("read skill {}", path.display()))?;
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("read skill {}", path.display()))?;
     parse_skill(&text)
 }
 
@@ -226,11 +223,7 @@ pub fn load_skill(id: &str) -> Result<Skill> {
 }
 
 pub fn extract_rows(tree: &A11yNode, skill: &Skill) -> Result<Vec<CatalogRow>, ExtractError> {
-    let tried: Vec<String> = skill
-        .anchors
-        .iter()
-        .flat_map(|a| a.names.clone())
-        .collect();
+    let tried: Vec<String> = skill.anchors.iter().flat_map(|a| a.names.clone()).collect();
     let located = find_anchor(tree, &skill.anchors).ok_or(ExtractError::AnchorMissing { tried })?;
     let items = collect_items(tree, located, skill);
     if items.is_empty() {
@@ -245,15 +238,19 @@ fn find_anchor<'a>(tree: &'a A11yNode, anchors: &[SkillAnchor]) -> Option<&'a A1
     if anchors.is_empty() {
         return None;
     }
-    tree.walk().find(|node| anchors.iter().any(|a| anchor_matches(node, a)))
+    tree.walk()
+        .find(|node| anchors.iter().any(|a| anchor_matches(node, a)))
 }
 
 fn anchor_matches(node: &A11yNode, anchor: &SkillAnchor) -> bool {
     if !anchor.roles.is_empty()
-        && !anchor
-            .roles
-            .iter()
-            .any(|r| eq_ci(&node.role, r) || node.role.to_ascii_lowercase().contains(&r.to_ascii_lowercase()))
+        && !anchor.roles.iter().any(|r| {
+            eq_ci(&node.role, r)
+                || node
+                    .role
+                    .to_ascii_lowercase()
+                    .contains(&r.to_ascii_lowercase())
+        })
     {
         return false;
     }
@@ -319,7 +316,11 @@ fn is_item(node: &A11yNode, skill: &Skill) -> bool {
     }
     if !skill.extract.item_roles.is_empty() {
         let role_ok = skill.extract.item_roles.iter().any(|r| {
-            eq_ci(&node.role, r) || node.role.to_ascii_lowercase().contains(&r.to_ascii_lowercase())
+            eq_ci(&node.role, r)
+                || node
+                    .role
+                    .to_ascii_lowercase()
+                    .contains(&r.to_ascii_lowercase())
         });
         if !role_ok {
             return false;
@@ -338,7 +339,8 @@ fn artwork_hint(node: &A11yNode) -> Option<String> {
 
 fn looks_like_art(s: &str) -> bool {
     let l = s.to_ascii_lowercase();
-    l.starts_with("http") && (l.contains(".jpg") || l.contains(".png") || l.contains(".webp") || l.contains("art"))
+    l.starts_with("http")
+        && (l.contains(".jpg") || l.contains(".png") || l.contains(".webp") || l.contains("art"))
 }
 
 fn collect_descendants(node: &A11yNode) -> Vec<&A11yNode> {

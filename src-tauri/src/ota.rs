@@ -45,9 +45,7 @@ fn default_channel_paths() -> Vec<PathBuf> {
 }
 
 pub fn ota_available() -> bool {
-    channel_config_paths()
-        .iter()
-        .any(|p| p.exists())
+    channel_config_paths().iter().any(|p| p.exists())
 }
 
 pub fn list_channels() -> Result<Vec<OtaChannel>> {
@@ -56,8 +54,7 @@ pub fn list_channels() -> Result<Vec<OtaChannel>> {
         if !path.exists() {
             continue;
         }
-        let text = fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         for name in filter_and_sort_channels(parse_channel_names(&text)) {
             out.push(OtaChannel {
                 name,
@@ -92,24 +89,14 @@ fn parse_channel_names(text: &str) -> Vec<String> {
 
 fn is_1seg(name: &str) -> bool {
     let l = name.to_lowercase();
-    l.contains("1seg")
-        || l.contains("1-seg")
-        || l.contains("one seg")
-        || l.contains("oneseg")
+    l.contains("1seg") || l.contains("1-seg") || l.contains("one seg") || l.contains("oneseg")
 }
 
 /// Normalize for duplicate detection (strip quality suffixes).
 fn channel_base_key(name: &str) -> String {
     let mut s = name.to_lowercase();
     for token in [
-        " hdtv",
-        " hd",
-        " fhd",
-        " sd",
-        " uhd",
-        " 4k",
-        " (hd)",
-        " [hd]",
+        " hdtv", " hd", " fhd", " sd", " uhd", " 4k", " (hd)", " [hd]",
     ] {
         if let Some(idx) = s.rfind(token) {
             if idx + token.len() == s.len() {
@@ -136,10 +123,7 @@ fn hd_score(name: &str) -> i32 {
 
 /// Drop obvious 1Seg rows; prefer HD when multiple names map to the same service.
 pub fn filter_and_sort_channels(names: Vec<String>) -> Vec<String> {
-    let mut filtered: Vec<String> = names
-        .into_iter()
-        .filter(|n| !is_1seg(n))
-        .collect();
+    let mut filtered: Vec<String> = names.into_iter().filter(|n| !is_1seg(n)).collect();
 
     filtered.sort_by(|a, b| {
         let sa = hd_score(a);

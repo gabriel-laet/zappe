@@ -17,10 +17,7 @@ fn main() {
         match args[i].as_str() {
             "--skill" => {
                 i += 1;
-                req.skill_id = args
-                    .get(i)
-                    .cloned()
-                    .expect("--skill needs an id");
+                req.skill_id = args.get(i).cloned().expect("--skill needs an id");
             }
             "--fixture" => {
                 i += 1;

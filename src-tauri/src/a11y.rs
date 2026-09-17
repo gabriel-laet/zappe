@@ -35,9 +35,7 @@ pub struct A11yNode {
 
 impl A11yNode {
     pub fn walk<'a>(&'a self) -> A11yWalk<'a> {
-        A11yWalk {
-            stack: vec![self],
-        }
+        A11yWalk { stack: vec![self] }
     }
 }
 
@@ -128,9 +126,11 @@ async fn dump_from_connection(conn: &Connection) -> Result<A11yNode> {
         }
     }
 
-    chrome.or_else(|| others.into_iter().find(looks_like_chrome)).ok_or_else(|| {
-        anyhow!("no Chrome/Chromium application on the AT-SPI bus (is the nest running?)")
-    })
+    chrome
+        .or_else(|| others.into_iter().find(looks_like_chrome))
+        .ok_or_else(|| {
+            anyhow!("no Chrome/Chromium application on the AT-SPI bus (is the nest running?)")
+        })
 }
 
 fn looks_like_chrome(node: &A11yNode) -> bool {
@@ -143,13 +143,11 @@ async fn connect_a11y_bus() -> Result<Connection> {
         .await
         .context("connect to D-Bus session bus")?;
     match a11y_bus_address(&session).await {
-        Ok(addr) if !addr.is_empty() => {
-            zbus::connection::Builder::address(addr.as_str())
-                .map_err(|e| anyhow!("invalid AT-SPI bus address {addr}: {e}"))?
-                .build()
-                .await
-                .context("connect to AT-SPI bus")
-        }
+        Ok(addr) if !addr.is_empty() => zbus::connection::Builder::address(addr.as_str())
+            .map_err(|e| anyhow!("invalid AT-SPI bus address {addr}: {e}"))?
+            .build()
+            .await
+            .context("connect to AT-SPI bus"),
         Ok(_) => Ok(session),
         Err(err) => {
             log::warn!("org.a11y.Bus.GetAddress failed ({err}); using session bus");
@@ -169,7 +167,10 @@ async fn a11y_bus_address(session: &Connection) -> Result<String> {
         )
         .await
         .context("org.a11y.Bus.GetAddress")?;
-    let addr: String = reply.body().deserialize().context("decode a11y bus address")?;
+    let addr: String = reply
+        .body()
+        .deserialize()
+        .context("decode a11y bus address")?;
     Ok(addr)
 }
 
@@ -263,7 +264,13 @@ async fn node_url(
     }
 
     if let Ok(reply) = conn
-        .call_method(Some(dest), path, Some("org.a11y.atspi.Hyperlink"), "GetURI", &(0i32))
+        .call_method(
+            Some(dest),
+            path,
+            Some("org.a11y.atspi.Hyperlink"),
+            "GetURI",
+            &(0i32),
+        )
         .await
     {
         if let Ok(uri) = reply.body().deserialize::<String>() {

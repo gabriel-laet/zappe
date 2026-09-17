@@ -110,7 +110,10 @@ mod tests {
         let teach = TeachMode::new();
         let state = teach.begin("netflix.continue_watching.v1", "anchor missing");
         assert!(state.active);
-        assert_eq!(state.skill_id.as_deref(), Some("netflix.continue_watching.v1"));
+        assert_eq!(
+            state.skill_id.as_deref(),
+            Some("netflix.continue_watching.v1")
+        );
         assert!(state.message.unwrap().contains("Teach me"));
     }
 
