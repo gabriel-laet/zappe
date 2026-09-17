@@ -4,6 +4,7 @@ version = "0.2.0"
 description = "Living-room launcher: Tauri guide + gamescope Chrome nest + a11y harvest"
 edition = "2021"
 rust-version = "1.88"
+default-run = "zappe"
 
 [lib]
 name = "zappe_lib"
