@@ -40,13 +40,22 @@ impl Catalog {
             metadata: Box::new(StubMetadata),
             rows: vec![
                 Row {
-                    label: "CONTINUE".into(),
+                    label: "Apps".into(),
                     tiles: vec![
+                        app_tile("Netflix", Service::Netflix),
+                        app_tile("Prime", Service::Prime),
+                        app_tile("Disney+", Service::Disney),
+                        app_tile("YouTube", Service::Youtube),
                         Tile {
-                            title: "Accounts".into(),
+                            title: "Contas".into(),
                             service: Service::Netflix,
                             url: ACCOUNTS_URL.into(),
                         },
+                    ],
+                },
+                Row {
+                    label: "Continue watching".into(),
+                    tiles: vec![
                         tile("The Night Agent", Service::Netflix),
                         tile("Reacher", Service::Prime),
                         tile("Andor", Service::Disney),
@@ -130,6 +139,16 @@ impl Catalog {
                 url: format!("{OTA_URL_PREFIX}{}", ch.name),
             })
             .collect();
+        if let Some(apps) = cat.rows.iter_mut().find(|r| r.label == "Apps") {
+            apps.tiles.insert(
+                4,
+                Tile {
+                    title: "TV ao vivo".into(),
+                    service: Service::Ota,
+                    url: format!("{OTA_URL_PREFIX}{}", channels[0].name),
+                },
+            );
+        }
         let insert_at = cat
             .rows
             .iter()
@@ -138,7 +157,7 @@ impl Catalog {
         cat.rows.insert(
             insert_at,
             Row {
-                label: "OTA TV".into(),
+                label: "Canais abertos".into(),
                 tiles,
             },
         );
@@ -161,6 +180,14 @@ impl Catalog {
     /// Public metadata only. Never scrapes a logged-in streaming site.
     pub fn public_meta(&self, query: &str) -> Option<TitleMeta> {
         self.metadata.lookup(query)
+    }
+}
+
+fn app_tile(title: &str, service: Service) -> Tile {
+    Tile {
+        title: title.into(),
+        service,
+        url: service.home_url().into(),
     }
 }
 
@@ -207,7 +234,8 @@ use crate::accounts::is_accounts_url;
         assert_eq!(
             labels,
             [
-                "CONTINUE",
+                "Apps",
+                "Continue watching",
                 "NETFLIX",
                 "PRIME VIDEO",
                 "DISNEY+",
@@ -215,8 +243,8 @@ use crate::accounts::is_accounts_url;
                 "JELLYFIN",
             ]
         );
-        assert!(catalog.tile(0, 0).is_some());
-        assert!(is_accounts_url(catalog.tile(0, 0).unwrap().url.as_str()));
+        let apps = catalog.rows.iter().find(|r| r.label == "Apps").unwrap();
+        assert!(apps.tiles.iter().any(|t| is_accounts_url(&t.url)));
         assert!(catalog.tile(0, 1).unwrap().url.starts_with("https://"));
         let yt = catalog
             .rows
@@ -245,7 +273,7 @@ use crate::accounts::is_accounts_url;
                 name: "SBT HD".into(),
             },
         ]);
-        let row = cat.rows.iter().find(|r| r.label == "OTA TV").expect("ota");
+        let row = cat.rows.iter().find(|r| r.label == "Canais abertos").expect("ota");
         assert_eq!(row.tiles.len(), 2);
         assert_eq!(row.tiles[0].service, Service::Ota);
         assert_eq!(

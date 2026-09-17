@@ -1,6 +1,7 @@
 //! First-run setup orchestration (browser + optional 1Password).
 
 pub mod browser;
+pub mod choices;
 pub mod onepassword;
 
 use crate::accounts;

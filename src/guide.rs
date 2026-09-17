@@ -15,6 +15,8 @@ pub enum HudScreen {
 pub struct Guide {
     pub screen: HudScreen,
     pub account_idx: usize,
+    /// Horizontal focus index on setup screens (browser / 1Password).
+    pub setup_choice_idx: usize,
     pub catalog: Catalog,
     pub row: usize,
     pub col: usize,
@@ -23,6 +25,8 @@ pub struct Guide {
     pub ota_line: String,
     pub hidden: bool,
     pub command: Option<String>,
+    /// Short user-facing message (errors); not shown as a status strip in the HUD.
+    pub toast: Option<String>,
 }
 
 impl Guide {
@@ -30,14 +34,16 @@ impl Guide {
         Self {
             screen: initial_screen,
             account_idx: 0,
+            setup_choice_idx: 0,
             catalog,
             row: 0,
             col: 0,
-            status: "D-pad · OK · Voltar · Home · Play/Pause".into(),
-            chrome_line: "Chrome · starting…".into(),
-            ota_line: "OTA · off".into(),
+            status: String::new(),
+            chrome_line: String::new(),
+            ota_line: String::new(),
             hidden: false,
             command: None,
+            toast: None,
         }
     }
 
@@ -90,7 +96,12 @@ impl Guide {
         self.row = 0;
         self.col = 0;
         self.command = None;
-        self.status = "home".into();
+        self.status.clear();
+    }
+
+    pub fn set_screen(&mut self, screen: HudScreen) {
+        self.screen = screen;
+        self.setup_choice_idx = 0;
     }
 
     pub fn focused(&self) -> Option<&crate::catalog::Tile> {

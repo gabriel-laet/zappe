@@ -6,10 +6,9 @@ import com.zappe.app
 ApplicationWindow {
     id: root
     width: 1280
-    height: 900
-    // cxx-qt exposes Q_PROPERTY names as snake_case (not camelCase).
+    height: 720
     visible: backend.hud_visible
-    color: "#0e1014"
+    color: "#07080c"
     title: "Zappe"
 
     ZappeBackend {
@@ -17,14 +16,14 @@ ApplicationWindow {
         Component.onCompleted: tick()
     }
 
-    function parseCatalogJson() {
+    function uiModel() {
         const raw = backend.catalog_json
-        if (raw === undefined || raw === null || raw === "")
-            return ({ rows: [], accounts: [] })
+        if (!raw)
+            return ({ setup: { active: false }, rows: [], accounts: [] })
         try {
             return JSON.parse(raw)
         } catch (e) {
-            return ({ rows: [], accounts: [] })
+            return ({ setup: { active: false }, rows: [], accounts: [] })
         }
     }
 
@@ -46,12 +45,11 @@ ApplicationWindow {
         id: remoteInput
         anchors.fill: parent
         focus: true
-
         Component.onCompleted: forceActiveFocus()
 
         Keys.onPressed: function(event) {
             const cmd = backend.command_text || ""
-            if (cmd.length > 0 || commandBar.visible) {
+            if (cmd.length > 0) {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
                     backend.commandCommit()
                     event.accepted = true
@@ -97,186 +95,165 @@ ApplicationWindow {
             event.accepted = true
         }
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 32
-            spacing: 20
-
-        RowLayout {
-            Layout.fillWidth: true
-            Rectangle { Layout.preferredWidth: 6; Layout.preferredHeight: 44; color: "#fa9428" }
-            ColumnLayout {
-                spacing: 4
-                Text {
-                    text: "Zappe"
-                    font.pixelSize: 36
-                    font.weight: Font.DemiBold
-                    color: "#ebeff7"
-                }
-                Text {
-                    text: "launcher da sala"
-                    font.pixelSize: 16
-                    color: "#8c94a6"
-                }
-            }
-            Item { Layout.fillWidth: true }
-            ColumnLayout {
-                spacing: 4
-                Text { text: backend.chrome_line; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
-                Text { text: backend.ota_line; font.pixelSize: 14; color: "#8c94a6"; horizontalAlignment: Text.AlignRight }
-            }
-        }
-
-        Text {
-            Layout.fillWidth: true
-            text: backend.status_message
-            font.pixelSize: 18
-            color: "#8c94a6"
-            wrapMode: Text.WordWrap
-        }
-
+        // —— First-run setup (Apple TV style) ——
         Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            anchors.fill: parent
+            visible: uiModel().setup.active
+            anchors.margins: 72
 
-            ColumnLayout {
+            Column {
                 anchors.centerIn: parent
-                visible: backend.screen === 0
-                spacing: 24
-                width: parent.width * 0.7
+                width: Math.min(parent.width, 920)
+                spacing: 40
 
                 Text {
-                    Layout.fillWidth: true
-                    text: "Passo 1 — Navegador"
-                    font.pixelSize: 28
-                    color: "#ebeff7"
+                    width: parent.width
+                    text: uiModel().setup.title || ""
+                    font.pixelSize: 42
+                    font.weight: Font.DemiBold
+                    color: "#f2f4f8"
+                    horizontalAlignment: Text.AlignHCenter
                 }
                 Text {
-                    Layout.fillWidth: true
-                    text: backend.browser_message
-                    font.pixelSize: 20
-                    color: "#8c94a6"
+                    width: parent.width
+                    text: uiModel().setup.subtitle || ""
+                    font.pixelSize: 22
+                    color: "#9aa3b5"
                     wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                    lineHeight: 1.25
                 }
                 Text {
-                    Layout.fillWidth: true
-                    text: backend.distro_hint
+                    width: parent.width
+                    visible: uiModel().setup.show_install_command === true
+                    text: uiModel().setup.install_command || ""
                     font.pixelSize: 16
-                    color: "#7a9ec7"
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: backend.install_command
-                    font.pixelSize: 18
                     font.family: "monospace"
-                    color: "#61b8fa"
+                    color: "#6b9fd4"
                     wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                    opacity: 0.85
                 }
 
-                RowLayout {
-                    spacing: 16
-                    ActionButton { label: "Tentar instalar"; onClicked: backend.tryInstallBrowser() }
-                    ActionButton { label: "Tentar de novo"; onClicked: backend.retryBrowserDetect() }
-                    ActionButton { label: "Continuar"; primary: true; onClicked: backend.continueChromeSetup() }
-                }
-            }
-
-            ColumnLayout {
-                anchors.centerIn: parent
-                visible: backend.screen === 1
-                spacing: 24
-                width: parent.width * 0.75
-
-                Text {
-                    text: "Passo 2 — 1Password (opcional)"
-                    font.pixelSize: 28
-                    color: "#ebeff7"
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: backend.onepassword_summary
-                    font.pixelSize: 20
-                    color: "#8c94a6"
-                    wrapMode: Text.WordWrap
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: backend.onepassword_app_hint
-                    font.pixelSize: 16
-                    color: "#8c94a6"
-                    wrapMode: Text.WordWrap
-                }
-                RowLayout {
-                    spacing: 16
-                    ActionButton { label: "Abrir extensão"; onClicked: backend.openOnePasswordExtension() }
-                    ActionButton { label: "Pular"; onClicked: backend.skipOnePassword() }
-                    ActionButton { label: "Continuar"; primary: true; onClicked: backend.continueOnePassword() }
-                }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                visible: backend.screen === 2
-                spacing: 16
-
-                Text {
-                    text: "Contas"
-                    font.pixelSize: 26
-                    color: "#7a9ec7"
-                }
-                Text {
-                    Layout.fillWidth: true
-                    text: "Entre uma vez no Chrome do Zappe. 1Password na extensão ajuda."
-                    font.pixelSize: 18
-                    color: "#ebeff7"
-                    wrapMode: Text.WordWrap
-                }
-
-                Flow {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    spacing: 16
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 20
                     Repeater {
-                        model: root.parseCatalogJson().accounts
-                        delegate: Tile {
-                            title: modelData.label
-                            subtitle: "OK abre login"
+                        model: uiModel().setup.choices || []
+                        delegate: FocusCard {
+                            label: modelData.label
+                            primary: modelData.primary
                             focused: modelData.focused
+                            width: 240
+                            height: 72
                         }
                     }
                 }
             }
+        }
+
+        // —— Accounts onboarding ——
+        Item {
+            anchors.fill: parent
+            visible: backend.screen === 2
+            anchors.margins: 56
+
+            Column {
+                anchors.fill: parent
+                spacing: 28
+                Text {
+                    text: "Contas"
+                    font.pixelSize: 34
+                    font.weight: Font.DemiBold
+                    color: "#f2f4f8"
+                }
+                Text {
+                    width: parent.width
+                    text: "Entre uma vez em cada serviço. OK abre o login no Chrome."
+                    font.pixelSize: 20
+                    color: "#9aa3b5"
+                    wrapMode: Text.WordWrap
+                }
+                Flickable {
+                    width: parent.width
+                    height: parent.height - 120
+                    contentWidth: accountsRow.width
+                    clip: true
+                    interactive: false
+                    Row {
+                        id: accountsRow
+                        spacing: 20
+                        Repeater {
+                            model: uiModel().accounts || []
+                            delegate: PosterTile {
+                                title: modelData.label
+                                subtitle: ""
+                                focused: modelData.focused
+                                appStyle: true
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // —— Home / guide shelves ——
+        Item {
+            anchors.fill: parent
+            visible: backend.screen === 3
+            anchors.topMargin: 40
+            anchors.leftMargin: 56
+            anchors.rightMargin: 56
+            anchors.bottomMargin: 32
+
+            Text {
+                id: brand
+                text: "Zappe"
+                font.pixelSize: 22
+                font.weight: Font.Medium
+                color: "#6d7689"
+            }
 
             Flickable {
-                anchors.fill: parent
-                visible: backend.screen === 3
-                contentHeight: guideCol.height
+                anchors.top: brand.bottom
+                anchors.topMargin: 24
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                contentHeight: homeShelves.height
                 clip: true
+                interactive: false
 
                 Column {
-                    id: guideCol
+                    id: homeShelves
                     width: parent.width
-                    spacing: 24
+                    spacing: 36
 
                     Repeater {
-                        model: root.parseCatalogJson().rows
+                        model: uiModel().rows || []
                         delegate: Column {
                             width: parent.width
-                            spacing: 12
+                            spacing: 14
                             Text {
                                 text: modelData.label
-                                font.pixelSize: 22
-                                color: "#7a9ec7"
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                                color: "#8b95a8"
                             }
-                            Flow {
-                                width: parent.width
+                            Row {
                                 spacing: 16
                                 Repeater {
                                     model: modelData.tiles
-                                    delegate: Tile {
+                                    delegate: PosterTile {
                                         title: modelData.title
                                         subtitle: modelData.service
                                         focused: modelData.focused
+                                        appStyle: modelData.service === "NETFLIX"
+                                            || modelData.service === "PRIME"
+                                            || modelData.service === "DISNEY+"
+                                            || modelData.service === "YOUTUBE"
+                                            || modelData.title === "Contas"
+                                            || modelData.title === "TV ao vivo"
                                     }
                                 }
                             }
@@ -286,66 +263,93 @@ ApplicationWindow {
             }
         }
 
+        // Toast (errors only)
         Rectangle {
-            id: commandBar
-            Layout.fillWidth: true
-            Layout.preferredHeight: commandBar.visible ? 52 : 0
-            visible: (backend.command_text || "").length > 0
-            color: "#141820"
-            radius: 8
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 40
+            width: Math.min(parent.width - 80, toastText.implicitWidth + 48)
+            height: toastText.implicitHeight + 28
+            radius: 12
+            color: "#1a1f2a"
+            border.color: "#3d4a63"
+            visible: (backend.toast_message || "").length > 0
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 200 } }
+
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 16
-                text: "> " + (backend.command_text || "") + "_"
-                font.pixelSize: 20
-                font.family: "monospace"
-                color: "#61b8fa"
+                id: toastText
+                anchors.centerIn: parent
+                width: parent.width - 32
+                text: backend.toast_message || ""
+                font.pixelSize: 18
+                color: "#e8ecf4"
+                wrapMode: Text.WordWrap
+                horizontalAlignment: Text.AlignHCenter
             }
         }
-        }
     }
 
-    component ActionButton: Button {
-        id: actionBtn
+    component FocusCard: Rectangle {
+        id: card
         property string label
         property bool primary: false
-        text: label
-        font.pixelSize: 20
-        padding: 16
-        focusPolicy: Qt.NoFocus
-        background: Rectangle {
-            color: actionBtn.primary ? "#61b8fa" : "#1c2029"
-            border.color: actionBtn.primary ? "#61b8fa" : "#3a4254"
-            border.width: 2
-            radius: 10
-        }
-        contentItem: Text {
-            text: actionBtn.text
-            font: actionBtn.font
-            color: actionBtn.primary ? "#0e1014" : "#ebeff7"
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
+        property bool focused: false
+
+        radius: 14
+        color: primary ? (focused ? "#e8f2ff" : "#c5dcf5") : (focused ? "#2a3142" : "#151922")
+        border.width: focused ? 3 : 1
+        border.color: focused ? "#ffffff" : "#2e3648"
+        scale: focused ? 1.06 : 1
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+
+        Text {
+            anchors.centerIn: parent
+            text: card.label
+            font.pixelSize: 20
+            font.weight: card.primary ? Font.DemiBold : Font.Normal
+            color: card.primary ? "#0a0c10" : "#eef1f6"
         }
     }
 
-    component Tile: Rectangle {
-        id: tileRoot
+    component PosterTile: Rectangle {
+        id: tile
         property string title
         property string subtitle
         property bool focused: false
-        width: 260
-        height: 96
-        radius: 10
-        color: tileRoot.focused ? "#262b38" : "#1c1f28"
-        border.width: tileRoot.focused ? 3 : 1
-        border.color: tileRoot.focused ? "#61b8fa" : "#2a3040"
+        property bool appStyle: false
+
+        width: appStyle ? 120 : 200
+        height: appStyle ? 120 : 112
+        radius: appStyle ? 28 : 14
+        color: focused ? "#2c3344" : "#141820"
+        border.width: focused ? 3 : 1
+        border.color: focused ? "#ffffff" : "#252b38"
+        scale: focused ? 1.08 : 1
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+
         Column {
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 8
-            Text { text: tileRoot.subtitle; font.pixelSize: 14; color: tileRoot.focused ? "#61b8fa" : "#8c94a6" }
-            Text { text: tileRoot.title; font.pixelSize: 20; color: "#ebeff7"; elide: Text.ElideRight; width: parent.width }
+            anchors.centerIn: parent
+            width: parent.width - 16
+            spacing: 6
+            Text {
+                width: parent.width
+                text: tile.title
+                font.pixelSize: appStyle ? 15 : 17
+                font.weight: Font.DemiBold
+                color: "#f0f3f9"
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
+            Text {
+                width: parent.width
+                visible: !appStyle && tile.subtitle.length > 0
+                text: tile.subtitle
+                font.pixelSize: 12
+                color: focused ? "#a8c8f0" : "#7a8496"
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
+            }
         }
     }
 }

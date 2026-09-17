@@ -4,6 +4,9 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
+use crate::setup::browser::{detect, try_noninteractive_install, InstallAttempt};
+use crate::setup::choices::{choice_at, choice_count};
+
 use anyhow::Result;
 use tokio::runtime::Runtime;
 
@@ -29,6 +32,7 @@ pub struct AppCore {
     pub rt: Runtime,
     pub hud_visible: bool,
     pub quit_requested: bool,
+    toast_since: Option<Instant>,
 }
 
 impl AppCore {
@@ -51,6 +55,21 @@ impl AppCore {
             rt,
             hud_visible: true,
             quit_requested: false,
+            toast_since: None,
+        }
+    }
+
+    pub fn show_toast(&mut self, msg: impl Into<String>) {
+        self.guide.toast = Some(msg.into());
+        self.toast_since = Some(Instant::now());
+    }
+
+    fn clear_toast_if_stale(&mut self) {
+        if let Some(since) = self.toast_since {
+            if since.elapsed() > Duration::from_secs(5) {
+                self.guide.toast = None;
+                self.toast_since = None;
+            }
         }
     }
 
@@ -61,12 +80,12 @@ impl AppCore {
         ensure_chrome_binary(&self.chrome_opts)?;
         let mut chrome = ChromeHandle::start(self.rt.handle().clone(), self.chrome_opts.clone());
         chrome.wait_for_ready(Duration::from_secs(45))?;
-        self.guide.chrome_line = "Chrome · ready".into();
         self.chrome = Some(chrome);
         Ok(())
     }
 
     pub fn tick(&mut self) {
+        self.clear_toast_if_stale();
         self.drain_text_commands();
         self.apply_chrome_events();
         self.apply_ota_events();
@@ -77,21 +96,17 @@ impl AppCore {
             match ev {
                 OtaEvent::Playing { channel } => {
                     self.ota_playing = true;
-                    self.guide.status = format!("OTA · {channel}");
-                    self.guide.ota_line = format!("OTA · {channel}");
                     self.hud_visible = false;
+                    log::info!("OTA playing {channel}");
                 }
                 OtaEvent::Stopped => {
                     self.ota_playing = false;
-                    self.guide.ota_line = "OTA · ready".into();
                     self.hud_visible = true;
-                    self.guide.status = "OTA parado".into();
                 }
                 OtaEvent::Failed(msg) => {
                     self.ota_playing = false;
-                    self.guide.status = msg.clone();
-                    self.guide.ota_line = "OTA · erro".into();
                     self.hud_visible = true;
+                    self.show_toast(msg.clone());
                     log::warn!("{msg}");
                 }
             }
@@ -103,22 +118,13 @@ impl AppCore {
             for ev in chrome.poll_events() {
                 match ev {
                     ChromeEvent::Ready(msg) => {
-                        self.guide.chrome_line = format!("Chrome · ready ({msg})");
                         log::info!("{msg}");
                     }
-                    ChromeEvent::Opened(url) => {
-                        self.guide.status = format!("Playing · {url}");
-                    }
-                    ChromeEvent::LoginRaised(service) => {
-                        self.guide.status = format!(
-                            "Entre em {} na janela Chrome · Voltar quando terminar",
-                            service.label()
-                        );
-                    }
+                    ChromeEvent::Opened(_) => {}
+                    ChromeEvent::LoginRaised(_) => {}
                     ChromeEvent::HiddenHud => self.hud_visible = false,
                     ChromeEvent::Failed(msg) => {
-                        self.guide.chrome_line = "Chrome · error".into();
-                        self.guide.status = msg;
+                        self.show_toast(msg);
                         self.hud_visible = true;
                     }
                 }
@@ -203,7 +209,6 @@ impl AppCore {
     }
 
     fn open_url(&mut self, service: Service, title: &str, url: String) {
-        self.guide.status = format!("Abrindo {title} …");
         self.chrome_send(ChromeCmd::Open {
             url,
             service,
@@ -237,6 +242,29 @@ impl AppCore {
     }
 
     pub fn activate_focus(&mut self) {
+        if matches!(
+            self.guide.screen,
+            HudScreen::SetupChrome | HudScreen::SetupOnePassword
+        ) {
+            let browser = detect();
+            let idx = self.guide.setup_choice_idx;
+            if let Some(choice) = choice_at(self.guide.screen, &browser, idx) {
+                match choice.id {
+                    "continue" if self.guide.screen == HudScreen::SetupChrome => {
+                        if let Err(err) = self.finish_chrome_setup() {
+                            self.show_toast(format!("{err:#}"));
+                        }
+                    }
+                    "continue" => self.continue_onepassword(),
+                    "retry" => self.retry_browser_setup(),
+                    "install" => self.try_install_browser_setup(),
+                    "extension" => self.open_onepassword_extension_page(),
+                    "skip" => self.skip_onepassword(),
+                    _ => {}
+                }
+            }
+            return;
+        }
         if self.guide.screen == HudScreen::Accounts {
             if self.guide.is_accounts_done() {
                 accounts::mark_onboarding_done();
@@ -265,11 +293,9 @@ impl AppCore {
                 return;
             };
             if !self.ota.enabled {
-                self.guide.status =
-                    "OTA não configurado — ZAPPE_OTA_CHANNELS ou ~/tv/channels.conf".into();
+                self.show_toast("TV ao vivo não configurada.");
                 return;
             }
-            self.guide.status = format!("Sintonizando {channel} …");
             self.ota.play(channel);
             return;
         }
@@ -278,6 +304,19 @@ impl AppCore {
     }
 
     pub fn move_focus(&mut self, drow: isize, dcol: isize) {
+        if matches!(
+            self.guide.screen,
+            HudScreen::SetupChrome | HudScreen::SetupOnePassword
+        ) {
+            let browser = detect();
+            let n = choice_count(self.guide.screen, &browser) as isize;
+            if n > 0 {
+                let delta = if dcol != 0 { dcol } else { drow };
+                self.guide.setup_choice_idx =
+                    ((self.guide.setup_choice_idx as isize + delta).rem_euclid(n)) as usize;
+            }
+            return;
+        }
         if self.guide.screen == HudScreen::Accounts {
             let delta = if drow != 0 { drow } else { dcol };
             self.guide.move_accounts(delta);
@@ -287,6 +326,37 @@ impl AppCore {
             self.hud_visible = true;
             self.guide.move_by(drow, dcol);
         }
+    }
+
+    pub fn retry_browser_setup(&mut self) {
+        let browser = detect();
+        if browser.found {
+            self.guide.toast = None;
+            self.toast_since = None;
+        } else {
+            self.show_toast("Navegador não encontrado.");
+        }
+        let n = choice_count(HudScreen::SetupChrome, &browser);
+        if self.guide.setup_choice_idx >= n {
+            self.guide.setup_choice_idx = 0;
+        }
+    }
+
+    pub fn try_install_browser_setup(&mut self) {
+        match try_noninteractive_install() {
+            InstallAttempt::Installed => self.show_toast("Chromium instalado."),
+            InstallAttempt::NeedsPassword { command } => {
+                self.show_toast(format!("No terminal: {command}"));
+            }
+            InstallAttempt::Manual { command, detail } => {
+                self.show_toast(if detail.is_empty() {
+                    format!("Instale: {command}")
+                } else {
+                    detail
+                });
+            }
+        }
+        self.retry_browser_setup();
     }
 
     pub fn open_command_bar(&mut self) {
@@ -311,19 +381,17 @@ impl AppCore {
 
     pub fn finish_chrome_setup(&mut self) -> Result<()> {
         self.start_chrome()?;
-        self.guide.screen = advance_after_chrome_setup();
+        self.guide.set_screen(advance_after_chrome_setup());
         Ok(())
     }
 
     pub fn skip_onepassword(&mut self) {
         mark_skipped();
-        self.guide.status =
-            "1Password ignorado — logins manuais no Chrome.".into();
-        self.guide.screen = advance_after_onepassword();
+        self.guide.set_screen(advance_after_onepassword());
     }
 
     pub fn continue_onepassword(&mut self) {
-        self.guide.screen = advance_after_onepassword();
+        self.guide.set_screen(advance_after_onepassword());
     }
 
     pub fn open_onepassword_extension_page(&mut self) {
@@ -332,7 +400,7 @@ impl AppCore {
             service: Service::Youtube,
             title: "1Password extension".into(),
         });
-        self.guide.status = "Instale a extensão e volte aqui · Continuar".into();
+        self.show_toast("Instale a extensão e volte aqui.");
     }
 
     pub fn command_commit(&mut self) {

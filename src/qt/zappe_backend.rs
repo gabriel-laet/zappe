@@ -9,14 +9,18 @@ use cxx_qt_lib::QString;
 use crate::accounts;
 use crate::app::AppCore;
 use crate::guide::HudScreen;
-use crate::setup::browser::{detect, try_noninteractive_install, InstallAttempt};
+use crate::setup::browser::detect;
+use crate::setup::choices::{
+    chrome_choices, onepassword_choices, setup_subtitle, setup_title,
+};
 use crate::setup::onepassword::{app_install_hint, extension_in_profile, readiness_summary};
 
 /// Set before the QML engine loads.
 pub static APP_CORE: Mutex<Option<AppCore>> = Mutex::new(None);
 
 /// Empty catalog JSON for QML `JSON.parse` before the first `tick()`.
-pub const EMPTY_CATALOG_JSON: &str = r#"{"rows":[],"accounts":[]}"#;
+pub const EMPTY_CATALOG_JSON: &str =
+    r#"{"setup":{"active":false},"rows":[],"accounts":[]}"#;
 
 #[cxx_qt::bridge]
 pub mod qobject {
@@ -41,6 +45,7 @@ pub mod qobject {
         #[qproperty(QString, catalog_json)]
         #[qproperty(QString, command_text)]
         #[qproperty(i32, account_index)]
+        #[qproperty(QString, toast_message)]
         type ZappeBackend = super::ZappeBackendRust;
 
         #[qinvokable]
@@ -130,6 +135,7 @@ pub struct ZappeBackendRust {
     catalog_json: QString,
     command_text: QString,
     account_index: i32,
+    toast_message: QString,
 }
 
 impl Default for ZappeBackendRust {
@@ -148,6 +154,7 @@ impl Default for ZappeBackendRust {
             catalog_json: QString::from(EMPTY_CATALOG_JSON),
             command_text: QString::from(""),
             account_index: 0,
+            toast_message: QString::from(""),
         };
         refresh_browser_props(&mut rust);
         if let Ok(guard) = APP_CORE.lock() {
@@ -167,6 +174,7 @@ fn sync_props(rust: &mut ZappeBackendRust, core: &AppCore) {
     rust.hud_visible = core.hud_visible;
     rust.account_index = core.guide.account_idx as i32;
     rust.command_text = QString::from(core.guide.command.as_deref().unwrap_or(""));
+    rust.toast_message = QString::from(core.guide.toast.as_deref().unwrap_or(""));
     rust.catalog_json = QString::from(&catalog_to_json(core));
     rust.onepassword_summary = QString::from(&readiness_summary());
     rust.onepassword_app_hint = QString::from(&app_install_hint());
@@ -193,6 +201,7 @@ fn push_props(mut pin: Pin<&mut qobject::ZappeBackend>, rust: &ZappeBackendRust)
     pin.as_mut().set_catalog_json(QString::from(&rust.catalog_json.to_string()));
     pin.as_mut().set_command_text(QString::from(&rust.command_text.to_string()));
     pin.as_mut().set_account_index(rust.account_index);
+    pin.as_mut().set_toast_message(QString::from(&rust.toast_message.to_string()));
 }
 
 impl qobject::ZappeBackend {
@@ -217,46 +226,28 @@ impl qobject::ZappeBackend {
     }
 
     pub fn retry_browser_detect(mut self: Pin<&mut Self>) {
-        {
-            let rust = Pin::get_mut(self.as_mut().rust_mut());
-            refresh_browser_props(rust);
-            if detect().found {
-                rust.status_message = QString::from("Navegador encontrado — toque Continuar.");
+        if let Ok(mut guard) = APP_CORE.lock() {
+            if let Some(core) = guard.as_mut() {
+                core.retry_browser_setup();
             }
         }
-        let snapshot = self.rust().clone_snapshot();
-        push_props(self, &snapshot);
+        self.sync_from_core();
     }
 
     pub fn try_install_browser(mut self: Pin<&mut Self>) {
-        let attempt = try_noninteractive_install();
-        let msg = {
-            let rust = Pin::get_mut(self.as_mut().rust_mut());
-            match attempt {
-                InstallAttempt::Installed => {
-                    refresh_browser_props(rust);
-                    "Chromium instalado. Toque Continuar.".to_string()
-                }
-                InstallAttempt::NeedsPassword { command } => {
-                    rust.install_command = QString::from(&command);
-                    "Precisa de senha sudo — copie o comando e instale no terminal.".into()
-                }
-                InstallAttempt::Manual { command, detail } => {
-                    rust.install_command = QString::from(&command);
-                    format!("Instalação manual: {detail}")
-                }
+        if let Ok(mut guard) = APP_CORE.lock() {
+            if let Some(core) = guard.as_mut() {
+                core.try_install_browser_setup();
             }
-        };
-        Pin::get_mut(self.as_mut().rust_mut()).status_message = QString::from(&msg);
-        let snapshot = self.rust().clone_snapshot();
-        push_props(self, &snapshot);
+        }
+        self.sync_from_core();
     }
 
     pub fn continue_chrome_setup(mut self: Pin<&mut Self>) {
         if let Ok(mut guard) = APP_CORE.lock() {
             if let Some(core) = guard.as_mut() {
                 if let Err(err) = core.finish_chrome_setup() {
-                    core.guide.status = format!("Chrome: {err:#}");
+                    core.show_toast(format!("{err:#}"));
                 }
             }
         }
@@ -421,6 +412,7 @@ impl ZappeBackendRust {
             catalog_json: QString::from(&self.catalog_json.to_string()),
             command_text: QString::from(&self.command_text.to_string()),
             account_index: self.account_index,
+            toast_message: QString::from(&self.toast_message.to_string()),
         }
     }
 }
@@ -436,13 +428,25 @@ fn screen_to_i32(s: HudScreen) -> i32 {
 
 fn catalog_to_json(core: &AppCore) -> String {
     let guide = &core.guide;
-    let mut out = String::from("{\"rows\":[");
+    let browser = detect();
+    let mut out = String::from("{\"setup\":");
+    append_setup_json(&mut out, guide, &browser);
+    out.push_str(",\"rows\":[");
     for (ri, row) in guide.catalog.rows.iter().enumerate() {
         if ri > 0 {
             out.push(',');
         }
+        let kind = if row.label == "Apps" {
+            "apps"
+        } else if row.label == "Continue watching" {
+            "continue"
+        } else {
+            "shelf"
+        };
         out.push_str("{\"label\":\"");
         escape_json(&row.label, &mut out);
+        out.push_str("\",\"kind\":\"");
+        out.push_str(kind);
         out.push_str("\",\"tiles\":[");
         for (ci, tile) in row.tiles.iter().enumerate() {
             if ci > 0 {
@@ -473,6 +477,50 @@ fn catalog_to_json(core: &AppCore) -> String {
     }
     out.push_str("]}");
     out
+}
+
+fn append_setup_json(out: &mut String, guide: &crate::guide::Guide, browser: &crate::setup::browser::BrowserDetect) {
+    let active = matches!(
+        guide.screen,
+        HudScreen::SetupChrome | HudScreen::SetupOnePassword
+    );
+    out.push_str("{\"active\":");
+    out.push_str(if active { "true" } else { "false" });
+    if active {
+        out.push_str(",\"title\":\"");
+        escape_json(setup_title(guide.screen), out);
+        out.push_str("\",\"subtitle\":\"");
+        escape_json(&setup_subtitle(guide.screen, browser), out);
+        out.push_str("\",\"show_install_command\":");
+        let show_cmd = guide.screen == HudScreen::SetupChrome && !browser.found;
+        out.push_str(if show_cmd { "true" } else { "false" });
+        out.push_str(",\"install_command\":\"");
+        if show_cmd {
+            escape_json(&browser.install_command, out);
+        }
+        out.push_str("\",\"choices\":[");
+        let choices: Vec<_> = match guide.screen {
+            HudScreen::SetupChrome => chrome_choices(browser),
+            HudScreen::SetupOnePassword => onepassword_choices(),
+            _ => vec![],
+        };
+        for (i, ch) in choices.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"id\":\"");
+            escape_json(ch.id, out);
+            out.push_str("\",\"label\":\"");
+            escape_json(ch.label, out);
+            out.push_str("\",\"primary\":");
+            out.push_str(if ch.primary { "true" } else { "false" });
+            out.push_str(",\"focused\":");
+            out.push_str(if guide.setup_choice_idx == i { "true" } else { "false" });
+            out.push('}');
+        }
+        out.push(']');
+    }
+    out.push('}');
 }
 
 fn escape_json(s: &str, out: &mut String) {
