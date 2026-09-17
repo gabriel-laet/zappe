@@ -156,8 +156,7 @@ ApplicationWindow {
                     font.pixelSize: 18
                     font.family: "monospace"
                     color: "#61b8fa"
-                    wrapMode: Text.Wrap
-                    selectByMouse: true
+                    wrapMode: Text.WordWrap
                 }
 
                 RowLayout {
