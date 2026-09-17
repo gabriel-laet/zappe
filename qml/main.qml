@@ -24,58 +24,68 @@ ApplicationWindow {
         }
     }
 
-    focus: true
-    Keys.onPressed: function(event) {
-        if (backend.commandText.length > 0 || commandBar.visible) {
-            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                backend.commandCommit()
-                event.accepted = true
-                return
-            }
-            if (event.key === Qt.Key_Escape) {
-                backend.commandCancel()
-                event.accepted = true
-                return
-            }
-            if (event.key === Qt.Key_Backspace) {
-                backend.commandBackspace()
-                event.accepted = true
-                return
-            }
-            if (event.text && event.text.length > 0) {
-                backend.commandAppend(event.text)
-                event.accepted = true
-            }
-            return
-        }
+    onActiveChanged: if (active) Qt.callLater(remoteInput.forceActiveFocus)
+    onVisibleChanged: if (visible) Qt.callLater(remoteInput.forceActiveFocus)
 
-        switch (event.key) {
-        case Qt.Key_Up: backend.moveFocus(-1, 0); break
-        case Qt.Key_Down: backend.moveFocus(1, 0); break
-        case Qt.Key_Left: backend.moveFocus(0, -1); break
-        case Qt.Key_Right: backend.moveFocus(0, 1); break
-        case Qt.Key_Return:
-        case Qt.Key_Enter: backend.activate(); break
-        case Qt.Key_Escape:
-        case Qt.Key_Back: backend.back(); break
-        case Qt.Key_Home: backend.moveFocus(0, 0); break
-        case Qt.Key_Space:
-        case Qt.Key_MediaPlay:
-        case Qt.Key_MediaPause:
-        case Qt.Key_MediaTogglePlayPause:
-            backend.playPause(); break
-        case Qt.Key_Slash: backend.openCommand(); break
-        case Qt.Key_Q: backend.quit(); break
-        case Qt.Key_H: backend.toggleHud(); break
-        default: return
-        }
-        event.accepted = true
-    }
-
-    ColumnLayout {
+    // ApplicationWindow has no `focus` property in Qt 6.11 — remote keys live on Item/FocusScope.
+    FocusScope {
+        id: remoteInput
         anchors.fill: parent
-        anchors.margins: 32
-        spacing: 20
+        focus: true
+
+        Component.onCompleted: forceActiveFocus()
+
+        Keys.onPressed: function(event) {
+            if (backend.commandText.length > 0 || commandBar.visible) {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    backend.commandCommit()
+                    event.accepted = true
+                    return
+                }
+                if (event.key === Qt.Key_Escape) {
+                    backend.commandCancel()
+                    event.accepted = true
+                    return
+                }
+                if (event.key === Qt.Key_Backspace) {
+                    backend.commandBackspace()
+                    event.accepted = true
+                    return
+                }
+                if (event.text && event.text.length > 0) {
+                    backend.commandAppend(event.text)
+                    event.accepted = true
+                }
+                return
+            }
+
+            switch (event.key) {
+            case Qt.Key_Up: backend.moveFocus(-1, 0); break
+            case Qt.Key_Down: backend.moveFocus(1, 0); break
+            case Qt.Key_Left: backend.moveFocus(0, -1); break
+            case Qt.Key_Right: backend.moveFocus(0, 1); break
+            case Qt.Key_Return:
+            case Qt.Key_Enter: backend.activate(); break
+            case Qt.Key_Escape:
+            case Qt.Key_Back: backend.back(); break
+            case Qt.Key_Home: backend.moveFocus(0, 0); break
+            case Qt.Key_Space:
+            case Qt.Key_MediaPlay:
+            case Qt.Key_MediaPause:
+            case Qt.Key_MediaTogglePlayPause:
+                backend.playPause(); break
+            case Qt.Key_Slash: backend.openCommand(); break
+            case Qt.Key_Q: backend.quit(); break
+            case Qt.Key_H: backend.toggleHud(); break
+            default: return
+            }
+            event.accepted = true
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 32
+            spacing: 20
 
         RowLayout {
             Layout.fillWidth: true
@@ -283,6 +293,7 @@ ApplicationWindow {
                 color: "#61b8fa"
             }
         }
+        }
     }
 
     component ActionButton: Button {
@@ -291,6 +302,7 @@ ApplicationWindow {
         text: label
         font.pixelSize: 20
         padding: 16
+        focusPolicy: Qt.NoFocus
         background: Rectangle {
             color: primary ? "#61b8fa" : "#1c2029"
             border.color: primary ? "#61b8fa" : "#3a4254"
