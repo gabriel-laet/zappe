@@ -1,12 +1,16 @@
 use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
+
+use crate::paths::{data_dir, ensure_data_dir};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct OtaChannel {
@@ -188,6 +192,9 @@ impl OtaSession {
     pub async fn play(&self, channel: &str, conf: &Path) -> Result<()> {
         self.stop().await;
 
+        if let Err(err) = ensure_dvb_adapter() {
+            return Err(anyhow!("can't open {channel}: {err}"));
+        }
         if which("dvbv5-zap").is_none() {
             return Err(anyhow!(
                 "dvbv5-zap not found on PATH (install dvb5-tools on Arch/Omarchy)"
@@ -197,31 +204,39 @@ impl OtaSession {
             return Err(anyhow!("mpv not found on PATH"));
         }
 
-        let conf_s = conf.display().to_string();
-        let channel_s = channel.replace('\'', "'\\''");
-        let script = format!(
-            "dvbv5-zap -a 0 -c '{conf_s}' -p '{channel_s}' -r -o - | mpv --hwdec=no --demuxer-lavf-format=mpegts --fs --no-terminal -"
-        );
+        let log_path = ota_log_path()?;
+        append_log_header(&log_path, channel, conf)?;
+        let log_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .with_context(|| format!("open {}", log_path.display()))?;
 
-        let child = Command::new("sh")
+        let script = pipeline_script(&conf.display().to_string(), channel);
+        let mut child = Command::new("sh")
             .arg("-c")
             .arg(&script)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(log_file)
             .kill_on_drop(true)
             .spawn()
             .context("spawn OTA pipeline")?;
 
-        *self.pipeline_child.lock().await = Some(child);
-        *self.active_channel.lock().await = Some(channel.to_string());
-        *self.active_conf.lock().await = Some(conf.to_path_buf());
-        *self.mpv_pid.lock().await = None;
-
-        sleep(Duration::from_millis(350)).await;
-        *self.mpv_pid.lock().await = crate::wm::find_mpv_pid();
-
-        Ok(())
+        match wait_pipeline_ready(&mut child, &log_path, channel).await {
+            Ok(mpv_pid) => {
+                *self.pipeline_child.lock().await = Some(child);
+                *self.active_channel.lock().await = Some(channel.to_string());
+                *self.active_conf.lock().await = Some(conf.to_path_buf());
+                *self.mpv_pid.lock().await = mpv_pid;
+                Ok(())
+            }
+            Err(err) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                Err(err)
+            }
+        }
     }
 
     pub async fn stop(&self) {
@@ -241,6 +256,112 @@ impl OtaSession {
             .as_ref()
             .and_then(|c| c.id())
     }
+}
+
+pub fn dvb_adapter_path() -> PathBuf {
+    PathBuf::from("/dev/dvb/adapter0")
+}
+
+/// True when `/dev/dvb/adapter0` or its frontend/demux/dvr nodes exist.
+pub fn dvb_adapter_present() -> bool {
+    let adapter = dvb_adapter_path();
+    adapter.exists()
+        || adapter.join("frontend0").exists()
+        || adapter.join("demux0").exists()
+        || adapter.join("dvr0").exists()
+}
+
+fn ensure_dvb_adapter() -> Result<PathBuf> {
+    let adapter = dvb_adapter_path();
+    if dvb_adapter_present() {
+        return Ok(adapter);
+    }
+    Err(anyhow!(
+        "no DVB tuner at {} (missing frontend/demux/dvr). Plug in the stick and check `ls /dev/dvb/`.",
+        adapter.display()
+    ))
+}
+
+fn pipeline_script(conf: &str, channel: &str) -> String {
+    let channel_s = channel.replace('\'', "'\\''");
+    format!(
+        "set -o pipefail; dvbv5-zap -a 0 -c '{conf}' -p '{channel_s}' -r -o - | \
+         mpv --hwdec=no --vo=gpu --demuxer-lavf-format=mpegts \
+         --demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal -"
+    )
+}
+
+fn ota_log_path() -> Result<PathBuf> {
+    ensure_data_dir()?;
+    Ok(data_dir().join("ota-pipeline.log"))
+}
+
+fn append_log_header(path: &Path, channel: &str, conf: &Path) -> Result<()> {
+    use std::io::Write;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .with_context(|| format!("open {}", path.display()))?;
+    writeln!(
+        file,
+        "\n--- zappe ota {} channel={channel} conf={} ---",
+        chrono_like_now(),
+        conf.display()
+    )?;
+    Ok(())
+}
+
+fn chrono_like_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn read_log_tail(path: &Path, max_chars: usize) -> String {
+    let Ok(text) = fs::read_to_string(path) else {
+        return String::new();
+    };
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let tail = if trimmed.len() > max_chars {
+        &trimmed[trimmed.len().saturating_sub(max_chars)..]
+    } else {
+        trimmed
+    };
+    format!(" log: {}", tail.replace('\n', " | "))
+}
+
+async fn wait_pipeline_ready(
+    child: &mut Child,
+    log_path: &Path,
+    channel: &str,
+) -> Result<Option<u32>> {
+    let deadline = Instant::now() + Duration::from_millis(1200);
+    loop {
+        if let Some(status) = child.try_wait().context("poll OTA pipeline")? {
+            let tail = read_log_tail(log_path, 400);
+            return Err(anyhow!(
+                "OTA failed for '{channel}' (pipeline exited {status}).{tail} Is the tuner at /dev/dvb/adapter0?"
+            ));
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    let mpv_pid = crate::wm::find_mpv_pid();
+    if mpv_pid.is_none() {
+        let tail = read_log_tail(log_path, 400);
+        return Err(anyhow!(
+            "OTA failed for '{channel}': mpv never started.{tail} Is the tuner at /dev/dvb/adapter0?"
+        ));
+    }
+    Ok(mpv_pid)
 }
 
 fn which(name: &str) -> Option<PathBuf> {
@@ -294,5 +415,44 @@ BBC ONE:8:...
         assert!(out.contains(&"Globo SP HD".to_string()));
         assert!(out.contains(&"SBT HD".to_string()));
         assert!(!out.contains(&"Globo SP".to_string()));
+    }
+
+    #[test]
+    fn pipeline_uses_working_watch_flags_and_pipefail() {
+        let script = pipeline_script("/home/me/tv/channels.conf", "Globo");
+        assert!(script.contains("set -o pipefail"));
+        assert!(script.contains("dvbv5-zap -a 0"));
+        assert!(script.contains("--vo=gpu"));
+        assert!(script.contains("--demuxer-lavf-analyzeduration=5"));
+        assert!(script.contains("--cache=yes"));
+        assert!(script.contains("--hwdec=no"));
+        assert!(script.contains("--fs"));
+        assert!(!script.contains("2>/dev/null"));
+    }
+
+    #[test]
+    fn missing_adapter_message_is_actionable() {
+        if dvb_adapter_present() {
+            return;
+        }
+        let err = ensure_dvb_adapter().unwrap_err().to_string();
+        assert!(err.contains("/dev/dvb/adapter0"));
+        assert!(err.contains("tuner") || err.contains("DVB") || err.contains("dvr"));
+    }
+
+    #[tokio::test]
+    async fn play_errors_before_hiding_when_adapter_missing() {
+        if dvb_adapter_present() {
+            return;
+        }
+        let session = OtaSession::new();
+        let err = session
+            .play("Globo", Path::new("/tmp/zappe-missing-channels.conf"))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Globo"), "{err}");
+        assert!(err.contains("/dev/dvb/adapter0"), "{err}");
+        assert!(session.pipeline_child.lock().await.is_none());
     }
 }

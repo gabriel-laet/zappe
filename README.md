@@ -173,8 +173,11 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` (not legacy `dispatch focus
 Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`. HD preferred; 1Seg filtered.
 
 ```bash
-dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --demuxer-lavf-format=mpegts --fs --no-terminal -
+dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --vo=gpu \
+  --demuxer-lavf-format=mpegts --demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal -
 ```
+
+Play fails fast (guide stays / is restored) if `/dev/dvb/adapter0` is missing or zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
 
 ## Out of scope (v1)
 
