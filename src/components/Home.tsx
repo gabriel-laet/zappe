@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { primaryOtaChannel } from "@/lib/otaDisplay";
 import {
   api,
   onFocusRestore,
@@ -41,45 +42,51 @@ function placeholders(label: string): Tile[] {
   }));
 }
 
+function otaTiles(channels: OtaChannel[]): Tile[] {
+  return channels.map((c) => ({
+    id: `ota-${c.name}`,
+    title: c.name,
+    kind: "ota",
+    ota: { channel: c.name, conf: c.source },
+  }));
+}
+
 export function Home() {
   const [otaChannels, setOtaChannels] = useState<OtaChannel[]>([]);
-  const [otaOn, setOtaOn] = useState(false);
   const [focus, setFocus] = useState<GuideFocus>({ shelf_id: "apps", index: 0 });
+
+  const hasOta = otaChannels.length > 0;
+  const primary = primaryOtaChannel(otaChannels);
 
   const shelves: Shelf[] = useMemo(() => {
     const apps: Tile[] = [...APP_TILES];
-    if (otaOn && otaChannels[0]) {
-      const c = otaChannels[0];
+    if (primary) {
       apps.push({
-        id: "live-tv",
-        title: "Live TV",
-        subtitle: c.name,
+        id: "tv-aberta",
+        title: "TV aberta",
+        subtitle: primary.name,
         kind: "ota",
-        ota: { channel: c.name, conf: c.source },
+        ota: { channel: primary.name, conf: primary.source },
       });
     }
-    const liveShelf: Shelf = {
-      id: "live",
-      title: "Live TV",
-      tiles: otaChannels.map((c) => ({
-        id: `ota-${c.name}`,
-        title: c.name,
-        subtitle: c.source,
-        kind: "ota",
-        ota: { channel: c.name, conf: c.source },
-      })),
+    const canaisShelf: Shelf = {
+      id: "canais",
+      title: "Canais",
+      tiles: otaTiles(otaChannels),
     };
     return [
       { id: "apps", title: "Apps", tiles: apps },
       { id: "continue", title: "Continue watching", tiles: placeholders("Resume") },
-      ...(otaOn && otaChannels.length > 0 ? [liveShelf] : []),
+      ...(hasOta ? [canaisShelf] : []),
       { id: "movies", title: "Movies", tiles: placeholders("Movie") },
     ];
-  }, [otaChannels, otaOn]);
+  }, [otaChannels, hasOta, primary]);
 
   useEffect(() => {
-    void api.otaEnabled().then(setOtaOn);
-    void api.listOtaChannels().then(setOtaChannels).catch(() => setOtaChannels([]));
+    void api
+      .listOtaChannels()
+      .then(setOtaChannels)
+      .catch(() => setOtaChannels([]));
     let unlisten: (() => void) | undefined;
     void onFocusRestore((f) => setFocus(f)).then((fn) => {
       unlisten = fn;
@@ -105,7 +112,7 @@ export function Home() {
         toast.error(String(e));
       }
     },
-    [focus, otaChannels],
+    [focus],
   );
 
   const move = useCallback(

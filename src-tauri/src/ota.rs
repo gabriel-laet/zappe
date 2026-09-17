@@ -13,21 +13,40 @@ pub struct OtaChannel {
     pub source: String,
 }
 
+/// Config file paths used for OTA. `ZAPPE_OTA_CHANNELS` overrides defaults (colon-separated).
 pub fn channel_config_paths() -> Vec<PathBuf> {
-    std::env::var("ZAPPE_OTA_CHANNELS")
-        .ok()
-        .map(|raw| {
-            raw.split(':')
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from)
-                .collect()
-        })
-        .unwrap_or_default()
+    if let Ok(raw) = std::env::var("ZAPPE_OTA_CHANNELS") {
+        return raw
+            .split(':')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect();
+    }
+    default_channel_paths()
+}
+
+fn default_channel_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        let tv = home.join("tv").join("channels.conf");
+        if tv.exists() {
+            paths.push(tv);
+        }
+    }
+    if let Some(config) = dirs::config_dir() {
+        let zappe = config.join("zappe").join("channels.conf");
+        if zappe.exists() {
+            paths.push(zappe);
+        }
+    }
+    paths
 }
 
 pub fn ota_available() -> bool {
-    !channel_config_paths().is_empty()
+    channel_config_paths()
+        .iter()
+        .any(|p| p.exists())
 }
 
 pub fn list_channels() -> Result<Vec<OtaChannel>> {
@@ -38,7 +57,7 @@ pub fn list_channels() -> Result<Vec<OtaChannel>> {
         }
         let text = fs::read_to_string(&path)
             .with_context(|| format!("read {}", path.display()))?;
-        for name in parse_channel_names(&text) {
+        for name in filter_and_sort_channels(parse_channel_names(&text)) {
             out.push(OtaChannel {
                 name,
                 source: path.display().to_string(),
@@ -67,9 +86,89 @@ fn parse_channel_names(text: &str) -> Vec<String> {
             }
         }
     }
-    names.sort();
-    names.dedup();
     names
+}
+
+fn is_1seg(name: &str) -> bool {
+    let l = name.to_lowercase();
+    l.contains("1seg")
+        || l.contains("1-seg")
+        || l.contains("one seg")
+        || l.contains("oneseg")
+}
+
+/// Normalize for duplicate detection (strip quality suffixes).
+fn channel_base_key(name: &str) -> String {
+    let mut s = name.to_lowercase();
+    for token in [
+        " hdtv",
+        " hd",
+        " fhd",
+        " sd",
+        " uhd",
+        " 4k",
+        " (hd)",
+        " [hd]",
+    ] {
+        if let Some(idx) = s.rfind(token) {
+            if idx + token.len() == s.len() {
+                s = s[..idx].trim().to_string();
+            }
+        }
+    }
+    s.trim().to_string()
+}
+
+fn hd_score(name: &str) -> i32 {
+    let l = name.to_lowercase();
+    if l.contains("hdtv") || l.contains(" fhd") || l.ends_with(" hd") || l.contains(" hd ") {
+        return 0;
+    }
+    if l.contains("hd") {
+        return 1;
+    }
+    if l.contains(" sd") {
+        return 3;
+    }
+    2
+}
+
+/// Drop obvious 1Seg rows; prefer HD when multiple names map to the same service.
+pub fn filter_and_sort_channels(names: Vec<String>) -> Vec<String> {
+    let mut filtered: Vec<String> = names
+        .into_iter()
+        .filter(|n| !is_1seg(n))
+        .collect();
+
+    filtered.sort_by(|a, b| {
+        let sa = hd_score(a);
+        let sb = hd_score(b);
+        sa.cmp(&sb)
+            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
+    });
+
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for name in filtered {
+        let key = channel_base_key(&name);
+        match seen.get(&key) {
+            None => {
+                seen.insert(key, name);
+            }
+            Some(existing) => {
+                if hd_score(&name) < hd_score(existing) {
+                    seen.insert(key, name);
+                }
+            }
+        }
+    }
+
+    let mut out: Vec<String> = seen.into_values().collect();
+    out.sort_by(|a, b| {
+        hd_score(a)
+            .cmp(&hd_score(b))
+            .then_with(|| a.to_lowercase().cmp(&b.to_lowercase()))
+    });
+    out
 }
 
 pub struct OtaSession {
@@ -179,5 +278,21 @@ BBC ONE:8:...
         assert!(names.contains(&"France 2".to_string()));
         assert!(names.contains(&"ARTE".to_string()));
         assert!(names.contains(&"BBC ONE".to_string()));
+    }
+
+    #[test]
+    fn filter_prefers_hd_and_drops_1seg() {
+        let names = vec![
+            "Globo SP 1Seg".into(),
+            "Globo SP HD".into(),
+            "Globo SP".into(),
+            "SBT HD".into(),
+            "SBT".into(),
+        ];
+        let out = filter_and_sort_channels(names);
+        assert!(!out.iter().any(|n| n.contains("1Seg")));
+        assert!(out.contains(&"Globo SP HD".to_string()));
+        assert!(out.contains(&"SBT HD".to_string()));
+        assert!(!out.contains(&"Globo SP".to_string()));
     }
 }

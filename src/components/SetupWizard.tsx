@@ -3,13 +3,20 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { api, type GuideFocus, type SetupState } from "@/lib/tauri";
 
-type Step = "browser" | "onepassword" | "accounts" | "done";
+type Step = "browser" | "onepassword" | "accounts";
 
 const noopFocus: GuideFocus = { shelf_id: "apps", index: 0 };
 
+const emptySetup: SetupState = {
+  completed: false,
+  browser_ack: false,
+  onepassword_skipped: false,
+  accounts_done: false,
+};
+
 export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<Step>("browser");
-  const [setup, setSetup] = useState<SetupState | null>(null);
+  const [setup, setSetup] = useState<SetupState>(emptySetup);
   const [chromeOk, setChromeOk] = useState(false);
 
   useEffect(() => {
@@ -22,6 +29,18 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
     await api.updateSetup(patch);
   };
 
+  const goHome = async (opts?: { accountsDone?: boolean }) => {
+    const patch = {
+      ...setup,
+      browser_ack: true,
+      accounts_done: opts?.accountsDone ?? setup.accounts_done,
+      completed: true,
+    };
+    await persist(patch);
+    await api.completeSetup();
+    onComplete();
+  };
+
   const nextFromBrowser = async () => {
     const status = await api.chromeStatus();
     if (!status.available) {
@@ -31,25 +50,12 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       });
       return;
     }
-    const patch = {
-      ...(setup ?? {
-        completed: false,
-        browser_ack: false,
-        onepassword_skipped: false,
-        accounts_done: false,
-      }),
-      browser_ack: true,
-    };
-    await persist(patch);
+    await persist({ ...setup, browser_ack: true });
     setStep("onepassword");
   };
 
   const skip1Password = async () => {
-    const patch = {
-      ...(setup!),
-      onepassword_skipped: true,
-    };
-    await persist(patch);
+    await persist({ ...setup, onepassword_skipped: true });
     setStep("accounts");
   };
 
@@ -65,17 +71,10 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const openAccounts = async () => {
     try {
       await api.openApp("netflix", noopFocus);
-      toast.message("Sign in to your services in Zappe Chrome. Back returns here.");
+      toast.message("Sign in in Zappe Chrome. Back returns here — then Continue to Home.");
     } catch (e) {
       toast.error(String(e));
     }
-  };
-
-  const finish = async () => {
-    const patch = { ...(setup!), accounts_done: true, completed: true };
-    await persist(patch);
-    await api.completeSetup();
-    onComplete();
   };
 
   return (
@@ -83,7 +82,8 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       <div className="max-w-2xl space-y-4">
         <h1 className="text-4xl font-semibold tracking-tight">Welcome to Zappe</h1>
         <p className="text-xl text-muted-foreground">
-          A TV-style guide for streaming in your own Chrome profile — plus live TV when configured.
+          Streaming apps use your Zappe Chrome profile. Live TV appears on Home when{" "}
+          <code className="text-base">channels.conf</code> is found — no extra setup step.
         </p>
       </div>
 
@@ -95,11 +95,18 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
             always play there — never in a webview.
           </p>
           <p className="text-sm text-muted-foreground">
-            {chromeOk ? "Chrome detected on this system." : "Chrome not detected yet."}
+            {chromeOk ? "Chrome detected — you can continue." : "Chrome not detected yet."}
           </p>
-          <Button size="lg" onClick={() => void nextFromBrowser()}>
-            Continue
-          </Button>
+          <div className="flex flex-wrap justify-center gap-4">
+            <Button size="lg" onClick={() => void nextFromBrowser()}>
+              Continue
+            </Button>
+            {chromeOk && (
+              <Button size="lg" variant="secondary" onClick={() => void goHome()}>
+                Skip to Home
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -116,33 +123,28 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
             <Button size="lg" variant="secondary" onClick={() => void skip1Password()}>
               Skip
             </Button>
+            <Button size="lg" variant="ghost" onClick={() => void goHome()}>
+              Continue to Home
+            </Button>
           </div>
         </div>
       )}
 
       {step === "accounts" && (
         <div className="space-y-6">
-          <h2 className="text-2xl">Sign in to your accounts</h2>
+          <h2 className="text-2xl">Sign in to your accounts (optional)</h2>
           <p className="max-w-lg text-muted-foreground">
-            Use orchestrated Chrome once per service. Sessions stay in the Zappe profile.
+            Use orchestrated Chrome once per service, or go straight to Home — TV aberta and Canais
+            are on the guide when your channel list is present.
           </p>
           <div className="flex flex-wrap justify-center gap-4">
-            <Button size="lg" onClick={() => void openAccounts()}>
+            <Button size="lg" onClick={() => void goHome({ accountsDone: true })}>
+              Continue to Home
+            </Button>
+            <Button size="lg" variant="secondary" onClick={() => void openAccounts()}>
               Open Netflix in Chrome
             </Button>
-            <Button size="lg" variant="secondary" onClick={() => setStep("done")}>
-              I&apos;m already signed in
-            </Button>
           </div>
-        </div>
-      )}
-
-      {step === "done" && (
-        <div className="space-y-6">
-          <h2 className="text-2xl">You&apos;re set</h2>
-          <Button size="lg" onClick={() => void finish()}>
-            Go to Home
-          </Button>
         </div>
       )}
     </div>

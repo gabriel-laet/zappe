@@ -27,7 +27,7 @@ Netflix, Prime, Disney+, and YouTube always run in a Zappe-owned Chrome profile 
 **Optional (OTA / MyGica)**
 
 - `dvbv5-tools` (`dvbv5-zap`), `mpv`
-- Channel list via `ZAPPE_OTA_CHANNELS` (colon-separated paths to `channels.conf`)
+- Channel list: auto-detected from default paths, or override with `ZAPPE_OTA_CHANNELS`
 
 Qt is **not** required for the current app.
 
@@ -75,9 +75,20 @@ Global shortcuts (Escape, BrowserBack) call back to the guide even when Tauri is
 
 ## OTA
 
+Without any environment variable, Zappe looks for an existing file at:
+
+1. `$HOME/tv/channels.conf` (common on Omarchy)
+2. `~/.config/zappe/channels.conf`
+
+If both exist, both are read. To use a different path (or several files), set:
+
 ```bash
-export ZAPPE_OTA_CHANNELS="$HOME/.config/dvbv5/channels.conf"
+export ZAPPE_OTA_CHANNELS="$HOME/.config/dvbv5/channels.conf:/path/to/extra.conf"
 ```
+
+When set, **`ZAPPE_OTA_CHANNELS` replaces the defaults** (colon-separated list).
+
+The guide shows **TV aberta** in Apps and a **Canais** shelf (HD preferred; obvious 1Seg duplicates filtered).
 
 Playback pipeline (no `mpegts://` URLs):
 
@@ -102,7 +113,7 @@ Back stops `mpv` and `dvbv5-zap`.
 | Variable | Purpose |
 | --- | --- |
 | `CHROME_PATH` | Override Chrome/Chromium binary |
-| `ZAPPE_OTA_CHANNELS` | Colon-separated `channels.conf` paths |
+| `ZAPPE_OTA_CHANNELS` | Override: colon-separated `channels.conf` paths (replaces default lookup) |
 
 ## Legacy HUD
 
