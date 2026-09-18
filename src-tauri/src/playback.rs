@@ -79,6 +79,7 @@ pub fn begin_nest(
     }
     playback.focus_snapshot = Some(focus);
     playback.surface = PlaybackSurface::Chrome;
+    crate::atongx::set_playback_grabs(app, &playback.surface);
     hide_guide(app);
     nest.open_url_detached(url, NestMode::Play);
     let _ = app.emit("playback-changed", playback.status());
@@ -101,6 +102,7 @@ pub async fn stop_playback_surface(nest: &NestManager, ota: &OtaSession, surface
 
 pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController) {
     playback.surface = PlaybackSurface::Idle;
+    crate::atongx::set_playback_grabs(app, &playback.surface);
     restore_guide_fullscreen(app);
     let status = playback.status();
     let _ = app.emit("playback-changed", &status);

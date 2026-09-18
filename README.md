@@ -27,7 +27,7 @@ gamescope  ──wraps──►  google-chrome-stable
 | **Teach-mode** | Stub: waiting state + `TeachRecorder` trait. HID recording is a follow-up. |
 | **OTA** | Unchanged: `dvbv5-zap \| mpv` when `channels.conf` is present. |
 
-Playback is a URL into the nest (deep link when harvest found one). Play/pause is a best-effort HID key (`wtype` / `ydotool` / `xdotool`). Hyprland `hl.dsp.*` nudges apply to the **gamescope** window (or the guide / mpv). They are not used to drive Chrome inside the nest.
+Playback is a URL into the nest (deep link when harvest found one). Play/pause, D-pad, and OK are injected into the **nest** compositor (`xdotool` on Chrome’s gamescope `DISPLAY`, then `wtype -k`, then `ydotool`). Hyprland `hl.dsp.*` nudges only raise the gamescope *window* on a desktop session — they are not how keys reach Netflix. Design: [`docs/nest-input.md`](docs/nest-input.md).
 
 ## Dependencies (Omarchy / Arch)
 
@@ -51,7 +51,7 @@ Playback is a URL into the nest (deep link when harvest found one). Play/pause i
 
 **Optional**
 
-- `wtype` or `ydotool` — nest play/pause / Escape
+- `xdotool` (preferred) plus `wtype` or `ydotool` — nest D-pad / OK / play/pause / Escape. `wtype` must use `-k` (keysym), not text.
 - `dvbv5-tools` + `mpv` — OTA / TV aberta
 - Channel list: `~/tv/channels.conf` or `~/.config/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
 
@@ -185,12 +185,12 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 
 | Button | This PR |
 | --- | --- |
-| D-pad + OK (orange ring) | Guide focus / activate (stays with nest / mpv when playing) |
+| D-pad + OK (orange ring) | Guide focus / activate. While Netflix is up: arrows + Return into the nest |
 | Home, Back, DEL | Return to guide / end playback. Evdev on XING WEI (`KEY_BACK` 158 / `KEY_HOMEPAGE` 172) so nest Chrome cannot eat them. |
 | Play / Pause | Space into Chrome nest or mpv |
 | PAGE up / down | Jump a shelf |
 | Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
-| Air-mouse cursor toggle | Shows / hides CSS pointer (`tv-pointer-on`) |
+| Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click |
 | VOL +/−, Mute | `pactl` ±5% / mute (guide + global) |
 | Menu | Open Connect (returns to guide first if playing) |
 | Power | Return to guide — never shuts the box down |

@@ -42,6 +42,8 @@ pub const KEY_VOICECOMMAND: u16 = 0x246;
 
 const DEBOUNCE: Duration = Duration::from_millis(280);
 const RESCAN: Duration = Duration::from_secs(2);
+/// Linux `TASK_COMM_LEN` is 16 including NUL. Longer names fail `thread::spawn`.
+const EVDEV_THREAD_NAME: &str = "zappe-hid-evdev";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum HidAction {
@@ -177,7 +179,7 @@ mod linux {
             return;
         }
         if let Err(err) = std::thread::Builder::new()
-            .name("zappe-atongx-evdev".into())
+            .name(EVDEV_THREAD_NAME.into())
             .spawn(move || watch_loop(app))
         {
             log::warn!("ATONGX evdev thread failed to start: {err}");
@@ -237,10 +239,18 @@ mod linux {
         paths
     }
 
+    fn unwatch(watched: &Watched, path: &PathBuf) {
+        watched
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(path);
+    }
+
     fn attach(app: AppHandle, path: PathBuf, mut device: Device, watched: Watched) {
         let name = device.name().unwrap_or("unknown").to_string();
         let path_str = path.to_string_lossy();
         if !is_atongx_device(&name, &path_str) {
+            unwatch(&watched, &path);
             return;
         }
 
@@ -251,9 +261,11 @@ mod linux {
             .is_some_and(|axes| axes.contains(RelativeAxisCode::REL_X));
         if is_mouse_only(has_rel, has_nest_escape_key(&keys)) {
             log::info!("ATONGX evdev ignore mouse-only {}", path.display());
+            unwatch(&watched, &path);
             return;
         }
         if !has_nest_escape_key(&keys) && !keys.iter().any(|c| action_for_keycode(*c).is_some()) {
+            unwatch(&watched, &path);
             return;
         }
 
@@ -278,26 +290,20 @@ mod linux {
             path.display()
         );
 
-        let unwatch = path.clone();
+        let unwatch_path = path.clone();
         let watched_reader = watched.clone();
         if let Err(err) = std::thread::Builder::new()
-            .name(format!("zappe-hid-{}", path.display()))
+            .name(EVDEV_THREAD_NAME.into())
             .spawn({
-                let unwatch = unwatch.clone();
+                let unwatch_path = unwatch_path.clone();
                 move || {
                     read_loop(app, path, device, grabbed);
-                    watched_reader
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .remove(&unwatch);
+                    unwatch(&watched_reader, &unwatch_path);
                 }
             })
         {
             log::warn!("ATONGX evdev reader failed: {err}");
-            watched
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&unwatch);
+            unwatch(&watched, &unwatch_path);
         }
     }
 
@@ -378,7 +384,7 @@ async fn dispatch(app: AppHandle, action: HidAction) {
             let _ = app.emit("voice-arm", ());
         }
         HidAction::Pointer => {
-            let _ = app.emit("guide-pointer", ());
+            crate::remote_pointer_inner(&app);
         }
         HidAction::VolumeUp => {
             let _ = remote_volume(1);
@@ -395,6 +401,17 @@ async fn dispatch(app: AppHandle, action: HidAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn evdev_thread_name_fits_linux_task_comm() {
+        assert!(
+            EVDEV_THREAD_NAME.len() <= 15,
+            "pthread name {:?} is {} chars; Linux max is 15",
+            EVDEV_THREAD_NAME,
+            EVDEV_THREAD_NAME.len()
+        );
+        assert_eq!(EVDEV_THREAD_NAME, "zappe-hid-evdev");
+    }
 
     #[test]
     fn documents_living_room_evdev_codes() {

@@ -4,19 +4,19 @@ Living-room box: **no physical keyboard**. Couch input is this remote plus a pho
 
 Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). This is Zappe HID mapping — not a Samsung TV API.
 
-When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
+When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough for Back / Home: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
 
-The appliance path is an **evdev watcher** (`src-tauri/src/hid.rs`) on the XING WEI nodes. It calls the same `return_to_guide` / `remote_back_inner` / `remote_power_inner` logic. Back, Home, and Power **always** exit the nest / OTA and show the guide. Power never shuts the box down.
+The appliance path for leaving the nest is an **evdev watcher** (`src-tauri/src/hid.rs`) on the XING WEI nodes. It calls the same `return_to_guide` / `remote_back_inner` / `remote_power_inner` logic. Back, Home, and Power **always** exit the nest / OTA and show the guide. Power never shuts the box down.
 
-D-pad + OK stay with the focused player (keyboard node is not grabbed).
+While the Chrome nest is playing, D-pad + OK + Space are grabbed as compositor shortcuts and **injected into the nest** — see [`nest-input.md`](nest-input.md). They are released when the guide returns so shelves keep focus. The evdev keyboard node is **not** grabbed, so those keys can still reach Chrome after injection.
 
 | Button on device | Action | This PR |
 | --- | --- | --- |
 | Power | `power` | Stop playback and return to the guide. Never shuts the box down. |
-| Play / Pause | `playpause` | Space into the Chrome nest, or Space into mpv for OTA |
-| Mouse-cursor toggle | `pointer` | Toggles `tv-pointer-on` (show/hide CSS cursor) |
-| D-pad ↑ ↓ ← → | `up` `down` `left` `right` | Guide focus |
-| OK (orange ring) | `ok` | Activate focused tile |
+| Play / Pause | `playpause` | Space into the Chrome nest (`wtype -k` / xdotool on nest `DISPLAY`), or Space into mpv for OTA |
+| Mouse-cursor toggle | `pointer` | Guide: `tv-pointer-on` CSS. Nest: focus gamescope so ATONGX event4 is a real cursor; OK clicks |
+| D-pad ↑ ↓ ← → | `up` `down` `left` `right` | Guide focus; arrows into Chrome while the nest is up |
+| OK (orange ring) | `ok` | Activate focused tile; Return (or click in pointer mode) in the nest |
 | Home | `home` | Return to guide / end playback |
 | Back | `back` | Hide nest / stop OTA |
 | Menu | `menu` | Open Connect (phone) |
@@ -78,5 +78,6 @@ Build with `npm run tauri -- build --no-bundle` (never plain `cargo build --rele
 1. `journalctl --user -u zappe.service -f` — look for `ATONGX evdev watching XING WEI … grab=true` on the consumer node.
 2. Open Netflix (or any nest). Press **Back** — nest gamescope+Chrome die, guide is fullscreen. Repeat with **Home** and **Power**. Box stays on.
 3. `pgrep -a gamescope` while the nest is up shows two processes (kiosk `-- zappe` and nest Chrome). After Back, only the kiosk remains.
-4. VOL / Mute still change Pulse (`pactl get-sink-volume @DEFAULT_SINK@`). D-pad / OK still work inside Netflix.
-5. Optional: `sudo evtest` as above if a press is ignored — add the printed `KEY_*` to `action_for_keycode` in `src-tauri/src/hid.rs`.
+4. VOL / Mute still change Pulse (`pactl get-sink-volume @DEFAULT_SINK@`).
+5. D-pad moves Netflix focus; OK activates. See [`nest-input.md`](nest-input.md).
+6. Optional: `sudo evtest` as above if Back / Home is ignored — add the printed `KEY_*` to `action_for_keycode` in `src-tauri/src/hid.rs`.

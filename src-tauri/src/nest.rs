@@ -110,13 +110,17 @@ impl NestManager {
     pub async fn show_fullscreen(&self) {
         let pids = self.play_window_pids().await;
         wm::nudge_nest_show(pids.first().copied());
+        crate::nest_input::focus_nest_on_host();
     }
 
-    /// Best-effort HID into the nest (Space / Escape). Teach-mode will record this later.
+    /// Best-effort HID into the nest (arrows / OK / Space / Escape).
+    /// Targets Chrome's gamescope DISPLAY — see `nest_input`.
     pub async fn send_key(&self, key: &str) {
-        let pids = nest_window_pids();
-        wm::nudge_nest_show(pids.first().copied());
-        send_key_best_effort(key);
+        crate::nest_input::inject_key(key);
+    }
+
+    pub async fn send_click(&self) {
+        crate::nest_input::inject_click();
     }
 
     pub async fn shutdown_if_owned(&self) {
@@ -227,7 +231,10 @@ fn apply_mode(mode: NestMode) {
     let pids = nest_window_pids();
     match mode {
         NestMode::Harvest => wm::nudge_nest_hide(pids.first().copied()),
-        NestMode::Play => wm::nudge_nest_show(pids.first().copied()),
+        NestMode::Play => {
+            wm::nudge_nest_show(pids.first().copied());
+            crate::nest_input::focus_nest_on_host();
+        }
     }
 }
 
@@ -518,6 +525,9 @@ fn looks_like_kiosk_payload(cmd: &str) -> bool {
 }
 
 pub fn nest_window_pids() -> Vec<u32> {
+    // Never return the outer kiosk `gamescope -- zappe` — focusing that PID
+    // is a no-op and is why D-pad never reached Netflix. Kill paths also use
+    // this filter so Back/Home never signal the kiosk.
     let mut pids: Vec<u32> = nest_gamescope_pids()
         .into_iter()
         .filter(|p| is_safe_nest_pid(*p))
@@ -636,7 +646,7 @@ async fn kill_child_and_profile_chrome(child: &mut Child) {
     }
 }
 
-fn nest_size() -> (u32, u32) {
+pub(crate) fn nest_size() -> (u32, u32) {
     let width = std::env::var("ZAPPE_NEST_WIDTH")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -649,33 +659,7 @@ fn nest_size() -> (u32, u32) {
 }
 
 pub fn send_media_key(key: &str) {
-    send_key_best_effort(key);
-}
-
-fn send_key_best_effort(key: &str) {
-    let key = key.trim().to_ascii_lowercase();
-    let mapped = match key.as_str() {
-        "space" | "playpause" | "play-pause" => "space",
-        "escape" | "esc" | "back" => "Escape",
-        other => other,
-    };
-    for (bin, args) in [
-        ("wtype", vec![mapped.to_string()]),
-        (
-            "ydotool",
-            vec!["key".into(), format!("{mapped}:1"), format!("{mapped}:0")],
-        ),
-        ("xdotool", vec!["key".into(), mapped.to_string()]),
-    ] {
-        if which(bin).is_some() {
-            match std::process::Command::new(bin).args(&args).status() {
-                Ok(status) if status.success() => return,
-                Ok(status) => log::warn!("{bin} key send exited {status}"),
-                Err(err) => log::warn!("{bin} key send failed: {err}"),
-            }
-        }
-    }
-    log::info!("no wtype/ydotool/xdotool; nest key '{mapped}' not sent");
+    crate::nest_input::inject_key(key);
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
@@ -703,7 +687,7 @@ fn lookup_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn pgrep_f(needle: &str) -> Vec<u32> {
+pub(crate) fn pgrep_f(needle: &str) -> Vec<u32> {
     let output = std::process::Command::new("pgrep")
         .args(["-f", needle])
         .output();

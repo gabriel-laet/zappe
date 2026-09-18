@@ -25,15 +25,34 @@ pub fn channel_config_paths() -> Vec<PathBuf> {
             .split(':')
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
+            .map(expand_user_path)
             .collect();
     }
     default_channel_paths()
 }
 
+/// Expand a leading `~/` so appliance env like `ZAPPE_OTA_CHANNELS=~/tv/channels.conf`
+/// still finds the file. Bare `~` other users (`~glaet/…`) are left alone.
+fn expand_user_path(raw: &str) -> PathBuf {
+    let trimmed = raw.trim();
+    if trimmed == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(trimmed)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    dirs::home_dir().or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+}
+
 fn default_channel_paths() -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if let Some(home) = dirs::home_dir() {
+    if let Some(home) = home_dir() {
         let tv = home.join("tv").join("channels.conf");
         if tv.exists() {
             paths.push(tv);
@@ -384,6 +403,19 @@ fn which(name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expands_tilde_ota_paths() {
+        let home = home_dir().expect("home dir");
+        assert_eq!(
+            expand_user_path("~/tv/channels.conf"),
+            home.join("tv/channels.conf")
+        );
+        assert_eq!(
+            expand_user_path("/abs/tv/channels.conf"),
+            PathBuf::from("/abs/tv/channels.conf")
+        );
+    }
 
     #[test]
     fn parse_dvbv5_sections() {
