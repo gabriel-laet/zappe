@@ -4,6 +4,7 @@ mod branding;
 mod catalog;
 mod harvest;
 mod nest;
+mod nest_input;
 mod ota;
 mod paths;
 pub(crate) mod playback;
@@ -214,6 +215,7 @@ async fn play_ota(
     wm::nudge_mpv_fullscreen(state.ota.latest_mpv_pid());
     let mut playback = state.playback.lock().unwrap();
     playback.surface = PlaybackSurface::Ota;
+    crate::atongx::set_playback_grabs(&app, &playback.surface);
     let _ = app.emit("playback-changed", playback.status());
     Ok(())
 }
@@ -248,6 +250,28 @@ fn remote_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     let playback = state.playback.lock().unwrap();
     playback::toggle_play_pause(&state.nest, &state.ota, &*playback);
     Ok(())
+}
+
+/// Air-mouse cursor mode: CSS on the guide, real pointer + click in the nest.
+pub(crate) fn remote_pointer_inner(app: &AppHandle) -> bool {
+    let Some(on) = nest_input::toggle_pointer_debounced() else {
+        return nest_input::pointer_mode();
+    };
+    let surface = {
+        let state = app.state::<AppState>();
+        let playback = state.playback.lock().unwrap();
+        playback.surface.clone()
+    };
+    if surface == PlaybackSurface::Chrome {
+        nest_input::on_pointer_toggled(on);
+    }
+    let _ = app.emit("guide-pointer", on);
+    on
+}
+
+#[tauri::command]
+fn remote_pointer(app: AppHandle) -> Result<bool, String> {
+    Ok(remote_pointer_inner(&app))
 }
 
 #[tauri::command]
@@ -373,6 +397,7 @@ pub fn run() {
             playback_status,
             remote_back,
             remote_play_pause,
+            remote_pointer,
             remote_home,
             remote_volume,
             remote_mute,

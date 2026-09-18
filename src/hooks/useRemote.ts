@@ -3,10 +3,14 @@ import { toast } from "sonner";
 import { api, onGuidePointer } from "@/lib/tauri";
 import { classifyAtongx } from "@/lib/remoteMap";
 
-function togglePointer() {
-  document.documentElement.classList.toggle("tv-pointer-on");
-  const on = document.documentElement.classList.contains("tv-pointer-on");
-  toast.message(on ? "Ponteiro" : "Controle");
+function applyPointer(on?: boolean) {
+  if (typeof on === "boolean") {
+    document.documentElement.classList.toggle("tv-pointer-on", on);
+  } else {
+    document.documentElement.classList.toggle("tv-pointer-on");
+  }
+  const shown = document.documentElement.classList.contains("tv-pointer-on");
+  toast.message(shown ? "Ponteiro" : "Controle");
 }
 
 export function useRemote(enabled: boolean) {
@@ -42,7 +46,7 @@ export function useRemote(enabled: boolean) {
         return;
       }
       if (action === "pointer") {
-        togglePointer();
+        void api.remotePointer().catch(() => applyPointer());
         return;
       }
       if (action === "volumeUp") {
@@ -83,7 +87,7 @@ export function useRemote(enabled: boolean) {
 
     window.addEventListener("keydown", onKey);
     let unlistenPointer: (() => void) | undefined;
-    void onGuidePointer(() => togglePointer()).then((fn) => {
+    void onGuidePointer((on) => applyPointer(on)).then((fn) => {
       unlistenPointer = fn;
     });
     return () => {

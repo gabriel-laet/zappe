@@ -107,6 +107,7 @@ export const api = {
   playbackStatus: () => invoke<PlaybackStatus>("playback_status"),
   remoteBack: () => invoke<void>("remote_back"),
   remotePlayPause: () => invoke<void>("remote_play_pause"),
+  remotePointer: () => invoke<boolean>("remote_pointer"),
   remoteHome: () => invoke<void>("remote_home"),
   remoteVolume: (delta: number) => invoke<string>("remote_volume", { delta }),
   remoteMute: () => invoke<string>("remote_mute"),
@@ -136,6 +137,6 @@ export function onVoiceArm(cb: () => void) {
   return listen("voice-arm", () => cb());
 }
 
-export function onGuidePointer(cb: () => void) {
-  return listen("guide-pointer", () => cb());
+export function onGuidePointer(cb: (on?: boolean) => void) {
+  return listen<boolean>("guide-pointer", (e) => cb(e.payload));
 }
