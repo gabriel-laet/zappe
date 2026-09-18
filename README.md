@@ -168,6 +168,7 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 | `ZAPPE_A11Y_DUMP` | write the live tree to this path |
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
 | `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
+| `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
 
 ## OTA
 
@@ -179,6 +180,63 @@ dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --vo=gpu \
 ```
 
 Play fails fast (guide stays / is restored) if `/dev/dvb/adapter0` is missing or zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
+
+## Appliance auto-update
+
+The living-room box (`zappe-tv`, user `glaet`) polls `origin/main` on a user systemd timer. A merge to `main` is picked up within ~20 minutes (or ~2 minutes after boot). No inbound ports, GitHub webhook, or Tailscale.
+
+Force an update now:
+
+```bash
+systemctl --user start zappe-update.service
+journalctl --user -u zappe-update.service -n 50
+# also: ~/.local/share/zappe/update.log
+```
+
+### One-time install
+
+Repo is expected at `~/src/zappe` (`ZAPPE_SRC` overrides). Copy the units, linger so user systemd runs without a login, then enable the timer:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp packaging/appliance/zappe-update.service \
+   packaging/appliance/zappe-update.timer \
+   ~/.config/systemd/user/
+# optional — only if you do not already have a kiosk unit
+cp packaging/appliance/zappe.service ~/.config/systemd/user/
+chmod +x packaging/appliance/zappe-update.sh packaging/appliance/zappe-kiosk.sh
+
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now zappe-update.timer
+systemctl --user enable --now zappe.service   # kiosk, if using the example unit
+```
+
+Expected kiosk unit name is **`zappe.service`**. Passwordless `sudo -n` is optional and only used to also install `/usr/local/bin/zappe`. The kiosk `PATH` prefers `~/bin`.
+
+### What the updater does
+
+1. `git fetch origin main` in `ZAPPE_SRC` (default `~/src/zappe`).
+2. Compare `origin/main` to `~/.local/share/zappe/installed-sha` (directory created if needed). Unchanged → exit 0 quietly.
+3. If the working tree is dirty, log and exit non-zero. Never `reset --hard` or wipe local changes. Never touches `~/.local/share/zappe/chrome-profile`.
+4. `git checkout main && git pull --ff-only`.
+5. `npm ci` (or `npm install`), then **build the binary only** (see below).
+6. Install to `~/bin/zappe` and, if `sudo -n` works, `/usr/local/bin/zappe`.
+7. Write the new SHA; `systemctl --user restart zappe.service` if that unit exists. Safe when gamescope/zappe is not running.
+
+### Build path (AppImage must not block updates)
+
+`npm run tauri build` (and `bundle.targets = "all"` in `src-tauri/tauri.conf.json`) packages AppImage/deb via linuxdeploy. That step can fail after the executable is already linked.
+
+Appliance updates **do not** run the bundler. They run:
+
+```bash
+npm run build                                          # tsc + vite → dist/
+cargo build --release --manifest-path src-tauri/Cargo.toml
+# binary: src-tauri/target/release/zappe
+```
+
+Equivalent and also safe: `npm run tauri build -- --no-bundle` (Tauri 2 skips bundling even when `bundle.active` is true).
 
 ## Out of scope (v1)
 
