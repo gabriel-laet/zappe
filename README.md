@@ -279,7 +279,7 @@ npm run tauri -- build --no-bundle
 # binary: src-tauri/target/release/zappe
 ```
 
-Never `cargo build --release` alone for the appliance — that leaves the kiosk on the Vite dev URL.
+Never `cargo build --release` alone for the appliance — that leaves `cfg(dev)` on and the kiosk on `http://localhost:1420`. `npm run check:updater` guards the script.
 
 ## Out of scope (v1)
 

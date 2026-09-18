@@ -121,6 +121,14 @@ else
   npm install
 fi
 
+if ! command -v npm >/dev/null 2>&1; then
+  die "npm not on PATH; cannot run the Tauri CLI"
+fi
+if ! npm run tauri -- --version >/dev/null; then
+  die "Tauri CLI missing (need @tauri-apps/cli via npm run tauri)"
+fi
+
+log "build: npm run tauri -- build --no-bundle (not cargo build --release)"
 npm run tauri -- build --no-bundle
 
 bin=""

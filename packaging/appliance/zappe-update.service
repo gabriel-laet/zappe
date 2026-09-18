@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Release builds on the TV box can take a while; default 90s would kill cargo.
+# Tauri --no-bundle release builds can take a while; default 90s would kill cargo.
 TimeoutStartSec=1h
 Environment=ZAPPE_SRC=%h/src/zappe
 Environment=PATH=%h/.cargo/bin:%h/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
