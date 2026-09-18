@@ -31,7 +31,7 @@ use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
 pub use harvest::{HarvestOutcome, HarvestRequest};
-use ota::{ota_available, OtaChannel};
+use ota::{ota_available, OtaChannel, OtaStatus};
 use playback::{GuideFocus, PlaybackController, PlaybackStatus, PlaybackSurface};
 use setup::{load_setup, save_setup, SetupState};
 use skill::NETFLIX_CONTINUE_WATCHING_V1;
@@ -108,6 +108,11 @@ fn ota_enabled() -> bool {
 #[tauri::command]
 fn list_ota_channels() -> Result<Vec<OtaChannel>, String> {
     ota::list_channels().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn ota_status() -> OtaStatus {
+    ota::ota_status()
 }
 
 #[tauri::command]
@@ -210,24 +215,16 @@ async fn play_ota(
     conf: String,
     focus: GuideFocus,
 ) -> Result<(), String> {
-    {
-        let mut playback = state.playback.lock().unwrap();
-        playback.focus_snapshot = Some(focus);
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.hide();
-        }
-    }
-    let conf_path = std::path::PathBuf::from(conf);
-    if let Err(err) = state.ota.play(&channel, &conf_path).await {
-        playback::restore_guide_fullscreen(&app);
-        return Err(err.to_string());
-    }
-    wm::nudge_mpv_fullscreen(state.ota.latest_mpv_pid());
-    let mut playback = state.playback.lock().unwrap();
-    playback.surface = PlaybackSurface::Ota;
-    crate::atongx::set_playback_grabs(&app, &playback.surface);
-    let _ = app.emit("playback-changed", playback.status());
-    Ok(())
+    playback::begin_ota(
+        &app,
+        &state.nest,
+        &state.ota,
+        &state.playback,
+        channel,
+        std::path::PathBuf::from(conf),
+        focus,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -406,6 +403,7 @@ pub fn run() {
             chrome_status,
             ota_enabled,
             list_ota_channels,
+            ota_status,
             get_catalog,
             get_branding,
             voice_listen,

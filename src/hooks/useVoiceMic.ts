@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { pickOtaChannel } from "@/lib/otaDisplay";
 import { api, onVoiceArm, type GuideFocus } from "@/lib/tauri";
 import { atongx } from "@/lib/remoteMap";
 import { parseVoicePtBr } from "@/lib/voicePtBr";
@@ -35,15 +36,20 @@ export function useVoiceMic(enabled: boolean) {
           await api.remoteMute();
           setMessage("Mudo");
         } else if (intent?.type === "ota") {
-          const channels = await api.listOtaChannels().catch(() => []);
-          const hit = channels.find((c) =>
-            c.name.toLowerCase().includes(intent.query.toLowerCase()),
-          );
-          if (hit) {
-            await api.playOta(hit.name, hit.source, noopFocus);
-            setMessage(hit.name);
+          const status = await api.otaStatus().catch(() => null);
+          const channels = status?.channels ?? [];
+          if (status?.error && channels.length === 0) {
+            setMessage(status.error);
           } else {
-            setMessage(`Canal ${intent.query} — próximo`);
+            const hit = pickOtaChannel(channels, intent.query);
+            if (hit) {
+              await api.playOta(hit.name, hit.source, noopFocus);
+              setMessage(hit.name);
+            } else {
+              setMessage(
+                status?.error ?? `Canal ${intent.query} não está no channels.conf`,
+              );
+            }
           }
         } else {
           setMessage(out.message);
