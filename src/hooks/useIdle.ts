@@ -29,9 +29,7 @@ export function useIdle(ms: number, enabled: boolean): boolean {
     bump();
     return () => {
       window.clearTimeout(timer);
-      ACTIVITY.forEach((evt) =>
-        window.removeEventListener(evt, bump, { capture: true } as EventListenerOptions),
-      );
+      ACTIVITY.forEach((evt) => window.removeEventListener(evt, bump, true));
     };
   }, [enabled, ms]);
 
