@@ -165,8 +165,11 @@ mod linux {
     use super::*;
     use std::collections::HashSet;
     use std::path::PathBuf;
+    use std::sync::{Arc, Mutex as StdMutex};
 
     use evdev::{Device, EventSummary, KeyCode, RelativeAxisCode};
+
+    type Watched = Arc<StdMutex<HashSet<PathBuf>>>;
 
     pub fn start(app: AppHandle) {
         if hid_disabled() {
@@ -182,16 +185,22 @@ mod linux {
     }
 
     fn watch_loop(app: AppHandle) {
-        let mut watched: HashSet<PathBuf> = HashSet::new();
+        let watched: Watched = Arc::new(StdMutex::new(HashSet::new()));
         loop {
             for path in candidate_paths() {
-                if !watched.insert(path.clone()) {
-                    continue;
+                {
+                    let mut guard = watched.lock().unwrap_or_else(|e| e.into_inner());
+                    if !guard.insert(path.clone()) {
+                        continue;
+                    }
                 }
                 match Device::open(&path) {
-                    Ok(device) => attach(app.clone(), path, device),
+                    Ok(device) => attach(app.clone(), path, device, watched.clone()),
                     Err(err) => {
-                        watched.remove(&path);
+                        watched
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&path);
                         log::debug!("ATONGX evdev skip {}: {err}", path.display());
                     }
                 }
@@ -228,7 +237,7 @@ mod linux {
         paths
     }
 
-    fn attach(app: AppHandle, path: PathBuf, mut device: Device) {
+    fn attach(app: AppHandle, path: PathBuf, mut device: Device, watched: Watched) {
         let name = device.name().unwrap_or("unknown").to_string();
         let path_str = path.to_string_lossy();
         if !is_atongx_device(&name, &path_str) {
@@ -269,11 +278,26 @@ mod linux {
             path.display()
         );
 
+        let unwatch = path.clone();
+        let watched_reader = watched.clone();
         if let Err(err) = std::thread::Builder::new()
             .name(format!("zappe-hid-{}", path.display()))
-            .spawn(move || read_loop(app, path, device, grabbed))
+            .spawn({
+                let unwatch = unwatch.clone();
+                move || {
+                    read_loop(app, path, device, grabbed);
+                    watched_reader
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .remove(&unwatch);
+                }
+            })
         {
             log::warn!("ATONGX evdev reader failed: {err}");
+            watched
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&unwatch);
         }
     }
 
