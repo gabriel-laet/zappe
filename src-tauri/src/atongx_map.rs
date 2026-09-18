@@ -121,12 +121,14 @@ pub struct AtongxBinding {
     pub action: AtongxAction,
     pub dispatch: AtongxDispatch,
     #[serde(default)]
+    #[allow(dead_code)]
     pub note: Option<String>,
     pub keys: Vec<AtongxKey>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct AtongxNode {
     pub id: String,
     pub by_id: String,
