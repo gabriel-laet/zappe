@@ -41,7 +41,7 @@ in `src-tauri/src/companion/sources.rs`. No new TV UX.
 | --- | --- |
 | Launch | Shared Chrome profile, **no gamescope**, **no `-f`**. |
 | Flags | `--start-minimized --window-size=1280,720 --window-position=-32000,-32000` |
-| After spawn | Hide nest + raise the guide (`keep_guide_after_background`). |
+| After spawn | Hide nest + raise the guide (harvest: `keep_guide_after_harvest`; login: `keep_hidden`). |
 | Typing | `inject_text_quiet` / `inject_key_quiet` — never `focus_nest_on_host`. |
 | Optional | `ZAPPE_LOGIN_BACKEND=xvfb` for a virtual X display. |
 | Never | Chrome `--headless`, CDP, `--enable-automation`. |
