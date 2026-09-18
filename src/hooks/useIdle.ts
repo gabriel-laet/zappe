@@ -23,11 +23,15 @@ export function useIdle(ms: number, enabled: boolean): boolean {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => setIdle(true), ms);
     };
-    ACTIVITY.forEach((evt) => window.addEventListener(evt, bump, { passive: true }));
+    ACTIVITY.forEach((evt) =>
+      window.addEventListener(evt, bump, { passive: true, capture: true }),
+    );
     bump();
     return () => {
       window.clearTimeout(timer);
-      ACTIVITY.forEach((evt) => window.removeEventListener(evt, bump));
+      ACTIVITY.forEach((evt) =>
+        window.removeEventListener(evt, bump, { capture: true } as EventListenerOptions),
+      );
     };
   }, [enabled, ms]);
 
