@@ -65,7 +65,10 @@ git_c() {
 }
 
 # --- fetch + compare -------------------------------------------------------
-if ! git_c fetch --quiet "${REMOTE}" "${BRANCH}"; then
+# Fetch the branch into the remote-tracking ref. A bare `git fetch origin main`
+# only writes FETCH_HEAD on some setups and would leave origin/main stale,
+# so an already-written installed-sha would skip a real update forever.
+if ! git_c fetch --quiet "${REMOTE}" "+refs/heads/${BRANCH}:refs/remotes/${REMOTE}/${BRANCH}"; then
   die "git fetch ${REMOTE} ${BRANCH} failed"
 fi
 

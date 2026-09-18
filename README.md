@@ -195,7 +195,7 @@ journalctl --user -u zappe-update.service -n 50
 
 ### One-time install
 
-Repo is expected at `~/src/zappe` (`ZAPPE_SRC` overrides). Copy the units, linger so user systemd runs without a login, then enable the timer:
+Repo is expected at `~/src/zappe` (`ZAPPE_SRC` overrides). If the checkout is elsewhere, edit `ZAPPE_SRC` and `ExecStart` in the copied units. Copy the units, linger so user systemd runs without a login, then enable the timer:
 
 ```bash
 mkdir -p ~/.config/systemd/user
