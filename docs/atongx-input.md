@@ -4,7 +4,11 @@ Living-room box: **no physical keyboard**. Couch input is this remote plus a pho
 
 Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). This is Zappe HID mapping — not a Samsung TV API.
 
-When the guide is hidden (nest / mpv), the same actions are registered as **global shortcuts** (`src-tauri/src/atongx.rs`) so Home / Back / Play-Pause / Menu / Mic / VOL / Mute / pointer still do something. D-pad + OK stay with the focused player.
+When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
+
+The appliance path is an **evdev watcher** (`src-tauri/src/hid.rs`) on the XING WEI nodes. It calls the same `return_to_guide` / `remote_back_inner` / `remote_power_inner` logic. Back, Home, and Power **always** exit the nest / OTA and show the guide. Power never shuts the box down.
+
+D-pad + OK stay with the focused player (keyboard node is not grabbed).
 
 | Button on device | Action | This PR |
 | --- | --- | --- |
@@ -22,6 +26,39 @@ When the guide is hidden (nest / mpv), the same actions are registered as **glob
 | DEL | `delete` | Same as Back (no on-TV typing) |
 | Mute | `mute` | `pactl set-sink-mute toggle` |
 
+## Evdev keycodes (XING WEI 2.4G USB)
+
+Dongle: USB **XING WEI 2.4G USB USB Composite Device** (ATONGX air mouse). Typical nodes:
+
+| Node | by-id | Role |
+| --- | --- | --- |
+| `/dev/input/event3` | `…-if02-event-kbd` | keyboard (D-pad / OK / Escape / Home). **Not grabbed.** |
+| `/dev/input/event4` | mouse | air-mouse pointer. Ignored. |
+| `/dev/input/event5` | consumer control | Back / Home / Power / VOL / Mute / PlayPause. **Grabbed** so nest gamescope cannot eat them. |
+
+Match is by name / by-id (`XING WEI`, `XING_WEI`, `ATONGX`, `2.4G USB`), overridable with `ZAPPE_HID_NAME`. Disable with `ZAPPE_HID_DISABLE=1`.
+
+| Button | evdev `KEY_*` | code | How we detect it |
+| --- | --- | --- | --- |
+| Back | `KEY_BACK`, also `KEY_ESC` / `KEY_EXIT` / `KEY_DELETE` / `KEY_BACKSPACE` | **158** (1 / 174 / 111 / 14) | Consumer `KEY_BACK` is the usual ATONGX “BrowserBack”. Keyboard Escape is a fallback (not grabbed). |
+| Home | `KEY_HOMEPAGE`, also `KEY_HOME` | **172** (102) | Consumer `KEY_HOMEPAGE` is “BrowserHome”. |
+| Power | `KEY_POWER`, also `KEY_POWER2` / `KEY_SLEEP` | **116** (226 / 142) | Return to guide only — never ACPI shutdown. |
+
+Confirm on the box (do this once if a new dongle maps differently):
+
+```bash
+# pick the XING WEI consumer + kbd nodes
+cat /proc/bus/input/devices | less
+sudo evtest /dev/input/event5   # press Back / Home / Power; note KEY_* and (code)
+sudo evtest /dev/input/event3
+```
+
+Zappe logs `ATONGX evdev watching … grab=true` and `ATONGX evdev Back code=158` on press. The user running the kiosk must be in the `input` group (`sudo usermod -aG input glaet` and re-login) so `/dev/input/event*` is readable.
+
+## Nest teardown
+
+`return_to_guide` **kills the nest child gamescope** (the one wrapping Chrome — cmdline contains `google-chrome` / `user-data-dir`). It never signals the outer kiosk (`gamescope -e -f -- zappe`) or any ancestor PID.
+
 ## Voice (red mic)
 
 Grammar: [`src/lib/voicePtBr.ts`](../src/lib/voicePtBr.ts).
@@ -33,3 +70,13 @@ Runtime: `ZAPPE_WHISPER_BIN` + `arecord`. `ZAPPE_VOICE_FAKE=abrir netflix` for t
 ## Branding (not this map)
 
 Official feras TV lockup (tan dog **Beto**, tuxedo cat **Lek**, beige circle, lowercase “feras”) lives only under `~/.local/share/zappe/` — never git. See `branding.json` + `logo.png`. Do not invent a substitute mark.
+
+## Manual verify (appliance)
+
+Build with `npm run tauri -- build --no-bundle` (never plain `cargo build --release`). Install / restart `zappe.service`.
+
+1. `journalctl --user -u zappe.service -f` — look for `ATONGX evdev watching XING WEI … grab=true` on the consumer node.
+2. Open Netflix (or any nest). Press **Back** — nest gamescope+Chrome die, guide is fullscreen. Repeat with **Home** and **Power**. Box stays on.
+3. `pgrep -a gamescope` while the nest is up shows two processes (kiosk `-- zappe` and nest Chrome). After Back, only the kiosk remains.
+4. VOL / Mute still change Pulse (`pactl get-sink-volume @DEFAULT_SINK@`). D-pad / OK still work inside Netflix.
+5. Optional: `sudo evtest` as above if a press is ignored — add the printed `KEY_*` to `action_for_keycode` in `src-tauri/src/hid.rs`.

@@ -15,7 +15,9 @@ describe("classifyAtongx", () => {
     assert.equal(classifyAtongx(key("ArrowRight")), "right");
     assert.equal(classifyAtongx(key("Enter")), "ok");
     assert.equal(classifyAtongx(key("Escape")), "back");
+    assert.equal(classifyAtongx(key("BrowserBack")), "back");
     assert.equal(classifyAtongx(key("Home")), "home");
+    assert.equal(classifyAtongx(key("BrowserHome")), "home");
     assert.equal(classifyAtongx(key("ContextMenu")), "menu");
     assert.equal(classifyAtongx(key("F1")), "menu");
     assert.equal(classifyAtongx(key("Space")), "playpause");

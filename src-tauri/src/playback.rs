@@ -88,8 +88,7 @@ pub fn begin_nest(
 pub async fn stop_playback_surface(nest: &NestManager, ota: &OtaSession, surface: PlaybackSurface) {
     match surface {
         PlaybackSurface::Chrome => {
-            nest.send_key("escape").await;
-            nest.hide().await;
+            nest.exit_play().await;
         }
         PlaybackSurface::Ota => {
             let pid = ota.latest_mpv_pid();
@@ -110,11 +109,7 @@ pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController
     }
 }
 
-pub fn toggle_play_pause(
-    nest: &NestManager,
-    ota: &OtaSession,
-    playback: &PlaybackController,
-) {
+pub fn toggle_play_pause(nest: &NestManager, ota: &OtaSession, playback: &PlaybackController) {
     match playback.surface {
         PlaybackSurface::Chrome => {
             let nest = nest.clone();
