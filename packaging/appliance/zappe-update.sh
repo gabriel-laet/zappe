@@ -21,6 +21,9 @@ LOG="${ZAPPE_DATA_DIR}/update.log"
 LOCK="${ZAPPE_DATA_DIR}/update.lock"
 USER_BIN="${HOME}/bin/zappe"
 SYSTEM_BIN="/usr/local/bin/zappe"
+USER_COMPANION="${HOME}/bin/zappe-companion"
+SYSTEM_COMPANION="/usr/local/bin/zappe-companion"
+COMPANION_UNIT="zappe-companion.service"
 
 # systemd --user sessions often have a thin PATH
 export PATH="${HOME}/.cargo/bin:${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
@@ -148,11 +151,36 @@ fi
 install -D -m 755 "${bin}" "${USER_BIN}"
 log "installed ${bin} -> ${USER_BIN}"
 
+companion=""
+for candidate in \
+  "${ZAPPE_SRC}/src-tauri/target/release/zappe-companion" \
+  "${ZAPPE_SRC}/target/release/zappe-companion"; do
+  if [[ -x "${candidate}" ]]; then
+    companion="${candidate}"
+    break
+  fi
+done
+if [[ -n "${companion}" ]]; then
+  install -D -m 755 "${companion}" "${USER_COMPANION}"
+  log "installed ${companion} -> ${USER_COMPANION}"
+fi
+
 if sudo -n true >/dev/null 2>&1; then
   sudo -n install -m 755 "${bin}" "${SYSTEM_BIN}"
   log "installed ${bin} -> ${SYSTEM_BIN}"
+  if [[ -n "${companion}" ]]; then
+    sudo -n install -m 755 "${companion}" "${SYSTEM_COMPANION}"
+    log "installed ${companion} -> ${SYSTEM_COMPANION}"
+  fi
 else
   log "sudo -n unavailable; skipped ${SYSTEM_BIN} (kiosk PATH uses ${HOME}/bin)"
+fi
+
+if [[ -f "${ZAPPE_SRC}/packaging/appliance/${COMPANION_UNIT}" ]]; then
+  mkdir -p "${HOME}/.config/systemd/user"
+  cp "${ZAPPE_SRC}/packaging/appliance/${COMPANION_UNIT}" \
+    "${HOME}/.config/systemd/user/${COMPANION_UNIT}"
+  systemctl --user daemon-reload || true
 fi
 
 printf '%s\n' "${remote_sha}" > "${INSTALLED_SHA}"
@@ -167,6 +195,14 @@ if systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
   fi
 else
   log "unit ${ZAPPE_UNIT} not installed; skip restart (expected name: zappe.service)"
+fi
+
+if [[ -n "${companion}" ]] && systemctl --user cat "${COMPANION_UNIT}" >/dev/null 2>&1; then
+  if systemctl --user restart "${COMPANION_UNIT}"; then
+    log "restarted ${COMPANION_UNIT}"
+  else
+    log "restart ${COMPANION_UNIT} failed (ignored)"
+  fi
 fi
 
 log "update complete ${remote_sha}"

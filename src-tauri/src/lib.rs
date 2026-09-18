@@ -2,6 +2,7 @@ mod a11y;
 mod atongx;
 mod branding;
 mod catalog;
+mod companion;
 mod harvest;
 mod hid;
 mod nest;
@@ -24,6 +25,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
+use companion::{Hub as CompanionHub, SessionView as CompanionSession};
 use nest::{NestManager, NestStatus};
 use remote_stubs::{remote_mute, remote_volume};
 use voice::VoiceOutcome;
@@ -44,6 +46,7 @@ pub(crate) struct AppState {
     setup: Mutex<SetupState>,
     catalog: CatalogStore,
     teach: TeachMode,
+    companion: CompanionHub,
 }
 
 #[derive(Serialize)]
@@ -97,6 +100,24 @@ fn complete_setup(state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 async fn chrome_status(state: State<'_, AppState>) -> Result<ChromeStatus, String> {
     Ok(state.nest.status().await.into())
+}
+
+#[tauri::command]
+async fn companion_session(state: State<'_, AppState>) -> Result<CompanionSession, String> {
+    Ok(state.companion.view().await)
+}
+
+#[tauri::command]
+async fn companion_begin(state: State<'_, AppState>) -> Result<CompanionSession, String> {
+    Ok(state.companion.begin().await)
+}
+
+#[tauri::command]
+async fn companion_select_source(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<CompanionSession, String> {
+    Ok(state.companion.select_source(&source).await)
 }
 
 #[tauri::command]
@@ -361,6 +382,11 @@ pub fn run() {
     let nest = NestManager::start();
     let catalog = CatalogStore::load();
     let teach = TeachMode::new();
+    let companion = CompanionHub::new(nest.clone());
+    let companion_boot = companion.clone();
+    tauri::async_runtime::spawn(async move {
+        companion::boot(companion_boot).await;
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -383,12 +409,16 @@ pub fn run() {
             setup: Mutex::new(setup),
             catalog,
             teach,
+            companion,
         })
         .invoke_handler(tauri::generate_handler![
             get_setup_state,
             update_setup,
             complete_setup,
             chrome_status,
+            companion_session,
+            companion_begin,
+            companion_select_source,
             ota_enabled,
             list_ota_channels,
             get_catalog,
@@ -427,4 +457,9 @@ pub fn run() {
 /// CLI / tests: harvest without starting the Tauri shell.
 pub async fn harvest_cli(req: HarvestRequest) -> anyhow::Result<HarvestOutcome> {
     harvest::run_cli(req).await
+}
+
+/// Standalone phone companion (`zappe-companion`).
+pub async fn run_companion() -> anyhow::Result<()> {
+    companion::run_standalone().await
 }

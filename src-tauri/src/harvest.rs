@@ -154,6 +154,7 @@ async fn harvest_skill(
         if let Err(err) = nest.open_url(&skill.open.url, NestMode::Harvest).await {
             log::warn!("nest start for harvest failed: {err:#}");
         }
+        keep_guide_after_background(nest).await;
         let wait = std::time::Duration::from_millis(skill.open.wait_ms);
         tokio::time::sleep(wait).await;
     } else if playback == PlaybackSurface::Chrome {
@@ -169,7 +170,7 @@ async fn harvest_skill(
                 match map_extract(skill, &tree) {
                     Ok(rows) => {
                         if playback != PlaybackSurface::Chrome {
-                            nest.hide().await;
+                            keep_guide_after_background(nest).await;
                         }
                         return Ok(rows);
                     }
@@ -184,9 +185,14 @@ async fn harvest_skill(
     }
 
     if playback != PlaybackSurface::Chrome {
-        nest.hide().await;
+        keep_guide_after_background(nest).await;
     }
     Err(last_err.unwrap_or_else(|| anyhow_none()))
+}
+
+async fn keep_guide_after_background(nest: &NestManager) {
+    nest.hide().await;
+    crate::wm::nudge_guide_fullscreen(None);
 }
 
 fn anyhow_none() -> anyhow::Error {

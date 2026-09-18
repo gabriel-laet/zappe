@@ -28,6 +28,16 @@ pub fn skills_override_dir() -> PathBuf {
     data_dir().join("skills")
 }
 
+/// Live device-code session (no passwords). Written by the companion.
+pub fn companion_session_path() -> PathBuf {
+    data_dir().join("companion-session.json")
+}
+
+/// Per-source auth flags (Netflix / Prime / Disney+ / YouTube).
+pub fn auth_sources_path() -> PathBuf {
+    data_dir().join("auth-sources.json")
+}
+
 pub fn ensure_data_dir() -> std::io::Result<PathBuf> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
@@ -51,6 +61,10 @@ mod tests {
         assert_eq!(
             branding_path(),
             PathBuf::from("/tmp/zappe-test-paths/branding.json")
+        );
+        assert_eq!(
+            companion_session_path(),
+            PathBuf::from("/tmp/zappe-test-paths/companion-session.json")
         );
         match prev {
             Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),

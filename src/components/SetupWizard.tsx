@@ -2,11 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
 import { useBrand } from "@/components/BrandingProvider";
-import { COMPANION_HOST } from "@/components/ConnectPhone";
+import { ConnectVisual } from "@/components/ConnectPhone";
 import { Button } from "@/components/ui/button";
 import { useTvChoice } from "@/hooks/useTvChoice";
+import {
+  EMPTY_SESSION,
+  isCompanionConnected,
+} from "@/lib/companion";
 import { cn } from "@/lib/utils";
-import { api, type SetupState } from "@/lib/tauri";
+import { api, type CompanionSession, type SetupState } from "@/lib/tauri";
 
 type Step = "browser" | "phone";
 
@@ -22,11 +26,31 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState<Step>("browser");
   const [setup, setSetup] = useState<SetupState>(emptySetup);
   const [chromeOk, setChromeOk] = useState(false);
+  const [session, setSession] = useState<CompanionSession>(EMPTY_SESSION);
 
   useEffect(() => {
     void api.getSetupState().then(setSetup);
     void api.chromeStatus().then((s) => setChromeOk(s.available));
   }, []);
+
+  useEffect(() => {
+    if (step !== "phone") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = await api.companionSession();
+        if (!cancelled) setSession(next);
+      } catch {
+        if (!cancelled) setSession(EMPTY_SESSION);
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [step]);
 
   const persist = async (patch: SetupState) => {
     setSetup(patch);
@@ -38,12 +62,13 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       ...setup,
       browser_ack: true,
       onepassword_skipped: true,
+      accounts_done: setup.accounts_done || isCompanionConnected(session.status),
       completed: true,
     };
     await persist(patch);
     await api.completeSetup();
     onComplete();
-  }, [onComplete, setup]);
+  }, [onComplete, session.status, setup]);
 
   const nextFromBrowser = useCallback(async () => {
     const status = await api.chromeStatus();
@@ -110,16 +135,17 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
           <h2 className="tv-title">Connect account (phone)</h2>
           <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
             On the couch, open your phone — not a password field on the TV.
+            Chrome stays hidden while you sign in.
           </p>
-          <p className="tv-caption">On your phone, open</p>
-          <p className="tv-host">{COMPANION_HOST}</p>
-          <div className="mx-auto tv-qr-stub" aria-hidden>
-            <span>QR</span>
-          </div>
-          <p className="tv-caption mx-auto max-w-3xl">
-            Netflix-style device code + QR land in a follow-up (phone companion).
-            This step is the placeholder so setup never asks you to type.
-          </p>
+          <ConnectVisual
+            session={session}
+            onSelectSource={(id) => {
+              void api.companionSelectSource(id).then(setSession);
+            }}
+          />
+          {isCompanionConnected(session.status) && (
+            <p className="tv-caption">Connected. Continue to Home when you are ready.</p>
+          )}
         </div>
       )}
 

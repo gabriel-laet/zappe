@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
+    <title>Zappe — Connect</title>
+    <style>
+      :root {
+        --bg: #000;
+        --fg: #f5f5f7;
+        --muted: #8e8e93;
+        --card: #141414;
+        --line: #2c2c2e;
+        --accent: #c4a574;
+        --ok: #7dcea0;
+        --danger: #ff6b6b;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        min-height: 100%;
+        background: #000;
+        color: var(--fg);
+        font-family: "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      body {
+        background-image:
+          radial-gradient(ellipse 90% 48% at 50% -12%, rgba(255,255,255,0.055), transparent 58%),
+          radial-gradient(ellipse 55% 42% at 92% 8%, rgba(196,165,116,0.16), transparent 62%),
+          linear-gradient(180deg, #141418 0%, #0a0a0c 36%, #000 78%);
+      }
+      main {
+        width: min(32rem, 100%);
+        margin: 0 auto;
+        padding: 2.25rem 1.35rem 3rem;
+      }
+      .kicker {
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+        color: var(--muted);
+        margin: 0 0 0.6rem;
+      }
+      h1 {
+        font-size: 1.85rem;
+        letter-spacing: -0.03em;
+        margin: 0 0 0.55rem;
+        font-weight: 650;
+      }
+      p { color: var(--muted); line-height: 1.45; }
+      .card {
+        margin-top: 1.4rem;
+        padding: 1.15rem 1.1rem 1.25rem;
+        background: var(--card);
+        border-radius: 1.15rem;
+      }
+      label {
+        display: block;
+        font-size: 0.78rem;
+        color: var(--muted);
+        margin: 0.85rem 0 0.35rem;
+      }
+      input, select {
+        width: 100%;
+        border: 0;
+        border-radius: 0.85rem;
+        background: #1c1c1e;
+        color: var(--fg);
+        font-size: 1.05rem;
+        padding: 0.85rem 0.9rem;
+      }
+      input:focus, select:focus { outline: 2px solid var(--accent); }
+      .row { display: flex; gap: 0.6rem; }
+      .row > * { flex: 1; }
+      button {
+        width: 100%;
+        margin-top: 1.15rem;
+        border: 0;
+        border-radius: 0.95rem;
+        background: var(--accent);
+        color: #1a140c;
+        font-size: 1.05rem;
+        font-weight: 650;
+        padding: 0.95rem 1rem;
+      }
+      button.secondary {
+        background: #1c1c1e;
+        color: var(--fg);
+      }
+      button:disabled { opacity: 0.45; }
+      .status {
+        margin-top: 1rem;
+        min-height: 1.4rem;
+        color: var(--fg);
+      }
+      .status.ok { color: var(--ok); }
+      .status.err { color: var(--danger); }
+      .code {
+        font-size: 1.7rem;
+        letter-spacing: 0.18em;
+        font-weight: 650;
+        margin: 0.2rem 0 0.6rem;
+      }
+      .hint { font-size: 0.88rem; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p class="kicker">Phone companion</p>
+      <h1>Sign in on this phone</h1>
+      <p>
+        The TV only shows a code. Every Apps source uses this page —
+        never a couch keyboard, and Chrome stays hidden on the TV.
+      </p>
+
+      <section id="gate" class="card">
+        <p class="hint">Match the code on the TV, or open the QR link.</p>
+        <label for="code">TV code</label>
+        <input id="code" inputmode="text" autocomplete="one-time-code" placeholder="W7K2-MQ4P" maxlength="12" />
+        <button id="claim" type="button">Continue</button>
+        <p id="gate-status" class="status"></p>
+      </section>
+
+      <section id="login" class="card" hidden>
+        <p class="code" id="paired-code"></p>
+        <p class="hint" id="source-hint">This signs the shared Chrome profile on the TV. HDMI stays on Zappe.</p>
+        <label for="source">Service</label>
+        <select id="source">
+          <option value="netflix">Netflix</option>
+          <option value="prime">Prime Video</option>
+          <option value="disney">Disney+</option>
+          <option value="youtube">YouTube</option>
+        </select>
+        <label for="provider">How do you sign in?</label>
+        <select id="provider">
+          <option value="password">Email + password</option>
+          <option value="email_code">Email sign-in code</option>
+          <option value="google">Google</option>
+        </select>
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="username" placeholder="you@email.com" />
+        <div id="password-wrap">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" />
+        </div>
+        <div id="factor-wrap" hidden>
+          <label for="factor">Code from email / 2FA</label>
+          <input id="factor" inputmode="numeric" autocomplete="one-time-code" />
+          <button id="send-factor" class="secondary" type="button">Send code to the TV</button>
+        </div>
+        <button id="submit" type="button">Sign in on the TV</button>
+        <p id="login-status" class="status"></p>
+      </section>
+    </main>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      let code = "";
+      let source = new URLSearchParams(location.search).get("s") || "netflix";
+
+      function pathCode() {
+        const m = location.pathname.match(/\/c\/([A-Za-z0-9-]+)/);
+        return m ? m[1] : "";
+      }
+
+      function setStatus(el, text, kind) {
+        el.textContent = text || "";
+        el.className = "status" + (kind ? " " + kind : "");
+      }
+
+      async function api(path, body) {
+        const opts = body
+          ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+          : {};
+        const res = await fetch(path, opts);
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || data.message || res.statusText);
+        return data;
+      }
+
+      function showLogin(session) {
+        $("gate").hidden = true;
+        $("login").hidden = false;
+        code = session.code || code;
+        $("paired-code").textContent = session.display_code || code;
+        if (session.source) {
+          source = session.source;
+          $("source").value = session.source;
+        }
+        fillSources(session.sources);
+        renderSession(session);
+      }
+
+      function fillSources(list) {
+        if (!list || !list.length) return;
+        const sel = $("source");
+        sel.innerHTML = "";
+        list.forEach((s) => {
+          const opt = document.createElement("option");
+          opt.value = s.id;
+          opt.textContent = s.label + (s.wired ? "" : " (same path)");
+          sel.appendChild(opt);
+        });
+        sel.value = source;
+      }
+
+      function renderSession(session) {
+        const el = $("login-status");
+        const status = session.status || "";
+        const msg = session.message || "";
+        if (status === "connected") setStatus(el, msg || "Connected. You can put the phone down.", "ok");
+        else if (status === "error") setStatus(el, msg || "Sign-in failed.", "err");
+        else setStatus(el, msg || "Waiting…");
+        const label = session.source_label || source;
+        $("source-hint").textContent = "Signing " + label + " into this TV's Chrome profile. HDMI stays on Zappe.";
+        $("factor-wrap").hidden = !(status === "needs_factor" || $("provider").value === "email_code");
+        $("submit").disabled = status === "signing_in" || status === "connected";
+      }
+
+      async function claim(raw) {
+        const session = await api("/api/claim", { code: raw });
+        if (source && source !== session.source) {
+          showLogin(await api("/api/tv/source", { source }));
+          return;
+        }
+        showLogin(session);
+      }
+
+      $("claim").onclick = async () => {
+        try {
+          setStatus($("gate-status"), "Pairing…");
+          await claim($("code").value);
+        } catch (err) {
+          setStatus($("gate-status"), String(err.message || err), "err");
+        }
+      };
+
+      $("source").onchange = async () => {
+        source = $("source").value;
+        try {
+          renderSession(await api("/api/tv/source", { source }));
+        } catch (_) {}
+      };
+
+      $("provider").onchange = () => {
+        const emailCode = $("provider").value === "email_code";
+        $("password-wrap").hidden = emailCode;
+        $("factor-wrap").hidden = !emailCode;
+      };
+
+      $("submit").onclick = async () => {
+        try {
+          setStatus($("login-status"), "Starting a hidden Chrome on the TV…");
+          const session = await api("/api/login", {
+            code,
+            email: $("email").value,
+            password: $("password").value,
+            provider: $("provider").value,
+            source: $("source").value || source,
+          });
+          renderSession(session);
+        } catch (err) {
+          setStatus($("login-status"), String(err.message || err), "err");
+        }
+      };
+
+      $("send-factor").onclick = async () => {
+        try {
+          const session = await api("/api/factor", { code, factor: $("factor").value });
+          renderSession(session);
+        } catch (err) {
+          setStatus($("login-status"), String(err.message || err), "err");
+        }
+      };
+
+      async function poll() {
+        if (!code) return;
+        try {
+          const session = await api("/api/status?code=" + encodeURIComponent(code));
+          renderSession(session);
+        } catch (_) {}
+      }
+
+      (async () => {
+        const fromPath = pathCode();
+        if (fromPath) {
+          $("code").value = fromPath;
+          try { await claim(fromPath); } catch (err) {
+            setStatus($("gate-status"), String(err.message || err), "err");
+          }
+        }
+        setInterval(poll, 1500);
+      })();
+    </script>
+  </body>
+</html>

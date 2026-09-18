@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import {
+  companionStatusLabel,
+  COMPANION_HOST,
+  GUIDE_SOURCES,
+  isCompanionConnected,
+  qrSvgMarkup,
+} from "./companion.ts";
 import { classifyAtongx } from "./remoteMap.ts";
 import { parseVoicePtBr } from "./voicePtBr.ts";
 
@@ -47,5 +54,43 @@ describe("parseVoicePtBr", () => {
     assert.deepEqual(parseVoicePtBr("início"), { type: "home" });
     assert.deepEqual(parseVoicePtBr("pausar"), { type: "playpause" });
     assert.equal(parseVoicePtBr("conte uma piada"), null);
+  });
+});
+
+describe("companion connect", () => {
+  it("keeps login on the phone host", () => {
+    assert.equal(COMPANION_HOST, "zappe-tv.local");
+    assert.equal(isCompanionConnected("connected"), true);
+    assert.equal(isCompanionConnected("waiting"), false);
+    assert.equal(companionStatusLabel({
+      code: "W7K2MQ4P",
+      display_code: "W7K2-MQ4P",
+      status: "waiting",
+      message: "Open this on your phone.",
+      public_url: "http://zappe-tv.local",
+      claim_url: "http://zappe-tv.local/c/W7K2MQ4P?s=netflix",
+      qr_svg: "<svg></svg>",
+      host: "zappe-tv.local",
+      port: 80,
+      expires_in_secs: 60,
+      nest_hidden: true,
+      accounts_connected: false,
+      source: "netflix",
+      source_label: "Netflix",
+      source_wired: true,
+      harvest_skill: "netflix.continue_watching.v1",
+      sources: [
+        { id: "netflix", label: "Netflix", wired: true, connected: false },
+        { id: "prime", label: "Prime Video", wired: false, connected: false },
+      ],
+    }), "Waiting for Netflix");
+    assert.equal(qrSvgMarkup("<svg><rect/></svg>"), "<svg><rect/></svg>");
+    assert.equal(qrSvgMarkup("<svg></svg><script>alert(1)</script>"), "<svg></svg>");
+    assert.deepEqual(
+      GUIDE_SOURCES.map((s) => s.id),
+      ["netflix", "prime", "disney", "youtube"],
+    );
+    assert.equal(GUIDE_SOURCES[0].wired, true);
+    assert.equal(GUIDE_SOURCES[1].wired, false);
   });
 });
