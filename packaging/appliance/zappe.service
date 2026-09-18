@@ -1,0 +1,13 @@
+[Unit]
+Description=Zappe living-room kiosk (gamescope + zappe)
+# DRM/display can appear after boot; Restart= retries.
+
+[Service]
+Type=simple
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/src/zappe/packaging/appliance/zappe-kiosk.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic Zappe appliance auto-update
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
