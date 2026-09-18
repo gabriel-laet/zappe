@@ -108,6 +108,10 @@ export const api = {
   remoteBack: () => invoke<void>("remote_back"),
   remotePlayPause: () => invoke<void>("remote_play_pause"),
   remoteHome: () => invoke<void>("remote_home"),
+  remoteVolume: (delta: number) => invoke<string>("remote_volume", { delta }),
+  remoteMute: () => invoke<string>("remote_mute"),
+  remotePower: () => invoke<string>("remote_power"),
+  remoteMenu: () => invoke<string>("remote_menu"),
   open1Password: (focus: GuideFocus) =>
     invoke<void>("open_onepassword_extension", { focus }),
 };

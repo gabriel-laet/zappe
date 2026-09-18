@@ -1,37 +1,103 @@
-/** ATONGX / ATONG-style living-room remote. No keyboard required. */
+/**
+ * ATONGX air-mouse contract (living-room remote).
+ *
+ * Every physical button has a named action. Guide navigation (D-pad / OK /
+ * Home / Back / Play-Pause / Mic) is wired. Power, volume, mute, menu,
+ * PAGE, pointer-toggle, and DEL have stable stubs so the next PR can attach
+ * HID / pactl / Hyprland without redesigning the UI.
+ *
+ * Cheap ATONGX HID maps vary; we accept common KeyboardEvent.code aliases.
+ */
 
-const BACK = new Set([
-  "Escape",
-  "Backspace",
-  "BrowserBack",
-  "GoBack",
-  "Back",
-]);
-const HOME = new Set(["Home", "BrowserHome"]);
-const ACTIVATE = new Set(["Enter", "NumpadEnter", "Select"]);
-const PLAY = new Set([
-  "Space",
-  "MediaPlayPause",
-  "MediaPlay",
-  "MediaPause",
-]);
-const VOICE = new Set(["ColorF0Red", "F9", "F8"]);
-const MENU = new Set(["ContextMenu", "F1", "AudioVolumeMute"]);
+export type AtongxAction =
+  | "up"
+  | "down"
+  | "left"
+  | "right"
+  | "ok"
+  | "back"
+  | "home"
+  | "menu"
+  | "playpause"
+  | "pageUp"
+  | "pageDown"
+  | "voice"
+  | "volumeUp"
+  | "volumeDown"
+  | "mute"
+  | "power"
+  | "pointer"
+  | "delete";
+
+const SETS: Record<AtongxAction, ReadonlySet<string>> = {
+  up: new Set(["ArrowUp"]),
+  down: new Set(["ArrowDown"]),
+  left: new Set(["ArrowLeft"]),
+  right: new Set(["ArrowRight"]),
+  ok: new Set(["Enter", "NumpadEnter", "Select"]),
+  back: new Set(["Escape", "BrowserBack", "GoBack", "Back"]),
+  home: new Set(["Home", "BrowserHome"]),
+  menu: new Set(["ContextMenu", "F1", "LaunchApp1"]),
+  playpause: new Set(["Space", "MediaPlayPause", "MediaPlay", "MediaPause"]),
+  pageUp: new Set(["PageUp"]),
+  pageDown: new Set(["PageDown"]),
+  voice: new Set(["ColorF0Red", "F9", "F8"]),
+  volumeUp: new Set(["AudioVolumeUp", "VolumeUp"]),
+  volumeDown: new Set(["AudioVolumeDown", "VolumeDown"]),
+  mute: new Set(["AudioVolumeMute", "VolumeMute"]),
+  power: new Set(["Power", "PowerOff", "Sleep"]),
+  pointer: new Set(["F2", "F6", "F7"]),
+  delete: new Set(["Delete", "Backspace"]),
+};
 
 function codeOf(e: KeyboardEvent): string {
   return e.code || e.key;
 }
 
+export function classifyAtongx(e: KeyboardEvent): AtongxAction | null {
+  const code = codeOf(e);
+  if (e.key === "ColorF0Red" || e.keyCode === 403) return "voice";
+  for (const [action, codes] of Object.entries(SETS) as [AtongxAction, ReadonlySet<string>][]) {
+    if (codes.has(code) || codes.has(e.key)) return action;
+  }
+  return null;
+}
+
 export const atongx = {
-  isLeft: (e: KeyboardEvent) => codeOf(e) === "ArrowLeft",
-  isRight: (e: KeyboardEvent) => codeOf(e) === "ArrowRight",
-  isUp: (e: KeyboardEvent) => codeOf(e) === "ArrowUp",
-  isDown: (e: KeyboardEvent) => codeOf(e) === "ArrowDown",
-  isActivate: (e: KeyboardEvent) => ACTIVATE.has(codeOf(e)),
-  isBack: (e: KeyboardEvent) => BACK.has(codeOf(e)),
-  isHome: (e: KeyboardEvent) => HOME.has(codeOf(e)),
-  isPlayPause: (e: KeyboardEvent) => PLAY.has(codeOf(e)),
-  isVoice: (e: KeyboardEvent) =>
-    VOICE.has(codeOf(e)) || e.key === "ColorF0Red" || e.keyCode === 403,
-  isMenu: (e: KeyboardEvent) => MENU.has(codeOf(e)),
+  classify: classifyAtongx,
+  isLeft: (e: KeyboardEvent) => classifyAtongx(e) === "left",
+  isRight: (e: KeyboardEvent) => classifyAtongx(e) === "right",
+  isUp: (e: KeyboardEvent) => classifyAtongx(e) === "up",
+  isDown: (e: KeyboardEvent) => classifyAtongx(e) === "down",
+  isActivate: (e: KeyboardEvent) => classifyAtongx(e) === "ok",
+  isBack: (e: KeyboardEvent) => classifyAtongx(e) === "back" || classifyAtongx(e) === "delete",
+  isHome: (e: KeyboardEvent) => classifyAtongx(e) === "home",
+  isPlayPause: (e: KeyboardEvent) => classifyAtongx(e) === "playpause",
+  isVoice: (e: KeyboardEvent) => classifyAtongx(e) === "voice",
+  isMenu: (e: KeyboardEvent) => classifyAtongx(e) === "menu",
+  isPageUp: (e: KeyboardEvent) => classifyAtongx(e) === "pageUp",
+  isPageDown: (e: KeyboardEvent) => classifyAtongx(e) === "pageDown",
 };
+
+/** Human table for README / next-PR wiring. */
+export const ATONGX_BUTTONS: { action: AtongxAction; button: string; status: "wired" | "stub" }[] =
+  [
+    { action: "power", button: "Power", status: "stub" },
+    { action: "playpause", button: "Play / Pause", status: "wired" },
+    { action: "pointer", button: "Air-mouse cursor toggle", status: "stub" },
+    { action: "up", button: "D-pad Up", status: "wired" },
+    { action: "down", button: "D-pad Down", status: "wired" },
+    { action: "left", button: "D-pad Left", status: "wired" },
+    { action: "right", button: "D-pad Right", status: "wired" },
+    { action: "ok", button: "OK (center / orange ring)", status: "wired" },
+    { action: "home", button: "Home", status: "wired" },
+    { action: "back", button: "Back", status: "wired" },
+    { action: "menu", button: "Menu", status: "stub" },
+    { action: "pageUp", button: "PAGE up", status: "wired" },
+    { action: "pageDown", button: "PAGE down", status: "wired" },
+    { action: "voice", button: "Mic (red)", status: "wired" },
+    { action: "volumeUp", button: "VOL +", status: "stub" },
+    { action: "volumeDown", button: "VOL −", status: "stub" },
+    { action: "delete", button: "DEL", status: "wired" },
+    { action: "mute", button: "Mute", status: "stub" },
+  ];

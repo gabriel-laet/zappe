@@ -294,6 +294,12 @@ export function Home() {
         e.preventDefault();
         const tile = currentShelf.tiles[focus.index];
         if (tile) void activate(tile);
+      } else if (atongx.isPageUp(e)) {
+        e.preventDefault();
+        move(-1, 0);
+      } else if (atongx.isPageDown(e)) {
+        e.preventDefault();
+        move(1, 0);
       }
     };
     window.addEventListener("keydown", onKey);

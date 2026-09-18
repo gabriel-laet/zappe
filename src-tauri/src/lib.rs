@@ -6,6 +6,7 @@ mod nest;
 mod ota;
 mod paths;
 mod playback;
+mod remote_stubs;
 mod setup;
 mod skill;
 mod skills;
@@ -21,6 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
 use nest::{NestManager, NestStatus};
+use remote_stubs::{remote_menu, remote_mute, remote_power, remote_volume};
 use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
@@ -355,6 +357,10 @@ pub fn run() {
             remote_back,
             remote_play_pause,
             remote_home,
+            remote_volume,
+            remote_mute,
+            remote_power,
+            remote_menu,
             open_onepassword_extension,
         ])
         .build(tauri::generate_context!())

@@ -50,6 +50,9 @@ export default function App() {
   const [minSplashDone, setMinSplashDone] = useState(false);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) {
+      document.documentElement.classList.add("tv-living-room");
+    }
     applyBrandingCss(DEFAULT_BRANDING);
     const timer = window.setTimeout(() => setMinSplashDone(true), SPLASH_MIN_MS);
     return () => window.clearTimeout(timer);

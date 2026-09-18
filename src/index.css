@@ -65,6 +65,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Appliance: hide the OS cursor until air-mouse pointer mode (F2). Dev keeps a cursor. */
+html.tv-living-room:not(.tv-pointer-on),
+html.tv-living-room:not(.tv-pointer-on) * {
+  cursor: none !important;
+}
+
 body.tv-handoff {
   animation: tv-handoff 0.28s var(--ease-out-tv) both;
 }

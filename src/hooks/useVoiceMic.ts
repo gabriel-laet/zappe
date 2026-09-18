@@ -28,6 +28,17 @@ export function useVoiceMic(enabled: boolean) {
         } else if (intent?.type === "open") {
           await api.openApp(intent.service, noopFocus);
           setMessage(intent.service);
+        } else if (intent?.type === "ota") {
+          const channels = await api.listOtaChannels().catch(() => []);
+          const hit = channels.find((c) =>
+            c.name.toLowerCase().includes(intent.query.toLowerCase()),
+          );
+          if (hit) {
+            await api.playOta(hit.name, hit.source, noopFocus);
+            setMessage(hit.name);
+          } else {
+            setMessage(`Canal ${intent.query} — próximo`);
+          }
         } else {
           setMessage(out.message);
         }

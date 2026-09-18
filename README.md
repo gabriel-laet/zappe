@@ -113,7 +113,7 @@ Not in this PR. Planned: a small companion at `http://zappe-tv.local` that shows
 
 ## Custom branding (appliance, not git)
 
-The guide ships only in-code defaults (`Zappe` + the built-in accent). Personal wordmark, accent, and artwork live in the **user data dir** so they are never committed.
+The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). The Feras TV circular badge (tan dog **Beto**, tuxedo cat **Lek** — names are not shown in the UI) lives in the **user data dir** so it is never committed.
 
 Preferred path (Linux XDG):
 
@@ -178,20 +178,21 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 
 Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
 
-## Remote (ATONGX — no keyboard)
+## Remote (ATONGX air mouse — no keyboard)
 
-Couch input is the TV remote (plus phone for login). Map lives in `src/lib/remoteMap.ts`.
+Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classifyAtongx` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts).
 
-| Key | Action |
+| Button | This PR |
 | --- | --- |
-| D-pad | move focus (Apple TV–style scale + glow) |
-| OK / Enter | activate tile |
-| Back / Escape / BrowserBack | back to guide |
-| Home | end playback / guide |
-| Play/Pause / Space | play/pause in the nest (HID) |
-| **Red** (`ColorF0Red` / F9) | Whisper pt-BR mic — `início`, `voltar`, `Netflix`, … |
+| D-pad + OK (orange ring) | Guide focus / activate |
+| Home, Back, DEL | Guide / end playback |
+| Play / Pause | Nest / mpv HID |
+| PAGE up / down | Jump a shelf |
+| Mic (red) | Whisper pt-BR stub — `abrir Netflix`, `pausar`, `voltar`, `canal Globo` |
+| Air-mouse cursor toggle | Shows / hides CSS pointer (`tv-pointer-on`). HID next PR |
+| VOL +/−, Mute, Menu, Power | Logged stubs (`remote_volume` / `mute` / `menu` / `power`) |
 
-Whisper: set `ZAPPE_WHISPER_BIN` to a whisper.cpp binary (`-l pt`). Optional `arecord` for capture. `ZAPPE_VOICE_FAKE=netflix` exercises the grammar without a mic.
+Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
 
 ## Environment
 

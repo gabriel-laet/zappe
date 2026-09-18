@@ -11,7 +11,7 @@ Zappe reads branding from the **user data dir**, never from this repository:
 
 Optional artwork sits next to that file (`logo.png`) or uses an absolute path.
 
-The Feras TV circular badge (dog + tuxedo cat, FERAS / TV) stays on the appliance. **Do not commit that PNG.**
+The Feras TV circular badge (tan dog **Beto**, tuxedo cat **Lek**, cream FERAS / orange TV) stays on the appliance. Pet names are not UI copy. **Do not commit that PNG.**
 
 ### Drop branding on the living-room box
 
