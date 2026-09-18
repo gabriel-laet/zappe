@@ -324,7 +324,7 @@ export function Home() {
   }
 
   return (
-    <div className="tv-page">
+    <div className="tv-page tv-guide">
       <header className="mb-[var(--tv-space-4)] flex items-center justify-between gap-[var(--tv-space-3)]">
         <BrandMark />
         {catalog.teach.active && (
