@@ -20,6 +20,8 @@ pub enum NestMode {
     Harvest,
     /// Fullscreen nest for watching.
     Play,
+    /// Couch login: never `-f`, hide immediately, keep the guide on HDMI.
+    Login,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -230,7 +232,10 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
 fn apply_mode(mode: NestMode) {
     let pids = nest_window_pids();
     match mode {
-        NestMode::Harvest => wm::nudge_nest_hide(pids.first().copied()),
+        NestMode::Harvest | NestMode::Login => {
+            wm::nudge_nest_hide(pids.first().copied());
+            wm::nudge_guide_fullscreen(None);
+        }
         NestMode::Play => {
             wm::nudge_nest_show(pids.first().copied());
             crate::nest_input::focus_nest_on_host();
@@ -314,10 +319,10 @@ pub struct NestLaunch {
 impl NestLaunch {
     pub fn new(chrome: PathBuf, profile: PathBuf, url: Option<String>, mode: NestMode) -> Self {
         let (width, height) = nest_size();
-        // Harvest must not spawn a second gamescope: on the appliance kiosk that
-        // steals HDMI/DRM. Play still wraps Chrome when gamescope is available.
+        // Harvest / login must not spawn a second gamescope: on the appliance
+        // kiosk that steals HDMI/DRM. Play still wraps Chrome when available.
         let gamescope = match mode {
-            NestMode::Harvest => None,
+            NestMode::Harvest | NestMode::Login => None,
             NestMode::Play if prefer_gamescope() => find_gamescope(),
             NestMode::Play => None,
         };
@@ -340,9 +345,9 @@ impl NestLaunch {
             self.mode,
         ));
 
-        // Safety net: never wrap harvest in gamescope even if the struct
-        // was built by hand with a gamescope path (tests / callers).
-        if self.mode != NestMode::Harvest {
+        // Safety net: never wrap harvest/login in gamescope even if the
+        // struct was built by hand with a gamescope path (tests / callers).
+        if !self.mode.is_background() {
             if let Some(gs) = &self.gamescope {
                 let mut args = vec![
                     gs.display().to_string(),
@@ -372,6 +377,12 @@ impl NestLaunch {
     }
 }
 
+impl NestMode {
+    pub fn is_background(self) -> bool {
+        matches!(self, Self::Harvest | Self::Login)
+    }
+}
+
 pub fn chrome_args(profile: &Path, url: Option<&str>) -> Vec<String> {
     chrome_args_for_mode(profile, url, NestMode::Play)
 }
@@ -384,9 +395,9 @@ pub fn chrome_args_for_mode(profile: &Path, url: Option<&str>, mode: NestMode) -
         "--disable-session-crashed-bubble".into(),
         "--force-renderer-accessibility".into(),
     ];
-    if mode == NestMode::Harvest {
-        // Stay off the HDMI kiosk: no --kiosk / --start-fullscreen, start
-        // minimized and parked off-screen when the compositor honors it.
+    if mode.is_background() {
+        // Stay off the HDMI kiosk: no --kiosk / --start-fullscreen. Chrome
+        // starts minimized and parked off-screen when the compositor honors it.
         args.push("--start-minimized".into());
         args.push("--window-size=1280,720".into());
         args.push("--window-position=-32000,-32000".into());
@@ -489,6 +500,16 @@ pub fn find_gamescope() -> Option<PathBuf> {
         }
     }
     which("gamescope")
+}
+
+pub fn env_flag(name: &str) -> bool {
+    match std::env::var(name)
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on") => true,
+        _ => false,
+    }
 }
 
 pub fn prefer_gamescope() -> bool {
@@ -793,26 +814,31 @@ mod tests {
     }
 
     #[test]
-    fn harvest_mode_is_not_fullscreen() {
-        let launch = NestLaunch {
-            gamescope: Some(PathBuf::from("/usr/bin/gamescope")),
-            chrome: PathBuf::from("/usr/bin/google-chrome-stable"),
-            profile: PathBuf::from("/tmp/zappe/chrome-profile"),
-            url: Some("https://www.netflix.com/browse".into()),
-            mode: NestMode::Harvest,
-            width: 1280,
-            height: 720,
-        };
-        let argv = launch.argv();
-        assert!(!argv.contains(&"-f".into()));
-        assert!(!argv.iter().any(|a| a.contains("gamescope")));
-        assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
-        assert!(argv.iter().any(|a| a == "--start-minimized"));
-        assert!(argv.iter().any(|a| a.contains("user-data-dir=")));
-        assert!(!argv
-            .iter()
-            .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
-        assert!(launch.has_no_cdp_flags());
+    fn login_and_harvest_share_invisible_chrome_path() {
+        for mode in [NestMode::Login, NestMode::Harvest] {
+            let launch = NestLaunch {
+                gamescope: Some(PathBuf::from("/usr/bin/gamescope")),
+                chrome: PathBuf::from("/usr/bin/google-chrome-stable"),
+                profile: PathBuf::from("/tmp/zappe/chrome-profile"),
+                url: Some("https://www.netflix.com/login".into()),
+                mode,
+                width: 1280,
+                height: 720,
+            };
+            let argv = launch.argv();
+            assert!(!argv.contains(&"-f".into()), "{mode:?} {argv:?}");
+            assert!(
+                !argv.iter().any(|a| a.contains("gamescope")),
+                "{mode:?} must not wrap a second gamescope: {argv:?}"
+            );
+            assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
+            assert!(argv.iter().any(|a| a == "--start-minimized"));
+            assert!(argv.iter().any(|a| a.contains("window-position=-32000")));
+            assert!(!argv
+                .iter()
+                .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
+            assert!(launch.has_no_cdp_flags());
+        }
     }
 
     #[test]
@@ -825,8 +851,15 @@ mod tests {
         );
         assert!(launch.gamescope.is_none());
         let argv = launch.argv();
+        assert!(!argv.contains(&"-f".into()));
         assert!(!argv.iter().any(|a| a.contains("gamescope")));
+        assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
         assert!(argv.iter().any(|a| a == "--start-minimized"));
+        assert!(argv.iter().any(|a| a.contains("user-data-dir=")));
+        assert!(!argv
+            .iter()
+            .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
+        assert!(launch.has_no_cdp_flags());
     }
 
     #[test]

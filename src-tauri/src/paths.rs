@@ -56,6 +56,16 @@ pub fn skill_search_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Live device-code session (no passwords). Written by the companion.
+pub fn companion_session_path() -> PathBuf {
+    data_dir().join("companion-session.json")
+}
+
+/// Per-source auth flags (Netflix / Prime / Disney+ / YouTube).
+pub fn auth_sources_path() -> PathBuf {
+    data_dir().join("auth-sources.json")
+}
+
 pub fn ensure_data_dir() -> std::io::Result<PathBuf> {
     let dir = data_dir();
     std::fs::create_dir_all(&dir)?;
@@ -87,6 +97,14 @@ mod tests {
         let search = skill_search_dirs();
         assert!(search.iter().any(|p| p == &skills_override_dir()));
         assert!(search.iter().any(|p| p.ends_with("skills")));
+        assert_eq!(
+            companion_session_path(),
+            PathBuf::from("/tmp/zappe-test-paths/companion-session.json")
+        );
+        assert_eq!(
+            auth_sources_path(),
+            PathBuf::from("/tmp/zappe-test-paths/auth-sources.json")
+        );
         match prev {
             Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),
             None => std::env::remove_var("ZAPPE_DATA_DIR"),

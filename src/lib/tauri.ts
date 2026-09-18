@@ -87,11 +87,22 @@ export type HarvestOutcome = {
   teach: boolean;
 };
 
+import type { CompanionSession } from "@/lib/companion";
+export type {
+  CompanionSession,
+  CompanionSource,
+  CompanionStatus,
+} from "@/lib/companion";
+
 export const api = {
   getSetupState: () => invoke<SetupState>("get_setup_state"),
   updateSetup: (patch: SetupState) => invoke<void>("update_setup", { patch }),
   completeSetup: () => invoke<void>("complete_setup"),
   chromeStatus: () => invoke<ChromeStatus>("chrome_status"),
+  companionSession: () => invoke<CompanionSession>("companion_session"),
+  companionBegin: () => invoke<CompanionSession>("companion_begin"),
+  companionSelectSource: (source: string) =>
+    invoke<CompanionSession>("companion_select_source", { source }),
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
   otaStatus: () => invoke<OtaStatus>("ota_status"),

@@ -1,6 +1,8 @@
 [Unit]
 Description=Zappe living-room kiosk (gamescope + zappe)
 # DRM/display can appear after boot; Restart= retries.
+Wants=zappe-companion.service
+After=zappe-companion.service
 
 [Service]
 Type=simple

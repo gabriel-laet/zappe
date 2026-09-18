@@ -201,6 +201,70 @@ pub fn inject_key(name: &str) {
     );
 }
 
+/// Type into the nest *without* raising it on HDMI. Login uses this so the
+/// Connect screen stays in front. Do not call [`focus_nest_on_host`].
+pub fn inject_text_quiet(text: &str) -> bool {
+    if text.is_empty() {
+        return true;
+    }
+    let target = discover_nest_target();
+    if target.x11_display.is_some()
+        && try_run("xdotool", &xdotool_type_args(text), Some(&target))
+    {
+        log::info!(
+            "nest text via quiet xdotool DISPLAY={}",
+            target.x11_display.as_deref().unwrap_or("?")
+        );
+        return true;
+    }
+    if target.wayland_display.is_some()
+        && try_run("wtype", &wtype_text_args(text), Some(&target))
+    {
+        log::info!(
+            "nest text via quiet wtype WAYLAND_DISPLAY={}",
+            target.wayland_display.as_deref().unwrap_or("?")
+        );
+        return true;
+    }
+    log::warn!("quiet text inject did not reach the hidden nest");
+    false
+}
+
+/// Named key into the nest without raising the gamescope window.
+pub fn inject_key_quiet(name: &str) -> bool {
+    let Some(spec) = key_spec(name) else {
+        log::warn!("nest key '{name}' is not mapped");
+        return false;
+    };
+    let target = discover_nest_target();
+    if target.x11_display.is_some()
+        && try_run("xdotool", &xdotool_key_args(spec), Some(&target))
+    {
+        return true;
+    }
+    if target.wayland_display.is_some()
+        && try_run("wtype", &wtype_key_args(spec), Some(&target))
+    {
+        return true;
+    }
+    false
+}
+
+pub fn xdotool_type_args(text: &str) -> Vec<String> {
+    vec![
+        "type".into(),
+        "--clearmodifiers".into(),
+        "--delay".into(),
+        "12".into(),
+        "--".into(),
+        text.to_string(),
+    ]
+}
+
+pub fn wtype_text_args(text: &str) -> Vec<String> {
+    vec!["--".into(), text.to_string()]
+}
+
 pub fn inject_click() {
     focus_nest_on_host();
     let target = discover_nest_target();
@@ -437,6 +501,23 @@ fn try_run(bin: &str, args: &[String], target: Option<&NestInputTarget>) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quiet_type_args_do_not_raise_or_automate() {
+        let args = xdotool_type_args("user@example.com");
+        assert_eq!(args[0], "type");
+        assert!(args.contains(&"--".into()));
+        assert_eq!(args.last().map(String::as_str), Some("user@example.com"));
+        assert_eq!(wtype_text_args("secret"), vec!["--", "secret"]);
+        let src = include_str!("nest_input.rs");
+        assert!(src.contains("fn inject_text_quiet"));
+        assert!(
+            !src[src.find("pub fn inject_text_quiet").unwrap()
+                ..src.find("pub fn inject_click").unwrap()]
+                .contains("focus_nest_on_host"),
+            "login typing must not raise the nest on HDMI"
+        );
+    }
 
     #[test]
     fn wtype_uses_keysym_dash_k_not_text() {

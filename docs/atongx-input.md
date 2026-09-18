@@ -1,6 +1,6 @@
 # ATONGX air mouse — input contract
 
-Living-room box: **no physical keyboard**. Couch input is this remote plus a phone at `zappe-tv.local` (device-code login is the next PR).
+Living-room box: **no physical keyboard**. Couch input is this remote plus a phone at `zappe-tv.local` (device code + QR — see [`docs/companion.md`](companion.md)).
 
 Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). Nest nav is Zappe HID. Volume / mute are Samsung Device Connect keys — see [`samsung-tv.md`](samsung-tv.md).
 

@@ -54,6 +54,7 @@ Playback is a URL into the nest (deep link when harvest found one). Play/pause, 
 - `xdotool` (preferred) plus `wtype` or `ydotool` — nest D-pad / OK / play/pause / Escape. `wtype` must use `-k` (keysym), not text.
 - `dvbv5-tools` + `mpv` — OTA / TV aberta
 - Channel list: `~/tv/channels.conf`, `~/.config/zappe/channels.conf`, or `~/.local/share/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
+- `xorg-server-xvfb` — optional invisible login backend (`ZAPPE_LOGIN_BACKEND=xvfb`). Default login uses the same hidden Chrome path as harvest (no second gamescope).
 
 ### Chrome accessibility (harvest)
 
@@ -127,14 +128,23 @@ PY
 The living-room box has **no physical keyboard**. Couch input is the TV remote plus a phone.
 
 1. **Browser on this TV** — Chrome already on `PATH` (or `CHROME_PATH`). That is an appliance install, not a couch typing step.
-2. **Connect account (phone)** — stub: open `http://zappe-tv.local` on your phone. Netflix-style **device code + QR** via a phone companion is the next PR. Setup never asks for a password on the TV and no longer opens the nest to type.
-3. **Home** — harvested shelves + OTA when configured. An empty Continue Watching row shows a **Connect account (phone)** shelf.
+2. **Connect account (phone)** — TV shows a live **device code + QR** and a source picker (Netflix, Prime, Disney+, YouTube). Open `http://zappe-tv.local` (or scan). Sign in on the phone. Setup never asks for a password on the TV and never fullscreens Chrome for typing.
+3. **Home** — harvested shelves + OTA when configured. An empty Continue Watching row shows a **Connect account (phone)** shelf. ATONGX **Menu** opens Connect; **Back** dismisses it.
 
 Setup state: `~/.config/zappe/setup.json`.
 
-### Phone companion (next)
+### Phone companion
 
-Not in this PR. Planned: a small companion at `http://zappe-tv.local` that shows a device code and QR so the TV only displays “open this on your phone.” Do not add on-TV password fields.
+LAN HTTP server on the appliance (`zappe-companion`, also started by the guide if the port is free). Couch steps and how Chrome stays off HDMI: [`docs/companion.md`](docs/companion.md).
+
+```bash
+# appliance (port 80 via systemd capabilities)
+cp packaging/appliance/zappe-companion.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zappe-companion.service
+```
+
+The TV only displays the code / QR / “Connected”. Email and password stay on the phone. Each Apps source writes its session into `~/.local/share/zappe/chrome-profile` via the **same hidden Chrome path as harvest** (no second gamescope, `--start-minimized`). Netflix is the wired adapter (then Sync Continue Watching). Prime / Disney+ / YouTube use the same UX with stub cookie checks. Do not add on-TV password fields.
 
 ## Custom branding (appliance, not git)
 
@@ -179,7 +189,7 @@ Missing file → defaults. Invalid JSON → log and fall back. See [`packaging/a
     https://www.netflix.com/watch/…
   ```
 
-Harvest uses the same profile **without** gamescope and **without** `-f` (a second DRM nest would steal HDMI). Chrome starts minimized / off-screen when the compositor honors it, then the nest is hidden and the guide is raised. Netflix chrome may flash briefly on some sessions.
+Harvest **and** phone login share one invisible nest: the same Chrome profile, **no gamescope** (a second DRM nest would steal HDMI), **no `-f`**, `--start-minimized` + off-screen window, then hide and raise the guide. Play still wraps gamescope fullscreen. Netflix chrome may flash briefly on some sessions. See [`docs/companion.md`](docs/companion.md).
 
 `ZAPPE_NEST=chrome` skips gamescope (dev fallback). `ZAPPE_HARVEST_FIXTURE` / `zappe-harvest --fixture` skip the live dump.
 
@@ -196,7 +206,7 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 | Phase | Behavior |
 | --- | --- |
 | Guide | Tauri visible, D-pad on shelves |
-| Harvest | Chrome (no gamescope) minimized, dump, hide nest; guide stays up |
+| Harvest / login | Chrome (no gamescope) minimized / off-screen, dump or sign-in, hide nest; guide stays up |
 | Stream tile | Guide hides → gamescope fullscreen |
 | OTA | Guide hides → mpv fullscreen |
 | Back / Home / Power | Kill nest child gamescope (never the kiosk) or stop mpv → guide fullscreen + focus. Evdev on the XING WEI dongle; Power never shuts the box down. |
@@ -220,7 +230,7 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 | Menu | Open Connect (returns to guide first if playing) |
 | Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
 
-Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
+Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes are the login path — never on-TV typing.
 
 ## Environment
 
@@ -246,6 +256,12 @@ Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsun
 | `ZAPPE_SAMSUNG_TOKEN` | Device Connect token (prefer `~/.local/share/zappe/samsung.json`) |
 | `ZAPPE_SAMSUNG_NAME` | Client name shown on the TV pair popup (default `Zappe`) |
 | `ZAPPE_SAMSUNG_DISABLE` | `1` skips Samsung and uses `pactl` only |
+| `ZAPPE_COMPANION_HOST` | public name on the QR (`zappe-tv.local`) |
+| `ZAPPE_COMPANION_PORT` | bind port (default try `80`, then `8780`) |
+| `ZAPPE_COMPANION_BIND` | bind address (default `0.0.0.0`) |
+| `ZAPPE_COMPANION` | `0` / `remote` — only poll an existing companion |
+| `ZAPPE_LOGIN_BACKEND` | `xvfb` to force a virtual display; default is harvest-style minimized Chrome |
+| `ZAPPE_LOGIN_FAKE` | `1` — mark the selected source connected (tests) |
 
 ## OTA
 
@@ -280,6 +296,7 @@ Repo is expected at `~/src/zappe` (`ZAPPE_SRC` overrides). If the checkout is el
 mkdir -p ~/.config/systemd/user
 cp packaging/appliance/zappe-update.service \
    packaging/appliance/zappe-update.timer \
+   packaging/appliance/zappe-companion.service \
    ~/.config/systemd/user/
 # optional — only if you do not already have a kiosk unit
 cp packaging/appliance/zappe.service ~/.config/systemd/user/
@@ -288,6 +305,7 @@ chmod +x packaging/appliance/zappe-update.sh packaging/appliance/zappe-kiosk.sh
 loginctl enable-linger "$USER"
 systemctl --user daemon-reload
 systemctl --user enable --now zappe-update.timer
+systemctl --user enable --now zappe-companion.service
 systemctl --user enable --now zappe.service   # kiosk, if using the example unit
 ```
 
@@ -320,7 +338,7 @@ Never `cargo build --release` alone for the appliance — that leaves `cfg(dev)`
 
 - Jev / UI-TARS / RL mutation loops
 - Prime / Disney harvest (skill files can plug in later)
-- Perfect “never flash Netflix chrome”
+- Perfect harvest “never flash Netflix chrome” (login uses Xvfb / hidden nest)
 - Full HID teach-mode recording
 
 ## Legacy HUD
