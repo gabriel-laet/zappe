@@ -44,7 +44,7 @@
 
 html {
   /* One root size so every --tv-* rem token scales from 1080p to 4K. */
-  font-size: clamp(18px, 2.05vmin, 40px);
+  font-size: clamp(18px, 1.85vmin, 36px);
 }
 
 html,
@@ -69,7 +69,7 @@ body {
   height: 100%;
   flex-direction: column;
   background: var(--color-background);
-  padding: var(--tv-space-4) var(--tv-space-5);
+  padding: var(--tv-space-3) var(--tv-space-5);
 }
 
 .tv-scroll {

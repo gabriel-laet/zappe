@@ -81,9 +81,9 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
   };
 
   return (
-    <div className="tv-page items-center justify-center text-center">
-      <div className="max-w-4xl space-y-[var(--tv-space-3)]">
-        <BrandMark size="lg" className="justify-center" />
+    <div className="tv-page tv-scroll items-center text-center">
+      <div className="max-w-4xl space-y-[var(--tv-space-2)]">
+        <BrandMark className="justify-center" />
         <h1 className="tv-display">Welcome to {brand.name}</h1>
         <p className="tv-body text-muted-foreground">
           Streaming plays in a gamescope nest wrapping Google Chrome (your Zappe
@@ -93,7 +93,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       </div>
 
       {step === "browser" && (
-        <div className="mt-[var(--tv-space-4)] space-y-[var(--tv-space-3)]">
+        <div className="mt-[var(--tv-space-3)] space-y-[var(--tv-space-2)]">
           <h2 className="tv-title">Browser required</h2>
           <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
             Zappe launches a dedicated Chrome profile inside gamescope — no CDP,
@@ -117,7 +117,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       )}
 
       {step === "onepassword" && (
-        <div className="mt-[var(--tv-space-4)] space-y-[var(--tv-space-3)]">
+        <div className="mt-[var(--tv-space-3)] space-y-[var(--tv-space-2)]">
           <h2 className="tv-title">1Password (optional)</h2>
           <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
             Open the extension store in Zappe Chrome. Zappe never reads your vault or cookies.
@@ -137,7 +137,7 @@ export function SetupWizard({ onComplete }: { onComplete: () => void }) {
       )}
 
       {step === "accounts" && (
-        <div className="mt-[var(--tv-space-4)] space-y-[var(--tv-space-3)]">
+        <div className="mt-[var(--tv-space-3)] space-y-[var(--tv-space-2)]">
           <h2 className="tv-title">Sign in to your accounts (optional)</h2>
           <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
             Sign in inside the Chrome nest once per service so harvest can see
