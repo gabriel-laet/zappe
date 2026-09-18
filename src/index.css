@@ -16,8 +16,8 @@
   --tv-tile-h: 13.75rem;
   --tv-tile-wide-w: 29.5rem;
   --tv-tile-wide-h: 16.5rem;
-  --tv-logo: 5.75rem;
-  --tv-logo-lg: 8.5rem;
+  --tv-logo: 7.25rem;
+  --tv-logo-lg: 9.5rem;
   --tv-radius: 1.15rem;
   --brand-accent: #c4a574;
   --ease-out-tv: cubic-bezier(0.22, 1, 0.36, 1);
@@ -96,14 +96,14 @@ body.tv-handoff {
 
 .tv-display {
   font-size: var(--tv-type-display);
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -0.028em;
   line-height: 1.1;
 }
 
 .tv-title {
   font-size: var(--tv-type-title);
-  font-weight: 520;
+  font-weight: 500;
   letter-spacing: -0.018em;
   line-height: 1.22;
 }
@@ -155,7 +155,7 @@ body.tv-handoff {
 
 .tv-tile-title {
   font-size: var(--tv-type-title);
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.15;
   text-wrap: balance;
@@ -199,7 +199,7 @@ body.tv-handoff {
   border-radius: 50%;
   background: #141414;
   color: var(--brand-accent);
-  font-weight: 650;
+  font-weight: 700;
   letter-spacing: -0.03em;
 }
 
@@ -215,7 +215,7 @@ body.tv-handoff {
 
 .tv-wordmark {
   font-size: var(--tv-type-display);
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -0.03em;
   line-height: 1.05;
 }
@@ -227,7 +227,7 @@ body.tv-handoff {
 .tv-host {
   margin: var(--tv-space-1) 0 var(--tv-space-3);
   font-size: var(--tv-type-hero);
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -0.02em;
   line-height: 1.1;
   color: var(--color-foreground);
@@ -244,7 +244,7 @@ body.tv-handoff {
   background: #141414;
   color: var(--color-muted-foreground);
   font-size: var(--tv-type-caption);
-  font-weight: 520;
+  font-weight: 500;
   letter-spacing: 0.16em;
 }
 
@@ -324,8 +324,8 @@ button.tv-tile {
 
 .splash-art,
 .screensaver-badge {
-  width: min(20rem, 34vw);
-  height: min(20rem, 34vw);
+  width: min(22rem, 38vw);
+  height: min(22rem, 38vw);
 }
 
 .splash-art {
@@ -341,7 +341,7 @@ button.tv-tile {
 
 .splash-name {
   font-size: var(--tv-type-hero);
-  font-weight: 560;
+  font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.05;
 }
