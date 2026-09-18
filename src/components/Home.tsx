@@ -312,14 +312,14 @@ export function Home() {
 
   return (
     <div className="tv-page">
-      <header className="mb-[var(--tv-space-4)] flex items-end justify-between gap-[var(--tv-space-3)]">
+      <header className="mb-[var(--tv-space-4)] flex items-center justify-between gap-[var(--tv-space-3)]">
         <BrandMark />
         {catalog.teach.active && (
           <p className="tv-caption max-w-xl text-right">{catalog.teach.message}</p>
         )}
       </header>
 
-      <div className="tv-scroll space-y-[var(--tv-space-4)]">
+      <div className="tv-scroll">
         {shelves.map((shelf) => {
           const showHarvest = shelf.id === "continue" && harvesting;
           return (
@@ -337,7 +337,7 @@ export function Home() {
                       variant="secondary"
                       size="tile"
                       className={cn(
-                        "shrink-0 bg-card text-card-foreground",
+                        "shrink-0",
                         wide && "tv-tile-wide",
                         focused && "focus-tile",
                       )}

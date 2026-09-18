@@ -15,6 +15,7 @@ pub const DEFAULT_NAME: &str = "Zappe";
 pub const DEFAULT_ACCENT: &str = "#E85A1B";
 pub const DEFAULT_BACKGROUND: &str = "#000000";
 pub const DEFAULT_IDLE_TIMEOUT: u32 = 120;
+/// Official feras lockup is ~1.4 MiB PNG; 8 MiB leaves headroom for data-URL IPC.
 const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_NAME_CHARS: usize = 40;
 const MAX_TAGLINE_CHARS: usize = 80;
@@ -450,8 +451,10 @@ mod tests {
         fs::write(
             dir.join("branding.json"),
             r##"{
-              "name": "Feras TV",
+              "name": "feras TV",
+              "accent": "#C4A574",
               "logo": "logo.png",
+              "splash": "logo.png",
               "idle": {
                 "mode": "screensaver",
                 "asset": "logo.png",
@@ -467,7 +470,8 @@ mod tests {
         )
         .unwrap();
         let view = load_branding_from(&dir);
-        assert_eq!(view.name, "Feras TV");
+        assert_eq!(view.name, "feras TV");
+        assert_eq!(view.accent, "#C4A574");
         assert_eq!(view.theme_background, "#000000");
         assert_eq!(view.theme_style, "apple-tv");
         assert_eq!(view.theme_focus, "subtle-scale");
@@ -475,8 +479,32 @@ mod tests {
         assert_eq!(view.idle_timeout_seconds, 120);
         assert_eq!(view.idle_animation, "soft-breathe");
         assert!(view.logo_data_url.is_some());
+        assert!(view.splash_data_url.is_some());
         assert!(view.idle_data_url.is_some());
         assert!(view.tagline.is_none());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn large_png_under_cap_encodes_data_url() {
+        let dir = temp_dir();
+        let mut bytes = TINY_PNG.to_vec();
+        bytes.resize(1_453_923, 0);
+        fs::write(dir.join("logo.png"), &bytes).unwrap();
+        fs::write(
+            dir.join("branding.json"),
+            r##"{"name":"feras TV","accent":"#C4A574","logo":"logo.png"}"##,
+        )
+        .unwrap();
+        let view = load_branding_from(&dir);
+        let url = view.logo_data_url.expect("1.4MB logo should become a data URL");
+        assert!(url.starts_with("data:image/png;base64,"));
+        assert!(
+            url.len() > 1_900_000,
+            "base64 data URL too small: {}",
+            url.len()
+        );
+        assert_eq!(view.accent, "#C4A574");
         let _ = fs::remove_dir_all(dir);
     }
 

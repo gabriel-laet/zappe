@@ -3,7 +3,9 @@ export type VoiceIntent =
   | { type: "back" }
   | { type: "playpause" }
   | { type: "open"; service: "netflix" | "prime" | "disney" | "youtube" }
-  | { type: "ota"; query: string };
+  | { type: "ota"; query: string }
+  | { type: "volume"; delta: number }
+  | { type: "mute" };
 
 function fold(text: string): string {
   return text
@@ -21,6 +23,13 @@ export function parseVoicePtBr(text: string): VoiceIntent | null {
   if (!t) return null;
   if (/\b(inicio|home|guia|principal)\b/.test(t)) return { type: "home" };
   if (/\b(voltar|volta|retornar|back)\b/.test(t)) return { type: "back" };
+  if (/\b(mudo|mutar|unmute|desmutar)\b/.test(t)) return { type: "mute" };
+  if (/\b(volume\s+(mais|aumentar|alto)|aumentar\s+o?\s*volume|mais\s+alto)\b/.test(t)) {
+    return { type: "volume", delta: 1 };
+  }
+  if (/\b(volume\s+(menos|diminuir|baixo)|diminuir\s+o?\s*volume|mais\s+baixo)\b/.test(t)) {
+    return { type: "volume", delta: -1 };
+  }
   if (/\b(pausar|pause|parar|stop)\b/.test(t)) return { type: "playpause" };
   if (/\b(continuar|play|reproduzir|tocar)\b/.test(t)) return { type: "playpause" };
   if (/\b(abrir|abre|abre a|abrir a)?\s*netflix\b/.test(t) || /\bnetflix\b/.test(t)) {
@@ -29,7 +38,9 @@ export function parseVoicePtBr(text: string): VoiceIntent | null {
   if (/\b(prime|amazon)\b/.test(t)) return { type: "open", service: "prime" };
   if (/\b(disney|disneyplus)\b/.test(t)) return { type: "open", service: "disney" };
   if (/\b(youtube|you tube)\b/.test(t)) return { type: "open", service: "youtube" };
-  const canal = t.match(/\bcanal\s+(.+)$/) ?? t.match(/\b(globo|sbt|record|band|cultura)\b/);
+  const canal =
+    t.match(/\b(?:ir\s+para|abrir|abre|canal)\s+(.+)$/) ??
+    t.match(/\b(globo|sbt|record|band|cultura)\b/);
   if (canal) {
     const query = (canal[1] ?? canal[0]).trim();
     if (query) return { type: "ota", query };

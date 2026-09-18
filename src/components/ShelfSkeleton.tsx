@@ -10,7 +10,7 @@ export function ShelfSkeleton({
   wide?: boolean;
 }) {
   return (
-    <section aria-busy="true" aria-label={title ?? "Loading"}>
+    <section className="tv-shelf" aria-busy="true" aria-label={title ?? "Loading"}>
       {title ? <h2 className="tv-shelf-title">{title}</h2> : null}
       <div className="tv-progress" aria-hidden />
       <div className="shelf-scroll">

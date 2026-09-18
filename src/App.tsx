@@ -12,32 +12,25 @@ import { useVoiceMic } from "@/hooks/useVoiceMic";
 import {
   applyBrandingCss,
   DEFAULT_BRANDING,
+  ferasPreviewBranding,
+  loadDevDataDirBranding,
   normalizeBranding,
-  type Branding,
 } from "@/lib/branding";
 import { api } from "@/lib/tauri";
 
 const SPLASH_MIN_MS = 900;
 
 /** Vite-only: `?guide=1` Home, `?brand=feras` name/theme, `?splash=1` hold splash, `?idle=3` screensaver in 3s. */
-function webPreview(): { forceGuide: boolean; branding: Branding | null; idleSec: number | null } {
+function webPreview(): { forceGuide: boolean; wantFeras: boolean; idleSec: number | null } {
   if (!import.meta.env.DEV || typeof window === "undefined") {
-    return { forceGuide: false, branding: null, idleSec: null };
+    return { forceGuide: false, wantFeras: false, idleSec: null };
   }
   const params = new URLSearchParams(window.location.search);
-  const branding =
-    params.get("brand") === "feras" || params.get("brand") === "example"
-      ? {
-          ...DEFAULT_BRANDING,
-          name: "Feras TV",
-          source: "user" as const,
-        }
-      : null;
   const idleRaw = params.get("idle");
   const idleSec = idleRaw ? Number(idleRaw) : null;
   return {
     forceGuide: params.get("guide") === "1",
-    branding,
+    wantFeras: params.get("brand") === "feras" || params.get("brand") === "example",
     idleSec: idleSec && idleSec > 0 ? idleSec : null,
   };
 }
@@ -60,20 +53,30 @@ export default function App() {
 
   useEffect(() => {
     const preview = webPreview();
-    void api
-      .getBranding()
-      .then((next) => {
-        const resolved = normalizeBranding(next);
-        setBranding(resolved);
-        applyBrandingCss(resolved);
-      })
-      .catch((err) => {
-        console.warn("branding: falling back to defaults", err);
-        const fallback = normalizeBranding(preview.branding ?? DEFAULT_BRANDING);
-        setBranding(fallback);
-        applyBrandingCss(fallback);
-      })
-      .finally(() => setBrandingReady(true));
+    void (async () => {
+      let resolved = DEFAULT_BRANDING;
+      try {
+        resolved = normalizeBranding(await api.getBranding());
+      } catch (err) {
+        console.warn("branding: Tauri invoke unavailable", err);
+      }
+      const disk = await loadDevDataDirBranding();
+      if (disk) {
+        resolved = normalizeBranding({
+          ...resolved,
+          ...disk,
+          logo_data_url: resolved.logo_data_url ?? disk.logo_data_url,
+          splash_data_url: resolved.splash_data_url ?? disk.splash_data_url,
+          idle_data_url: resolved.idle_data_url ?? disk.idle_data_url,
+        });
+      }
+      if (preview.wantFeras) {
+        resolved = ferasPreviewBranding(resolved);
+      }
+      setBranding(resolved);
+      applyBrandingCss(resolved);
+      setBrandingReady(true);
+    })();
   }, []);
 
   useEffect(() => {

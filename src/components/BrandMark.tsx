@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { BrandArt } from "@/components/BrandArt";
 import { useBrand } from "@/components/BrandingProvider";
 
 type BrandMarkProps = {
@@ -9,12 +10,12 @@ type BrandMarkProps = {
 export function BrandMark({ size = "md", className }: BrandMarkProps) {
   const brand = useBrand();
   const art = brand.logo_data_url;
-  const letter = brand.name.trim().charAt(0) || "F";
+  const letter = brand.name.trim().charAt(0) || "Z";
 
   return (
     <div className={cn("flex items-center", className)}>
       {art ? (
-        <img
+        <BrandArt
           src={art}
           alt={brand.name}
           className={cn("tv-logo", size === "lg" && "tv-logo-lg")}

@@ -24,10 +24,10 @@ Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAto
 
 This PR: button is reserved, grammar lives in [`src/lib/voicePtBr.ts`](../src/lib/voicePtBr.ts).
 
-Examples (pt-BR, short): `abrir Netflix`, `pausar`, `voltar`, `canal Globo`.
+Examples (pt-BR, short): `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo`.
 
 Runtime: `ZAPPE_WHISPER_BIN` + `arecord`. `ZAPPE_VOICE_FAKE=abrir netflix` for tests.
 
 ## Branding (not this map)
 
-Feras TV mark (tan dog **Beto**, tuxedo cat **Lek**) lives only under `~/.local/share/zappe/` — never git. See `branding.json` + `logo.png`.
+Official feras TV lockup (tan dog **Beto**, tuxedo cat **Lek**, beige circle, lowercase “feras”) lives only under `~/.local/share/zappe/` — never git. See `branding.json` + `logo.png`. Do not invent a substitute mark.

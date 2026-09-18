@@ -72,7 +72,7 @@ npm install
 npm run tauri dev
 ```
 
-Production build: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=feras` name/theme, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Logo still comes from the data dir when Tauri is running.
+Production build: `npm run tauri -- build --no-bundle` on the appliance (see updater). Full installer: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=feras` name/theme + data-dir logo, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Official artwork is served from `~/.local/share/zappe/` (never git).
 
 ### Harvest Continue Watching (Linux)
 
@@ -113,27 +113,28 @@ Not in this PR. Planned: a small companion at `http://zappe-tv.local` that shows
 
 ## Custom branding (appliance, not git)
 
-The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). The Feras TV circular badge (tan dog **Beto**, tuxedo cat **Lek** — names are not shown in the UI) lives in the **user data dir** so it is never committed.
+The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). The official **feras TV** lockup (hugging tan dog **Beto** + tuxedo cat **Lek**, beige circle, lowercase “feras”, “— TV —” — names are not shown in the UI) lives in the **user data dir** so it is never committed. Do not invent substitute marks.
 
 Preferred path (Linux XDG):
 
 ```
-~/.local/share/zappe/branding.json
+~/.local/share/zappe/{branding.json,logo.png,splash.png}
 ```
 
-`$ZAPPE_DATA_DIR` overrides that directory. Put `logo.png` next to `branding.json` (Feras TV circular badge — **not in git**).
+`$ZAPPE_DATA_DIR` overrides that directory. Put the official PNG next to `branding.json` (**not in git**). ~1.4MB is fine — the Rust loader emits a data URL (8 MiB cap). Vite preview serves the same files over `/__zappe_branding__/` so the browser path does not base64 the PNG.
 
 ```bash
 mkdir -p ~/.local/share/zappe
 cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
-cp /path/to/feras-tv-logo.png ~/.local/share/zappe/logo.png
+cp /path/to/official-feras-tv.png ~/.local/share/zappe/logo.png
 systemctl --user restart zappe.service
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `name` | `Feras TV` on the appliance. Default in code is `Zappe`. No pet names / taglines. |
-| `logo` | Circular badge path (`png` / `jpg` / `webp` / `gif`) |
+| `name` | `feras TV` on the appliance. Default in code is `Zappe`. No pet names / taglines. |
+| `accent` | Warm beige from the art (`#C4A574`). |
+| `logo` / `splash` | Official lockup (`png` / `jpg` / `webp` / `gif`), shown with `object-fit: contain`. |
 | `idle` | `{ mode, asset, timeoutSeconds, animation }` — screensaver after ~2 min |
 | `theme` | `{ style: "apple-tv", background: "#000000", focusRing: "subtle-scale" }` |
 
@@ -269,15 +270,14 @@ Expected kiosk unit name is **`zappe.service`**. Passwordless `sudo -n` is optio
 
 `npm run tauri build` (and `bundle.targets = "all"` in `src-tauri/tauri.conf.json`) packages AppImage/deb via linuxdeploy. That step can fail after the executable is already linked.
 
-Appliance updates **do not** run the bundler. They run:
+Appliance updates **do not** run the bundler. They **must** go through the Tauri CLI so `cfg(dev)` is off and the binary embeds `frontendDist` instead of `http://localhost:1420`:
 
 ```bash
-npm run build                                          # tsc + vite → dist/
-cargo build --release --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build --no-bundle
 # binary: src-tauri/target/release/zappe
 ```
 
-Equivalent and also safe: `npm run tauri build -- --no-bundle` (Tauri 2 skips bundling even when `bundle.active` is true).
+Never `cargo build --release` alone for the appliance — that leaves the kiosk on the Vite dev URL.
 
 ## Out of scope (v1)
 

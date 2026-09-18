@@ -1,8 +1,10 @@
 {
   "_example": true,
-  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put logo.png next to it. Do not commit the Feras TV PNG or any personal brand assets to this repo.",
-  "name": "Feras TV",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put the official hugging dog+cat PNG as logo.png next to it. Do not commit that PNG or any personal brand assets to this repo.",
+  "name": "feras TV",
+  "accent": "#C4A574",
   "logo": "logo.png",
+  "splash": "logo.png",
   "idle": {
     "mode": "screensaver",
     "asset": "logo.png",

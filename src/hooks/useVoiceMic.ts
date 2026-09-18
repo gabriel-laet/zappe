@@ -28,6 +28,12 @@ export function useVoiceMic(enabled: boolean) {
         } else if (intent?.type === "open") {
           await api.openApp(intent.service, noopFocus);
           setMessage(intent.service);
+        } else if (intent?.type === "volume") {
+          await api.remoteVolume(intent.delta);
+          setMessage(intent.delta > 0 ? "Volume +" : "Volume −");
+        } else if (intent?.type === "mute") {
+          await api.remoteMute();
+          setMessage("Mudo");
         } else if (intent?.type === "ota") {
           const channels = await api.listOtaChannels().catch(() => []);
           const hit = channels.find((c) =>

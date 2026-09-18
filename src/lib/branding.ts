@@ -1,5 +1,7 @@
 export const DEFAULT_BRAND_NAME = "Zappe";
 export const DEFAULT_ACCENT = "#E85A1B";
+export const FERAS_PREVIEW_NAME = "feras TV";
+export const FERAS_PREVIEW_ACCENT = "#C4A574";
 export const DEFAULT_BACKGROUND = "#000000";
 export const DEFAULT_IDLE_TIMEOUT = 120;
 
@@ -61,4 +63,25 @@ export function normalizeBranding(raw: Partial<Branding> | null | undefined): Br
       Math.max(15, raw.idle_timeout_seconds ?? DEFAULT_IDLE_TIMEOUT),
     ),
   };
+}
+
+export function ferasPreviewBranding(base: Branding = DEFAULT_BRANDING): Branding {
+  return {
+    ...base,
+    name: FERAS_PREVIEW_NAME,
+    accent: FERAS_PREVIEW_ACCENT,
+    source: "user",
+  };
+}
+
+/** Vite-only: read ~/.local/share/zappe via the preview middleware (file URLs, not 1.4MB base64). */
+export async function loadDevDataDirBranding(): Promise<Branding | null> {
+  if (!import.meta.env.DEV) return null;
+  try {
+    const res = await fetch("/__zappe_branding__/preview");
+    if (!res.ok) return null;
+    return normalizeBranding(await res.json());
+  } catch {
+    return null;
+  }
 }

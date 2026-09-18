@@ -104,12 +104,15 @@ if ! git_c pull --ff-only --quiet "${REMOTE}" "${BRANCH}"; then
 fi
 
 # --- deps + build (binary only; bundler must not gate updates) -------------
-# `npm run tauri build` (default) packages AppImage/deb via linuxdeploy and
-# can fail even after the executable is already linked. Appliance updates
-# never take that path.
+# NEVER `cargo build --release` alone. That leaves Tauri's `cfg(dev)` on, so
+# the kiosk binary still loads `devUrl` (http://localhost:1420) instead of
+# the baked `frontendDist`. The Tauri CLI is what flips production cfg.
 #
-# Primary:  npm run build && cargo build --release
-# Also OK:  npm run tauri build -- --no-bundle
+# `npm run tauri build` (default) also packages AppImage/deb via linuxdeploy
+# and can fail after the executable is already linked. Appliance updates
+# skip the bundler:
+#
+#   npm run tauri -- build --no-bundle
 cd "${ZAPPE_SRC}"
 
 if [[ -f package-lock.json ]]; then
@@ -118,8 +121,7 @@ else
   npm install
 fi
 
-npm run build
-cargo build --release --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build --no-bundle
 
 bin=""
 for candidate in \
