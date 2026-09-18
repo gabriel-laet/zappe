@@ -106,6 +106,46 @@ cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tm
 
 Setup state: `~/.config/zappe/setup.json`.
 
+## Branding
+
+The guide wordmark, tagline, accent, and optional logo come from a small JSON file. Defaults are **Zappe** with the built-in warm amber.
+
+Copy [`fixtures/branding.example.json`](fixtures/branding.example.json) to one of:
+
+1. `~/.local/share/zappe/branding.json` (or `$ZAPPE_DATA_DIR/branding.json`)
+2. `~/.config/zappe/branding.json` (used if the data-dir file is absent)
+3. Any path in `ZAPPE_BRANDING`
+
+```json
+{
+  "name": "Zappe",
+  "wordmark": "Zappe",
+  "tagline": "Home",
+  "accent": "#e8a54b",
+  "logo": "logo.png"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | App title (document title, setup copy). |
+| `wordmark` | Header / splash label. Defaults to `name`. |
+| `tagline` | Large Home heading (default `Home`). |
+| `accent` | CSS color (`#rrggbb`, `oklch(...)`, etc.) for wordmark, focus ring, and primary. |
+| `logo` | Optional image: path relative to the data dir, `~/…`, absolute path, or a `data:` URL. PNG/SVG/WebP/JPEG, max 2 MB. |
+
+Field env vars override the file: `ZAPPE_BRAND_NAME`, `ZAPPE_BRAND_WORDMARK`, `ZAPPE_BRAND_TAGLINE`, `ZAPPE_BRAND_ACCENT`, `ZAPPE_BRAND_LOGO`.
+
+For `npm run dev:web` only, `VITE_ZAPPE_BRAND_*` (same suffixes) apply at build time.
+
+The Tauri command `get_branding` reads this layer at boot. Harvest, gamescope nest, and OTA paths are unchanged.
+
+## TV scale (4K / 10-foot)
+
+Home uses a density token so type, tiles, focus rings, and page margins read across the room on a 4K set (e.g. Samsung UN43 via gamescope).
+
+`--tv-density` on `:root` (see `src/index.css`) scales `html` rem: about **1.15×** at 1280 CSS px, **1.3×** at 1080p, **2.2×** at 3840×2160. Tile / poster sizes, shelf gaps, and focus-ring width are separate `--tv-*` tokens. Override `--tv-density` in a user stylesheet or by editing that file if a room wants a tighter or looser guide.
+
 ## Chrome profile / nest
 
 - Profile: `~/.local/share/zappe/chrome-profile` (Linux)
@@ -169,6 +209,8 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
 | `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
+| `ZAPPE_BRANDING` | path to `branding.json` (overrides data-dir / config copies) |
+| `ZAPPE_BRAND_NAME` / `_WORDMARK` / `_TAGLINE` / `_ACCENT` / `_LOGO` | per-field brand overrides |
 
 ## OTA
 

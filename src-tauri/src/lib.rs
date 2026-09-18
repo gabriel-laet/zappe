@@ -1,4 +1,5 @@
 mod a11y;
+mod branding;
 mod catalog;
 mod harvest;
 mod nest;
@@ -16,6 +17,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
+use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
 use nest::{NestManager, NestStatus};
 
@@ -103,6 +105,11 @@ fn list_ota_channels() -> Result<Vec<OtaChannel>, String> {
 #[tauri::command]
 fn get_catalog(state: State<AppState>) -> CatalogView {
     state.catalog.view(state.teach.view())
+}
+
+#[tauri::command]
+fn get_branding() -> BrandingView {
+    branding::load_branding()
 }
 
 #[tauri::command]
@@ -328,6 +335,7 @@ pub fn run() {
             ota_enabled,
             list_ota_channels,
             get_catalog,
+            get_branding,
             auto_harvest_enabled,
             harvest_now,
             begin_teach,
