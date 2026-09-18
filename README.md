@@ -99,12 +99,17 @@ cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tm
 
 ## First-run setup
 
-1. **Browser required** — Chrome on `PATH` (or `CHROME_PATH`).
-2. **1Password optional** — opens the Web Store in the nest (never reads vault/cookies).
-3. **Accounts** — sign in inside the nest so harvest can see Continue Watching.
-4. **Home** — harvested shelves + OTA when configured.
+The living-room box has **no physical keyboard**. Couch input is the TV remote plus a phone.
+
+1. **Browser on this TV** — Chrome already on `PATH` (or `CHROME_PATH`). That is an appliance install, not a couch typing step.
+2. **Connect account (phone)** — stub: open `http://zappe-tv.local` on your phone. Netflix-style **device code + QR** via a phone companion is the next PR. Setup never asks for a password on the TV and no longer opens the nest to type.
+3. **Home** — harvested shelves + OTA when configured. An empty Continue Watching row shows a **Connect account (phone)** shelf.
 
 Setup state: `~/.config/zappe/setup.json`.
+
+### Phone companion (next)
+
+Not in this PR. Planned: a small companion at `http://zappe-tv.local` that shows a device code and QR so the TV only displays “open this on your phone.” Do not add on-TV password fields.
 
 ## Custom branding (appliance, not git)
 
@@ -175,7 +180,7 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 
 Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
 
-## Remote (ALTONEX-style keyboard)
+## Remote (TV remote — no keyboard)
 
 | Key | Action |
 | --- | --- |

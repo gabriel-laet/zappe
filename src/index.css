@@ -198,6 +198,29 @@ body {
   color: var(--color-muted-foreground);
 }
 
+.tv-host {
+  margin: var(--tv-space-1) 0 var(--tv-space-3);
+  font-size: var(--tv-type-hero);
+  font-weight: 650;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  color: var(--brand-accent);
+}
+
+.tv-qr-stub {
+  display: grid;
+  place-items: center;
+  width: 10.5rem;
+  height: 10.5rem;
+  margin: 0 auto var(--tv-space-2);
+  border: 0.28rem dashed color-mix(in oklab, var(--brand-accent) 55%, transparent);
+  border-radius: 1rem;
+  color: var(--brand-accent);
+  font-size: var(--tv-type-title);
+  font-weight: 650;
+  letter-spacing: 0.12em;
+}
+
 .focus-tile {
   outline: var(--tv-focus-width) solid var(--color-ring);
   outline-offset: var(--tv-focus-offset);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { BrandMark } from "@/components/BrandMark";
+import { ConnectPhone } from "@/components/ConnectPhone";
 import { ShelfSkeleton } from "@/components/ShelfSkeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -22,7 +23,7 @@ type Tile = {
   serviceId?: string;
   url?: string;
   ota?: { channel: string; conf: string };
-  kind: "app" | "catalog" | "empty" | "teach" | "ota" | "sync";
+  kind: "app" | "catalog" | "empty" | "teach" | "ota" | "sync" | "connect";
 };
 
 type Shelf = {
@@ -53,7 +54,7 @@ function continueTiles(shelf?: CatalogShelf, teachActive?: boolean): Tile[] {
       {
         id: "continue-empty",
         title: "Nothing yet",
-        subtitle: "Sign in to Netflix, then Sync",
+        subtitle: "Connect from your phone, then Sync",
         kind: "empty",
       },
       {
@@ -117,11 +118,17 @@ export function Home() {
     teach: { active: false, skill_id: null, message: null },
   });
   const [focus, setFocus] = useState<GuideFocus>({ shelf_id: "apps", index: 0 });
+  const [connectOpen, setConnectOpen] = useState(false);
 
   const hasOta = otaChannels.length > 0;
   const primary = primaryOtaChannel(otaChannels);
   const continueShelf = catalog.shelves.find((s) => s.id === "continue");
   const harvesting = continueShelf?.status === "harvesting";
+  const needsConnect =
+    catalogReady &&
+    (!continueShelf ||
+      continueShelf.status === "empty" ||
+      (continueShelf.status === "ok" && continueShelf.rows.length === 0));
 
   const shelves: Shelf[] = useMemo(() => {
     const apps: Tile[] = [...APP_TILES];
@@ -141,6 +148,22 @@ export function Home() {
     };
     return [
       { id: "apps", title: "Apps", tiles: apps },
+      ...(needsConnect
+        ? [
+            {
+              id: "connect",
+              title: "Connect",
+              tiles: [
+                {
+                  id: "connect-phone",
+                  title: "Connect account (phone)",
+                  subtitle: "zappe-tv.local — no TV typing",
+                  kind: "connect" as const,
+                },
+              ],
+            },
+          ]
+        : []),
       ...(catalogReady
         ? [
             {
@@ -159,6 +182,7 @@ export function Home() {
     continueShelf,
     catalog.teach.active,
     catalogReady,
+    needsConnect,
   ]);
 
   useEffect(() => {
@@ -218,8 +242,10 @@ export function Home() {
           const skillId = tile.serviceId ?? "netflix.continue_watching.v1";
           const state = await api.beginTeach(skillId);
           toast.message(state.message ?? "Teach-mode waiting.");
+        } else if (tile.kind === "connect") {
+          setConnectOpen(true);
         } else if (tile.kind === "empty") {
-          toast.message("Sign into Netflix in the player nest, then Sync.");
+          toast.message("Connect from your phone at zappe-tv.local, then Sync.");
         }
       } catch (e) {
         toast.error(String(e));
@@ -247,6 +273,7 @@ export function Home() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (connectOpen) return;
       if (e.code === "ArrowUp") {
         e.preventDefault();
         move(-1, 0);
@@ -267,7 +294,11 @@ export function Home() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [activate, currentShelf, focus.index, move]);
+  }, [activate, connectOpen, currentShelf, focus.index, move]);
+
+  if (connectOpen) {
+    return <ConnectPhone onClose={() => setConnectOpen(false)} />;
+  }
 
   return (
     <div className="tv-page">
