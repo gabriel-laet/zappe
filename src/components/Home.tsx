@@ -278,7 +278,7 @@ export function Home() {
         )}
       </header>
 
-      <div className="flex-1 space-y-[var(--tv-space-4)] overflow-y-auto pb-[var(--tv-space-4)]">
+      <div className="tv-scroll space-y-[var(--tv-space-4)]">
         {shelves.map((shelf) => {
           const showHarvest = shelf.id === "continue" && harvesting;
           return (

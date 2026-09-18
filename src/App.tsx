@@ -14,6 +14,25 @@ import { api } from "@/lib/tauri";
 
 const SPLASH_MIN_MS = 900;
 
+/** Vite-only preview: `?guide=1` skips first-run; `?brand=example` uses sample wordmark/accent; `?splash=1` holds the boot screen. */
+function webPreview(): { forceGuide: boolean; branding: Branding | null } {
+  if (!import.meta.env.DEV || typeof window === "undefined") {
+    return { forceGuide: false, branding: null };
+  }
+  const params = new URLSearchParams(window.location.search);
+  const branding =
+    params.get("brand") === "example"
+      ? {
+          ...DEFAULT_BRANDING,
+          name: "Living Room",
+          accent: "#E8A84C",
+          tagline: "What are we watching?",
+          source: "user" as const,
+        }
+      : null;
+  return { forceGuide: params.get("guide") === "1", branding };
+}
+
 export default function App() {
   const [branding, setBranding] = useState<Branding>(DEFAULT_BRANDING);
   const [brandingReady, setBrandingReady] = useState(false);
@@ -28,6 +47,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const preview = webPreview();
     void api
       .getBranding()
       .then((next) => {
@@ -36,23 +56,32 @@ export default function App() {
       })
       .catch((err) => {
         console.warn("branding: falling back to defaults", err);
-        setBranding(DEFAULT_BRANDING);
-        applyBrandingCss(DEFAULT_BRANDING);
+        const fallback = preview.branding ?? DEFAULT_BRANDING;
+        setBranding(fallback);
+        applyBrandingCss(fallback);
       })
       .finally(() => setBrandingReady(true));
   }, []);
 
   useEffect(() => {
+    const preview = webPreview();
     void api
       .getSetupState()
       .then((s) => {
         setSetupDone(s.completed);
         setSetupReady(true);
       })
-      .catch(() => setSetupReady(true));
+      .catch(() => {
+        setSetupDone(preview.forceGuide);
+        setSetupReady(true);
+      });
   }, []);
 
-  const booting = !brandingReady || !setupReady || !minSplashDone;
+  const holdSplash =
+    import.meta.env.DEV &&
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("splash") === "1";
+  const booting = !brandingReady || !setupReady || !minSplashDone || holdSplash;
   useRemote(!booting);
 
   return (

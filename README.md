@@ -72,7 +72,7 @@ npm install
 npm run tauri dev
 ```
 
-Production build: `npm run tauri build`.
+Production build: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Query helpers in Vite only: `?guide=1` skips first-run, `?brand=example` applies the sample wordmark/accent, `?splash=1` holds the boot splash.
 
 ### Harvest Continue Watching (Linux)
 
