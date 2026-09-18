@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -83,6 +85,53 @@ pub fn begin_nest(
     hide_guide(app);
     nest.open_url_detached(url, NestMode::Play);
     let _ = app.emit("playback-changed", playback.status());
+    Ok(())
+}
+
+/// Tune OTA. Marks the surface first so Back/Home can cancel a slow lock,
+/// keeps the guide up until the pipeline is actually running, and always
+/// stops the previous zap/mpv group inside `OtaSession::play`.
+pub async fn begin_ota(
+    app: &AppHandle,
+    nest: &NestManager,
+    ota: &OtaSession,
+    playback: &Mutex<PlaybackController>,
+    channel: String,
+    conf: std::path::PathBuf,
+    focus: GuideFocus,
+) -> Result<(), String> {
+    let previous = {
+        let mut playback = playback.lock().unwrap();
+        playback.focus_snapshot = Some(focus);
+        let previous = playback.surface.clone();
+        playback.surface = PlaybackSurface::Ota;
+        crate::atongx::set_playback_grabs(app, &playback.surface);
+        previous
+    };
+    if previous == PlaybackSurface::Chrome {
+        nest.exit_play().await;
+    }
+
+    if let Err(err) = ota.play(&channel, &conf).await {
+        let mut playback = playback.lock().unwrap();
+        if playback.surface == PlaybackSurface::Ota {
+            playback.surface = PlaybackSurface::Idle;
+            crate::atongx::set_playback_grabs(app, &playback.surface);
+        }
+        restore_guide_fullscreen(app);
+        return Err(err.to_string());
+    }
+
+    {
+        let playback = playback.lock().unwrap();
+        if playback.surface != PlaybackSurface::Ota {
+            return Ok(());
+        }
+        let status = playback.status();
+        let _ = app.emit("playback-changed", status);
+    }
+    hide_guide(app);
+    wm::nudge_mpv_fullscreen(ota.latest_mpv_pid());
     Ok(())
 }
 

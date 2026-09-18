@@ -114,6 +114,7 @@ function continueTiles(shelf?: CatalogShelf, teachActive?: boolean): Tile[] {
 export function Home() {
   const [otaChannels, setOtaChannels] = useState<OtaChannel[]>([]);
   const [otaReady, setOtaReady] = useState(false);
+  const [otaError, setOtaError] = useState<string | null>(null);
   const [catalogReady, setCatalogReady] = useState(false);
   const [catalog, setCatalog] = useState<CatalogView>({
     shelves: [],
@@ -143,11 +144,21 @@ export function Home() {
         ota: { channel: primary.name, conf: primary.source },
       });
     }
+    const canaisTiles = otaTiles(otaChannels);
+    if (otaError && canaisTiles.length === 0) {
+      canaisTiles.push({
+        id: "canais-error",
+        title: "TV aberta",
+        subtitle: otaError,
+        kind: "empty",
+      });
+    }
     const canaisShelf: Shelf = {
       id: "canais",
       title: "Canais",
-      tiles: otaTiles(otaChannels),
+      tiles: canaisTiles,
     };
+    const showCanais = hasOta || Boolean(otaError);
     return [
       { id: "apps", title: "Apps", tiles: apps },
       ...(needsConnect
@@ -175,11 +186,12 @@ export function Home() {
             },
           ]
         : []),
-      ...(hasOta ? [canaisShelf] : []),
+      ...(showCanais ? [canaisShelf] : []),
     ];
   }, [
     otaChannels,
     hasOta,
+    otaError,
     primary,
     continueShelf,
     catalog.teach.active,
@@ -189,9 +201,24 @@ export function Home() {
 
   useEffect(() => {
     void api
-      .listOtaChannels()
-      .then(setOtaChannels)
-      .catch(() => setOtaChannels([]))
+      .otaStatus()
+      .then((status) => {
+        setOtaChannels(status.channels);
+        setOtaError(status.error);
+        if (status.error) {
+          toast.error(status.error);
+        }
+      })
+      .catch((err) => {
+        setOtaChannels([]);
+        const message = String(err);
+        if (/invoke|ipc|not found/i.test(message)) {
+          setOtaError(null);
+          return;
+        }
+        setOtaError(message);
+        toast.error(message);
+      })
       .finally(() => setOtaReady(true));
     void api
       .getCatalog()
@@ -261,14 +288,18 @@ export function Home() {
         } else if (tile.kind === "connect") {
           setConnectOpen(true);
         } else if (tile.kind === "empty") {
-          toast.message("Connect from your phone at zappe-tv.local, then Sync.");
+          if (tile.id === "canais-error") {
+            toast.error(otaError ?? tile.subtitle ?? "TV aberta unavailable.");
+          } else {
+            toast.message("Connect from your phone at zappe-tv.local, then Sync.");
+          }
         }
       } catch (e) {
         document.body.classList.remove("tv-handoff");
         toast.error(String(e));
       }
     },
-    [focus],
+    [focus, otaError],
   );
 
   const move = useCallback(

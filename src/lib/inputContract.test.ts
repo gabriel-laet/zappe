@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { pickOtaChannel, primaryOtaChannel } from "./otaDisplay.ts";
 import { classifyAtongx } from "./remoteMap.ts";
 import { parseVoicePtBr } from "./voicePtBr.ts";
 
@@ -47,5 +48,24 @@ describe("parseVoicePtBr", () => {
     assert.deepEqual(parseVoicePtBr("início"), { type: "home" });
     assert.deepEqual(parseVoicePtBr("pausar"), { type: "playpause" });
     assert.equal(parseVoicePtBr("conte uma piada"), null);
+  });
+});
+
+describe("pickOtaChannel", () => {
+  const channels = [
+    { name: "Globo HD", source: "/home/tv/channels.conf" },
+    { name: "Record HD", source: "/home/tv/channels.conf" },
+    { name: "SBT HD", source: "/home/tv/channels.conf" },
+    { name: "TV Cultura", source: "/home/tv/channels.conf" },
+  ];
+
+  it("resolves Brazilian couch names onto the HD list", () => {
+    assert.equal(pickOtaChannel(channels, "Globo")?.name, "Globo HD");
+    assert.equal(pickOtaChannel(channels, "globo")?.name, "Globo HD");
+    assert.equal(pickOtaChannel(channels, "Record")?.name, "Record HD");
+    assert.equal(pickOtaChannel(channels, "sbt")?.name, "SBT HD");
+    assert.equal(pickOtaChannel(channels, "cultura")?.name, "TV Cultura");
+    assert.equal(pickOtaChannel(channels, "nope"), null);
+    assert.equal(primaryOtaChannel(channels)?.name, "Globo HD");
   });
 });

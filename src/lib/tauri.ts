@@ -24,6 +24,13 @@ export type ChromeStatus = {
 
 export type OtaChannel = { name: string; source: string };
 
+export type OtaStatus = {
+  enabled: boolean;
+  adapter: boolean;
+  channels: OtaChannel[];
+  error: string | null;
+};
+
 export type PlaybackStatus = {
   surface: "idle" | "chrome" | "ota";
   focus: GuideFocus | null;
@@ -86,6 +93,7 @@ export const api = {
   chromeStatus: () => invoke<ChromeStatus>("chrome_status"),
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
+  otaStatus: () => invoke<OtaStatus>("ota_status"),
   getCatalog: () => invoke<CatalogView>("get_catalog"),
   getBranding: () => invoke<Branding>("get_branding"),
   voiceListen: () => invoke<VoiceOutcome>("voice_listen"),

@@ -53,7 +53,7 @@ Playback is a URL into the nest (deep link when harvest found one). Play/pause, 
 
 - `xdotool` (preferred) plus `wtype` or `ydotool` — nest D-pad / OK / play/pause / Escape. `wtype` must use `-k` (keysym), not text.
 - `dvbv5-tools` + `mpv` — OTA / TV aberta
-- Channel list: `~/tv/channels.conf` or `~/.config/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
+- Channel list: `~/tv/channels.conf`, `~/.config/zappe/channels.conf`, or `~/.local/share/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
 
 ### Chrome accessibility (harvest)
 
@@ -243,14 +243,16 @@ This is Zappe HID mapping, not a Samsung TV API. Whisper: `ZAPPE_WHISPER_BIN` (`
 
 ## OTA
 
-Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`. HD preferred; 1Seg filtered.
+Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`, then `~/.local/share/zappe/channels.conf`. HD preferred; 1Seg filtered. `Globo` / `Record` / `SBT` resolve onto the HD section name in the conf.
+
+Selecting another Canais tile **always stops the previous process group** (`dvbv5-zap` + `mpv`) before starting the next. The guide stays up until the new pipeline is alive, then hides. Missing conf or `/dev/dvb/adapter0` is a toast / Canais error tile — not a silent fail.
 
 ```bash
 dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --vo=gpu \
   --demuxer-lavf-format=mpegts --demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal -
 ```
 
-Play fails fast (guide stays / is restored) if `/dev/dvb/adapter0` is missing or zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
+Play fails with a restore if the adapter or conf is missing, or if zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
 
 ## Appliance auto-update
 
