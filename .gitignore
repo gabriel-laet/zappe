@@ -1,6 +1,10 @@
 /target
-**/*.rs.bk
+**/src-tauri/target
+node_modules
+dist
 .DS_Store
 *.swp
-# Never commit a Chrome profile (cookies live there).
+**/*.rs.bk
 chrome-profile/
+.env
+.env.*

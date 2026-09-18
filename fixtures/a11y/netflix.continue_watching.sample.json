@@ -1,0 +1,51 @@
+{
+  "role": "application",
+  "name": "Google Chrome",
+  "description": "",
+  "children": [
+    {
+      "role": "document web",
+      "name": "Netflix",
+      "children": [
+        {
+          "role": "heading",
+          "name": "Home"
+        },
+        {
+          "role": "heading",
+          "name": "Continue Watching",
+          "children": []
+        },
+        {
+          "role": "list",
+          "name": "Continue Watching",
+          "children": [
+            {
+              "role": "list item",
+              "name": "The Bear",
+              "url": "https://www.netflix.com/watch/81446671",
+              "description": "https://occ.netflix.com/the-bear.webp"
+            },
+            {
+              "role": "list item",
+              "name": "Squid Game",
+              "url": "https://www.netflix.com/title/81040344"
+            },
+            {
+              "role": "list item",
+              "name": "Play"
+            },
+            {
+              "role": "list item",
+              "name": "More Info"
+            }
+          ]
+        },
+        {
+          "role": "heading",
+          "name": "Trending Now"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+[package]
+name = "zappe"
+version = "0.2.0"
+description = "Living-room launcher: Tauri guide + gamescope Chrome nest + a11y harvest"
+edition = "2021"
+rust-version = "1.88"
+default-run = "zappe"
+
+[lib]
+name = "zappe_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "zappe-harvest"
+path = "src/bin/zappe-harvest.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+dirs = "6"
+env_logger = "0.11"
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
+zbus = { version = "5", default-features = false, features = ["tokio"] }
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

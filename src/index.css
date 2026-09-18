@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: oklch(0.12 0.02 265);
+  --color-foreground: oklch(0.95 0.01 265);
+  --color-card: oklch(0.16 0.02 265);
+  --color-card-foreground: oklch(0.95 0.01 265);
+  --color-primary: oklch(0.72 0.14 45);
+  --color-primary-foreground: oklch(0.15 0.02 265);
+  --color-muted: oklch(0.22 0.02 265);
+  --color-muted-foreground: oklch(0.7 0.02 265);
+  --color-ring: oklch(0.78 0.16 55);
+  --radius-lg: 0.75rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  overflow: hidden;
+}
+
+.focus-tile {
+  outline: 4px solid var(--color-ring);
+  outline-offset: 4px;
+  transform: scale(1.04);
+  transition:
+    transform 0.15s ease,
+    outline 0.15s ease;
+}
+
+.shelf-scroll {
+  display: flex;
+  gap: 1.25rem;
+  overflow-x: auto;
+  padding: 0.5rem 0.25rem 1rem;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+}
+
+.shelf-scroll::-webkit-scrollbar {
+  display: none;
+}

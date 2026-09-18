@@ -1,133 +1,192 @@
 # Zappe
 
-Personal living-room / desktop launcher. A native **HUD** sits on top of the room; **Netflix, Prime Video, Disney+, and YouTube play in a real Google Chrome window** you already logged into.
+Living-room launcher for Linux (Omarchy / Hyprland 0.56 / Wayland first). The **Tauri guide is the only catalog** the user sees. Google Chrome is a silent player and a background harvester of **logged-in** shelves (Continue Watching, later My List) — not a CDP-controlled browser and not a scrape of Netflix’s public catalog.
 
-This repo is the first runnable sketch: CRT-looking wgpu HUD, placeholder guide rows, and optional Chrome attach over CDP.
+No Trakt. No runtime LLM. No TypeSafe/Jev in v1. When a harvest skill misses its anchors we **mark it stale** and offer **teach mode** (user finishes the path with the air mouse; a later iteration re-records the skill).
 
-## What it is
+## Architecture
 
-- A always-on-top native HUD (`winit` + `wgpu`) with a scanline / phosphor shader and a tiny immediate-mode tile grid. No Electron, no Tauri, no in-process webview.
-- A remote control for a **separate Chrome process** with a dedicated `--user-data-dir` (`…/zappe/chrome-profile`). You log in by hand, once. Zappe then opens first-party URLs and sends a few CDP / DOM pokes.
-- Living-room input: a dummy TV remote that looks like a keyboard, plus a constrained command language (on-screen bar / stdin / whisper.cpp hook). Not a chat bot.
-- Window control via CDP `Browser.setWindowBounds` (fullscreen / raise). macOS `osascript` and Linux `wmctrl` are documented best-effort stubs for when the OS still needs a nudge.
-
-## What it is not
-
-- Not an unofficial Netflix / Prime / Disney / YouTube player.
-- Not a scraper. Catalog rows are placeholders. Public metadata is a stub trait (`StubMetadata`) for a later JustWatch-style source.
-- Not an embed of those sites, and not a DRM unpacker. Zappe does not extract, record, or re-encode protected video.
-- Not a cookie harvester. Session state stays inside Chrome's profile directory. This repo ships no secrets.
-
-## How to run
-
-Needs Rust 1.88+ (the `rust-toolchain.toml` pins `stable`). Builds on macOS and Linux.
-
-On Linux you need a working GPU stack at **runtime** (Vulkan ICD or GL/EGL) plus `libxkbcommon-x11`. Debian/Ubuntu:
-
-```bash
-sudo apt install libxkbcommon-x11-0 mesa-vulkan-drivers libegl1
+```
+Tauri guide (Home shelves)
+        │  reads ~/.local/share/zappe/catalog.json
+        ▼
+harvest skill  (skills/netflix.continue_watching.v1.yaml)
+        │  open URL → wait → AT-SPI dump → extract rows
+        ▼
+gamescope  ──wraps──►  google-chrome-stable
+                         ~/.local/share/zappe/chrome-profile
+                         no CDP / no --enable-automation / no remote debugging
 ```
 
-```bash
-cargo run
-```
-
-That is HUD-only. A cheap HDMI-CEC / USB / 2.4 GHz dummy remote that enumerates as a keyboard works on first run — see the keymap below.
-
-Drive a real Chrome profile:
-
-```bash
-# first time: Chrome opens the Zappe profile. Log into Netflix / Prime / Disney / YouTube yourself.
-cargo run -- --chrome --service youtube
-
-# later sessions reuse ~/.local/share/zappe/chrome-profile (macOS: ~/Library/Application Support/zappe/chrome-profile)
-ZAPPE_CHROME=1 cargo run -- --service prime
-```
-
-If Chrome is missing, the HUD still starts and the status line says so. Override the binary with `CHROME_PATH`.
-
-Attach to an already-running DevTools endpoint instead of launching:
-
-```bash
-# you started Chrome yourself with the zappe user-data-dir and --remote-debugging-port=9222
-cargo run -- --cdp http://127.0.0.1:9222 --url https://www.netflix.com
-```
-
-`--chrome` / `ZAPPE_CHROME` and `--cdp` / `ZAPPE_CDP` are the feature flags. `cargo run` never requires Chrome.
-
-### Remote / keyboard (must-have)
-
-Cheap HDMI-CEC, USB, and 2.4 GHz remotes show up as a keyboard. Zappe reads them in `winit` (physical `KeyCode` plus `NamedKey` aliases). Volume stays with the OS.
-
-| Remote / key | Action |
+| Piece | Role |
 | --- | --- |
-| Arrows | move the **big amber focus ring** across tiles and rows |
-| Enter / Return | activate the focused tile (open its first-party URL) |
-| Escape / Backspace / BrowserBack | back (close the command bar, show the HUD, Chrome history back) |
-| Home / BrowserHome | root of the guide (first tile of Continue) |
-| Space / MediaPlayPause | play-pause the Chrome player skill |
-| `p` | play (keyboard extra) |
-| `/` | open the on-screen command bar |
-| `h` | hide / show HUD so you can use the Chrome window |
-| `q` | quit HUD (keyboard only) |
-| 0–9 | reserved for later |
-| Volume | OS / AVR — Zappe does not eat these keys |
+| **Guide** | Tauri 2 + React. Apps, harvested Continue Watching, TV aberta / Canais. |
+| **Nest** | `gamescope` wrapping `google-chrome-stable` with a dedicated profile. Real session. |
+| **Harvest** | Dump the Chrome AT-SPI tree, walk versioned skill anchors, write the local store. |
+| **Skills** | JSON/YAML, e.g. `netflix.continue_watching.v1`. More services are sibling files. |
+| **Teach-mode** | Stub: waiting state + `TeachRecorder` trait. HID recording is a follow-up. |
+| **OTA** | Unchanged: `dvbv5-zap \| mpv` when `channels.conf` is present. |
 
-Point a dummy remote at the HUD and use arrows + OK + Back. The focus ring is a fat stroke, not a 1px outline.
+Playback is a URL into the nest (deep link when harvest found one). Play/pause is a best-effort HID key (`wtype` / `ydotool` / `xdotool`). Hyprland `hl.dsp.*` nudges apply to the **gamescope** window (or the guide / mpv). They are not used to drive Chrome inside the nest.
 
-### Voice and the command bar
+## Dependencies (Omarchy / Arch)
 
-Voice is **local whisper.cpp only**, not a chat LLM and not an unconstrained agent. After transcription, text is parsed with a tiny grammar — the same parser as the on-screen bar, `--say`, and stdin:
+**Required**
 
-```text
-play <query> [on youtube|netflix|prime|disney]
-search <query> [on youtube|netflix|prime|disney]
-pause | fullscreen | back | home
-```
+- Node.js 20+ and npm
+- Rust 1.88+ (`rust-toolchain.toml` pins stable)
+- Tauri Linux system deps:
 
-whisper.cpp is a stub/hook in this sketch (`--whisper` / `ZAPPE_WHISPER` / `ZAPPE_WHISPER_BIN`). It does not download a model. Until a binary is on PATH, type into the HUD (`/` then Enter) or:
+  ```bash
+  sudo pacman -S webkit2gtk-4.1 base-devel curl wget openssl pkg-config libappindicator-gtk3 librsvg
+  ```
+
+- **Google Chrome** (`google-chrome-stable` preferred) and **gamescope**:
+
+  ```bash
+  sudo pacman -S google-chrome gamescope at-spi2-core
+  ```
+
+  AUR/`google-chrome` if the distro package is not in extra. Override the binary with `CHROME_PATH`.
+
+**Optional**
+
+- `wtype` or `ydotool` — nest play/pause / Escape
+- `dvbv5-tools` + `mpv` — OTA / TV aberta
+- Channel list: `~/tv/channels.conf` or `~/.config/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
+
+### Chrome accessibility (harvest)
+
+Zappe launches Chrome with `--force-renderer-accessibility` and `ACCESSIBILITY_ENABLED=1` / `GTK_A11Y=atspi`. That is **not** automation.
+
+If Continue Watching harvest is empty on a logged-in profile:
+
+1. Confirm `at-spi2-core` is installed and the session has an a11y bus (`busctl --user introspect org.a11y.Bus /org/a11y/bus`).
+2. In the Zappe Chrome profile open `chrome://accessibility` and enable **Native**.
+3. On GNOME-ish sessions: `gsettings set org.gnome.desktop.interface toolkit-accessibility true` (Hyprland may not use this; the Chrome flag is the primary path).
+
+## Run
 
 ```bash
-cargo run -- --say "play lofi on youtube"
-echo "pause" | cargo run -- --cmd-stdin
+npm install
+npm run tauri dev
 ```
 
-Unknown utterances (`what's the weather`) are rejected. No general-purpose tool calling.
+Production build: `npm run tauri build`.
 
-## How login works
+### Harvest Continue Watching (Linux)
 
-1. Zappe launches **Google Chrome or Chromium**, not a webview, with a dedicated user-data-dir. It does not touch your default Chrome profile.
-2. You sign in to Netflix / Prime / Disney / YouTube in that window, the same way you would in any Chrome. MFA, passwords, cookies — all Chrome's problem.
-3. Next `cargo run -- --chrome` reuses the same profile. Zappe never reads or copies those cookies.
+From the guide: focus **Sync Netflix** (Home does **not** harvest on launch — that stole focus into the nest). `ZAPPE_AUTO_HARVEST=1` restores the old auto-sync for debugging.
 
-## How CDP attaches
+From a terminal (same store the UI reads):
 
-1. **Launch path:** `chromiumoxide` starts Chrome headed (`with_head()`), points `--user-data-dir` at the Zappe profile, and talks to the DevTools WebSocket it advertised.
-2. **Attach path:** `--cdp http://127.0.0.1:9222` connects to a Chrome you started yourself (same profile, `--remote-debugging-port=9222`).
-3. After attach, Zappe `Page.navigate`s to a first-party URL (`https://www.netflix.com`, `https://www.primevideo.com`, `https://www.disneyplus.com`, `https://www.youtube.com`, or a tile deep-link). YouTube prefers official `/watch?v=`, `/feed/subscriptions`, and `/results?search_query=` links. It does not pull their HTML into the catalog.
-4. A tiny **site skill** (`src/skills.rs`) may then search / open / pause / play / fullscreen / back. Selectors are isolated in that file and treated as fragile — they will break; that is expected.
-5. Raise / fullscreen uses **`Browser.getWindowForTarget` + `Browser.setWindowBounds`**. If the window manager ignores that:
+```bash
+cd src-tauri
+# Live nest + AT-SPI (needs gamescope, Chrome, a logged-in profile)
+cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1
 
-   - macOS stub: `osascript` to front the Chrome process
-   - Linux stub: `wmctrl -a 'Google Chrome'`
-
-   Both are best-effort and must not be required to build or to show the HUD.
-
-## Layout
-
-```
-src/main.rs       CLI + winit remote/keyboard loop
-src/command.rs    constrained play/pause/search grammar
-src/voice.rs      whisper.cpp hook (no model, no LLM)
-src/hud.rs        wgpu CRT pass + tiles + fat focus ring
-src/shaders/      crt.wgsl, quad.wgsl
-src/chrome.rs     spawn / attach, CDP window bounds, OS stubs
-src/catalog.rs    placeholder rows + MetadataSource stub
-src/skills.rs     per-site search / open / pause / play / fullscreen / back
+# Offline / CI: walk a saved tree (no Chrome)
+cargo run --bin zappe-harvest -- --fixture ../fixtures/a11y/netflix.continue_watching.sample.json
 ```
 
-egui was skipped: a fullscreen WGSL pass plus a few instanced quads is enough for a TV-guide HUD and keeps the shaders in-tree.
+Rows land in `~/.local/share/zappe/catalog.json`. Failures log and set the shelf to **stale / teach** — they do not crash the app.
 
-## Status
+Dump the tree while debugging:
 
-First sketch. The HUD is real. Chrome attach is real, and feature-flagged. Catalog, metadata, and site skills are placeholders by design.
+```bash
+cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tmp/zappe-a11y.json
+```
+
+## First-run setup
+
+1. **Browser required** — Chrome on `PATH` (or `CHROME_PATH`).
+2. **1Password optional** — opens the Web Store in the nest (never reads vault/cookies).
+3. **Accounts** — sign in inside the nest so harvest can see Continue Watching.
+4. **Home** — harvested shelves + OTA when configured.
+
+Setup state: `~/.config/zappe/setup.json`.
+
+## Chrome profile / nest
+
+- Profile: `~/.local/share/zappe/chrome-profile` (Linux)
+- Override data root: `ZAPPE_DATA_DIR`
+- Nest command (play):
+
+  ```bash
+  gamescope -W 1920 -H 1080 -f -- google-chrome-stable \
+    --user-data-dir="$HOME/.local/share/zappe/chrome-profile" \
+    --no-first-run --no-default-browser-check \
+    --force-renderer-accessibility \
+    https://www.netflix.com/watch/…
+  ```
+
+Harvest uses the same profile **without** `-f`, then hides the nest (best-effort: Hyprland special workspace). Netflix chrome may flash; hiding after harvest is enough for v1.
+
+`ZAPPE_NEST=chrome` skips gamescope (dev fallback). `ZAPPE_HARVEST_FIXTURE` / `zappe-harvest --fixture` skip the live dump.
+
+## Skills
+
+Bundled: [`skills/netflix.continue_watching.v1.yaml`](skills/netflix.continue_watching.v1.yaml).
+
+User overrides: `~/.local/share/zappe/skills/*.yaml` (same `id` wins).
+
+A skill is: **open URL → wait → a11y find anchors → extract rows**. If anchors miss, we do **not** invent a path. Teach-mode is the extension point (`TeachRecorder` in `src-tauri/src/teach.rs`).
+
+## Window handoff
+
+| Phase | Behavior |
+| --- | --- |
+| Guide | Tauri visible, D-pad on shelves |
+| Harvest | Nest starts windowed, dump, hide nest; guide stays up |
+| Stream tile | Guide hides → gamescope fullscreen |
+| OTA | Guide hides → mpv fullscreen |
+| Back / Escape | Hide nest or stop mpv → guide fullscreen + focus |
+| Quit | Stop OTA; kill a Zappe-launched nest |
+
+Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
+
+## Remote (ALTONEX-style keyboard)
+
+| Key | Action |
+| --- | --- |
+| Arrows | move focus |
+| Enter | activate tile |
+| Escape / Backspace / BrowserBack | back to guide |
+| Home | end playback |
+| Space / MediaPlayPause | play/pause in the nest (HID) |
+
+## Environment
+
+| Variable | Purpose |
+| --- | --- |
+| `CHROME_PATH` | Chrome binary |
+| `GAMESCOPE_PATH` | gamescope binary |
+| `ZAPPE_NEST` | `gamescope` (default) or `chrome` |
+| `ZAPPE_NEST_WIDTH` / `ZAPPE_NEST_HEIGHT` | nest size (default 1920×1080) |
+| `ZAPPE_DATA_DIR` | override `~/.local/share/zappe` |
+| `ZAPPE_HARVEST_FIXTURE` | a11y JSON dump (skip live AT-SPI) |
+| `ZAPPE_A11Y_DUMP` | write the live tree to this path |
+| `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
+| `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
+
+## OTA
+
+Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`. HD preferred; 1Seg filtered.
+
+```bash
+dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --vo=gpu \
+  --demuxer-lavf-format=mpegts --demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal -
+```
+
+Play fails fast (guide stays / is restored) if `/dev/dvb/adapter0` is missing or zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
+
+## Out of scope (v1)
+
+- Jev / UI-TARS / RL mutation loops
+- Prime / Disney harvest (skill files can plug in later)
+- Perfect “never flash Netflix chrome”
+- Full HID teach-mode recording
+
+## Legacy HUD
+
+The old wgpu HUD lives under `legacy-hud/` and is not the product path.
