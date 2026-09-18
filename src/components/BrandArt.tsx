@@ -10,6 +10,7 @@ type BrandArtProps = {
 /**
  * Official lockup only. Never invent a letter mark while a logo URL exists —
  * including the wait before decode and a failed load of a ~1.4MB PNG.
+ * Header/splash CSS clips the circular badge; do not paint a light plate here.
  */
 export function BrandArt({ src, alt = "", className }: BrandArtProps) {
   const [failed, setFailed] = useState(false);

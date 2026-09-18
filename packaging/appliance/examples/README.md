@@ -31,7 +31,7 @@ If `branding.json` is missing, the guide uses in-code defaults (`Zappe` + Apple 
 | --- | --- | --- |
 | `name` | no | Product name (e.g. `feras TV`). No pet names. Default `Zappe`. |
 | `accent` | no | Warm beige from the official art (`#C4A574`). |
-| `logo` | no | Image path relative to the data dir, or absolute. `png` / `jpg` / `webp` / `gif`, max 8 MiB (~1.4MB official PNG is fine). |
+| `logo` | no | Image path relative to the data dir, or absolute. `png` / `jpg` / `webp` / `gif`, max 8 MiB (~1.4MB official PNG is fine). Header clips the circular badge; prefer a transparent PNG so no white plate remains. |
 | `splash` | no | Splash image (defaults to `logo`). Shown `object-fit: contain`. |
 | `idle.mode` | no | `screensaver` (default) or `off`. |
 | `idle.asset` | no | Screensaver image (defaults to `logo`). |

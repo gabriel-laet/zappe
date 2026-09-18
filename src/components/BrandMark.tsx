@@ -15,11 +15,9 @@ export function BrandMark({ size = "md", className }: BrandMarkProps) {
   return (
     <div className={cn("flex items-center", className)}>
       {art ? (
-        <BrandArt
-          src={art}
-          alt={brand.name}
-          className={cn("tv-logo", size === "lg" && "tv-logo-lg")}
-        />
+        <span className={cn("tv-logo-frame", size === "lg" && "tv-logo-frame-lg")}>
+          <BrandArt src={art} alt={brand.name} className="tv-logo" />
+        </span>
       ) : (
         <>
           <span

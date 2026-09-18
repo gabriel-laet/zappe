@@ -65,6 +65,22 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Living-room chrome: true black with a faint Apple TV wash (never a light theme). */
+.tv-page,
+.splash-screen,
+.screensaver {
+  background-color: #000;
+  background-image:
+    radial-gradient(ellipse 90% 48% at 50% -12%, rgba(255, 255, 255, 0.055), transparent 58%),
+    radial-gradient(
+      ellipse 55% 42% at 92% 8%,
+      color-mix(in oklab, var(--brand-accent) 14%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(ellipse 50% 38% at 6% 88%, rgba(52, 68, 118, 0.14), transparent 64%),
+    linear-gradient(180deg, #141418 0%, #0a0a0c 36%, #000 78%);
+}
+
 /* Appliance: hide the OS cursor until air-mouse pointer mode (F2). Dev keeps a cursor. */
 html.tv-living-room:not(.tv-pointer-on),
 html.tv-living-room:not(.tv-pointer-on) * {
@@ -79,7 +95,6 @@ body.tv-handoff {
   display: flex;
   height: 100%;
   flex-direction: column;
-  background: #000;
   padding: var(--tv-space-4) var(--tv-space-5);
 }
 
@@ -143,8 +158,11 @@ body.tv-handoff {
   padding: var(--tv-space-2) var(--tv-space-2) 1.35rem;
   border: 0;
   border-radius: var(--tv-radius);
-  background: #141414;
-  box-shadow: none;
+  background-color: #141416;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 34%, transparent 58%),
+    linear-gradient(165deg, #1c1c20 0%, #141416 52%, #101012 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
   will-change: transform;
 }
 
@@ -175,6 +193,42 @@ body.tv-handoff {
   object-fit: contain;
   object-position: center;
   background: transparent;
+}
+
+/*
+  Official logo.png is a circular feras badge on an opaque white square.
+  Clip to a round Apple TV–style mark so there is never a light plate.
+  Prefer a transparent PNG when replacing the asset.
+*/
+.tv-logo-frame,
+.tv-logo-frame-lg {
+  display: block;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: transparent;
+  -webkit-mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+}
+
+.tv-logo-frame {
+  width: var(--tv-logo);
+  height: var(--tv-logo);
+}
+
+.tv-logo-frame-lg {
+  width: var(--tv-logo-lg);
+  height: var(--tv-logo-lg);
+}
+
+.tv-logo-frame .tv-logo,
+.tv-logo-frame-lg .tv-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  background: transparent;
+  transform: scale(1.08);
 }
 
 .tv-logo,
@@ -257,11 +311,17 @@ button.tv-tile {
 
 .focus-tile {
   outline: none;
-  transform: scale(1.055);
+  transform: scale(1.08);
   box-shadow:
-    0 1.6rem 3.6rem rgba(0, 0, 0, 0.55),
-    0 0 2.8rem color-mix(in oklab, var(--brand-accent) 26%, transparent);
+    0 1.8rem 4rem rgba(0, 0, 0, 0.52),
+    0 0 3.2rem color-mix(in oklab, var(--brand-accent) 34%, transparent);
   z-index: 2;
+}
+
+.tv-tile.focus-tile {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0.03) 36%, transparent 60%),
+    linear-gradient(165deg, #26262b 0%, #18181c 52%, #121214 100%);
 }
 
 .shelf-scroll {
@@ -301,7 +361,9 @@ button.tv-tile {
   height: var(--tv-tile-h);
   flex-shrink: 0;
   border-radius: var(--tv-radius);
-  background: #141414;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 48%),
+    #141416;
   animation: splash-breathe 3.4s ease-in-out infinite;
 }
 
@@ -311,7 +373,6 @@ button.tv-tile {
   height: 100%;
   align-items: center;
   justify-content: center;
-  background: #000;
 }
 
 .splash-inner {
@@ -326,6 +387,11 @@ button.tv-tile {
 .screensaver-badge {
   width: min(22rem, 38vw);
   height: min(22rem, 38vw);
+  border-radius: 50%;
+  object-fit: cover;
+  background: transparent;
+  -webkit-mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
 }
 
 .splash-art {

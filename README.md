@@ -134,7 +134,7 @@ systemctl --user restart zappe.service
 | --- | --- |
 | `name` | `feras TV` on the appliance. Default in code is `Zappe`. No pet names / taglines. |
 | `accent` | Warm beige from the art (`#C4A574`). |
-| `logo` / `splash` | Official lockup (`png` / `jpg` / `webp` / `gif`), shown with `object-fit: contain`. |
+| `logo` / `splash` | Official lockup (`png` / `jpg` / `webp` / `gif`). Header clips it to a circle so an opaque white plate still reads as a badge on black — prefer a transparent PNG. |
 | `idle` | `{ mode, asset, timeoutSeconds, animation }` — screensaver after ~2 min |
 | `theme` | `{ style: "apple-tv", background: "#000000", focusRing: "subtle-scale" }` |
 
