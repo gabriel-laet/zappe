@@ -11,6 +11,7 @@ import {
   api,
   onCatalogChanged,
   onFocusRestore,
+  onGuideMenu,
   type CatalogShelf,
   type CatalogView,
   type GuideFocus,
@@ -212,9 +213,17 @@ export function Home() {
     void onCatalogChanged(setCatalog).then((fn) => {
       unlistenCatalog = fn;
     });
+    let unlistenMenu: (() => void) | undefined;
+    void onGuideMenu(() => setConnectOpen(true)).then((fn) => {
+      unlistenMenu = fn;
+    });
+    const onDomMenu = () => setConnectOpen(true);
+    window.addEventListener("zappe-menu", onDomMenu);
     return () => {
       unlistenFocus?.();
       unlistenCatalog?.();
+      unlistenMenu?.();
+      window.removeEventListener("zappe-menu", onDomMenu);
     };
   }, []);
 

@@ -15,6 +15,7 @@ import {
   ferasPreviewBranding,
   loadDevDataDirBranding,
   normalizeBranding,
+  type Branding,
 } from "@/lib/branding";
 import { api } from "@/lib/tauri";
 

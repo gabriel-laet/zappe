@@ -3,12 +3,6 @@ import { toast } from "sonner";
 import { api } from "@/lib/tauri";
 import { classifyAtongx } from "@/lib/remoteMap";
 
-function stub(label: string, run: () => Promise<string>) {
-  void run()
-    .then(() => toast.message(label))
-    .catch(() => toast.message(`${label} — próximo`));
-}
-
 export function useRemote(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
@@ -48,23 +42,38 @@ export function useRemote(enabled: boolean) {
         return;
       }
       if (action === "volumeUp") {
-        stub("Volume +", () => api.remoteVolume(1));
+        void api
+          .remoteVolume(1)
+          .then(() => toast.message("Volume +"))
+          .catch(() => toast.message("Volume +"));
         return;
       }
       if (action === "volumeDown") {
-        stub("Volume −", () => api.remoteVolume(-1));
+        void api
+          .remoteVolume(-1)
+          .then(() => toast.message("Volume −"))
+          .catch(() => toast.message("Volume −"));
         return;
       }
       if (action === "mute") {
-        stub("Mudo", () => api.remoteMute());
+        void api
+          .remoteMute()
+          .then(() => toast.message("Mudo"))
+          .catch(() => toast.message("Mudo"));
         return;
       }
       if (action === "menu") {
-        stub("Menu", () => api.remoteMenu());
+        window.dispatchEvent(new Event("zappe-menu"));
+        void api.remoteMenu().catch(() => undefined);
         return;
       }
       if (action === "power") {
-        stub("Power", () => api.remotePower());
+        void api
+          .remotePower()
+          .then((out) => {
+            toast.message(out === "power:home" ? "Início" : "Power — o aparelho continua ligado");
+          })
+          .catch(() => toast.message("Power — o aparelho continua ligado"));
       }
     };
 

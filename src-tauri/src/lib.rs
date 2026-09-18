@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
 use nest::{NestManager, NestStatus};
-use remote_stubs::{remote_menu, remote_mute, remote_power, remote_volume};
+use remote_stubs::{remote_mute, remote_volume};
 use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
@@ -257,6 +257,32 @@ async fn remote_home(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     let mut playback = state.playback.lock().unwrap();
     playback::finish_return_to_guide(&app, &mut *playback);
     Ok(())
+}
+
+/// Power never shuts the box down. If something is playing, return to the guide.
+#[tauri::command]
+async fn remote_power(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+    let surface = {
+        let playback = state.playback.lock().unwrap();
+        playback.surface.clone()
+    };
+    if surface == PlaybackSurface::Idle {
+        log::info!("ATONGX power on guide (not shutting down)");
+        return Ok("power:idle".into());
+    }
+    log::info!("ATONGX power — stop playback, return to guide");
+    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
+    let mut playback = state.playback.lock().unwrap();
+    playback::finish_return_to_guide(&app, &mut *playback);
+    Ok("power:home".into())
+}
+
+/// Menu opens the phone-connect sheet in the guide (no on-TV typing).
+#[tauri::command]
+fn remote_menu(app: AppHandle) -> Result<String, String> {
+    log::info!("ATONGX menu");
+    let _ = app.emit("guide-menu", ());
+    Ok("menu".into())
 }
 
 #[tauri::command]

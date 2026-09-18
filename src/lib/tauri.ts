@@ -127,3 +127,7 @@ export function onPlaybackChanged(cb: (status: PlaybackStatus) => void) {
 export function onCatalogChanged(cb: (catalog: CatalogView) => void) {
   return listen<CatalogView>("catalog-changed", (e) => cb(e.payload));
 }
+
+export function onGuideMenu(cb: () => void) {
+  return listen("guide-menu", () => cb());
+}

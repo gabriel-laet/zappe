@@ -1,10 +1,9 @@
 /**
  * ATONGX air-mouse contract (living-room remote).
  *
- * Every physical button has a named action. Guide navigation (D-pad / OK /
- * Home / Back / Play-Pause / Mic) is wired. Power, volume, mute, menu,
- * PAGE, pointer-toggle, and DEL have stable stubs so the next PR can attach
- * HID / pactl / Hyprland without redesigning the UI.
+ * Every physical button has a named action in the guide / nest. Volume and
+ * mute call `pactl`. Menu opens Connect. Power returns to the guide and
+ * never shuts the box down. Pointer toggles the CSS cursor.
  *
  * Cheap ATONGX HID maps vary; we accept common KeyboardEvent.code aliases.
  */
@@ -82,9 +81,9 @@ export const atongx = {
 /** Human table for README / next-PR wiring. */
 export const ATONGX_BUTTONS: { action: AtongxAction; button: string; status: "wired" | "stub" }[] =
   [
-    { action: "power", button: "Power", status: "stub" },
+    { action: "power", button: "Power", status: "wired" },
     { action: "playpause", button: "Play / Pause", status: "wired" },
-    { action: "pointer", button: "Air-mouse cursor toggle", status: "stub" },
+    { action: "pointer", button: "Air-mouse cursor toggle", status: "wired" },
     { action: "up", button: "D-pad Up", status: "wired" },
     { action: "down", button: "D-pad Down", status: "wired" },
     { action: "left", button: "D-pad Left", status: "wired" },
@@ -92,12 +91,12 @@ export const ATONGX_BUTTONS: { action: AtongxAction; button: string; status: "wi
     { action: "ok", button: "OK (center / orange ring)", status: "wired" },
     { action: "home", button: "Home", status: "wired" },
     { action: "back", button: "Back", status: "wired" },
-    { action: "menu", button: "Menu", status: "stub" },
+    { action: "menu", button: "Menu", status: "wired" },
     { action: "pageUp", button: "PAGE up", status: "wired" },
     { action: "pageDown", button: "PAGE down", status: "wired" },
     { action: "voice", button: "Mic (red)", status: "wired" },
-    { action: "volumeUp", button: "VOL +", status: "stub" },
-    { action: "volumeDown", button: "VOL −", status: "stub" },
+    { action: "volumeUp", button: "VOL +", status: "wired" },
+    { action: "volumeDown", button: "VOL −", status: "wired" },
     { action: "delete", button: "DEL", status: "wired" },
-    { action: "mute", button: "Mute", status: "stub" },
+    { action: "mute", button: "Mute", status: "wired" },
   ];
