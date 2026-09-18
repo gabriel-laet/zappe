@@ -106,6 +106,36 @@ cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tm
 
 Setup state: `~/.config/zappe/setup.json`.
 
+## Custom branding (appliance, not git)
+
+The guide ships only in-code defaults (`Zappe` + the built-in accent). Personal wordmark, accent, and artwork live in the **user data dir** so they are never committed.
+
+Preferred path (Linux XDG):
+
+```
+~/.local/share/zappe/branding.json
+```
+
+`$ZAPPE_DATA_DIR` overrides that directory (same as catalog / Chrome profile). Optional `logo` and `splash` files sit next to `branding.json`, or use an absolute path.
+
+```bash
+mkdir -p ~/.local/share/zappe
+# sample schema only — edit, then add your own images
+cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
+cp /path/to/your/logo.png ~/.local/share/zappe/logo.png
+systemctl --user restart zappe.service   # or relaunch zappe
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Wordmark on splash, Home, and first-run setup (default `Zappe`) |
+| `accent` | CSS color for primary actions and D-pad focus rings |
+| `logo` | Path relative to the data dir, or absolute (`png` / `jpg` / `webp` / `gif`) |
+| `splash` | Optional boot image (same path rules as `logo`) |
+| `tagline` | Optional line under the wordmark |
+
+Missing file → defaults. Invalid JSON or an unsafe/unknown accent → log and fall back. See [`packaging/appliance/examples/README.md`](packaging/appliance/examples/README.md).
+
 ## Chrome profile / nest
 
 - Profile: `~/.local/share/zappe/chrome-profile` (Linux)
@@ -163,7 +193,7 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 | `GAMESCOPE_PATH` | gamescope binary |
 | `ZAPPE_NEST` | `gamescope` (default) or `chrome` |
 | `ZAPPE_NEST_WIDTH` / `ZAPPE_NEST_HEIGHT` | nest size (default 1920×1080) |
-| `ZAPPE_DATA_DIR` | override `~/.local/share/zappe` |
+| `ZAPPE_DATA_DIR` | override `~/.local/share/zappe` (catalog, Chrome profile, `branding.json`) |
 | `ZAPPE_HARVEST_FIXTURE` | a11y JSON dump (skip live AT-SPI) |
 | `ZAPPE_A11Y_DUMP` | write the live tree to this path |
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |

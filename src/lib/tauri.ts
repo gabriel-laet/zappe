@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Branding } from "@/lib/branding";
 
 export type GuideFocus = { shelf_id: string; index: number };
 
@@ -80,6 +81,7 @@ export const api = {
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
   getCatalog: () => invoke<CatalogView>("get_catalog"),
+  getBranding: () => invoke<Branding>("get_branding"),
   autoHarvestEnabled: () => invoke<boolean>("auto_harvest_enabled"),
   harvestNow: (skillId?: string) =>
     invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),

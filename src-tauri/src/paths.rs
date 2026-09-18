@@ -19,6 +19,11 @@ pub fn catalog_path() -> PathBuf {
     data_dir().join("catalog.json")
 }
 
+/// User branding config. Not shipped in the repo — drop this on the appliance.
+pub fn branding_path() -> PathBuf {
+    data_dir().join("branding.json")
+}
+
 pub fn skills_override_dir() -> PathBuf {
     data_dir().join("skills")
 }
@@ -42,6 +47,10 @@ mod tests {
         assert_eq!(
             profile_dir(),
             PathBuf::from("/tmp/zappe-test-paths/chrome-profile")
+        );
+        assert_eq!(
+            branding_path(),
+            PathBuf::from("/tmp/zappe-test-paths/branding.json")
         );
         match prev {
             Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),

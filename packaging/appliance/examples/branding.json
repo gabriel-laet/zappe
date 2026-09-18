@@ -1,0 +1,9 @@
+{
+  "_example": true,
+  "_comment": "EXAMPLE ONLY — not used by the app. Copy to ~/.local/share/zappe/branding.json (or $ZAPPE_DATA_DIR/branding.json) and point logo/splash at your own files. Do not commit personal brand assets to this repo.",
+  "name": "Living Room",
+  "accent": "#E8A84C",
+  "logo": "logo.png",
+  "splash": "splash.png",
+  "tagline": "What are we watching?"
+}

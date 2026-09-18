@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/BrandMark";
+import { ShelfSkeleton } from "@/components/ShelfSkeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { primaryOtaChannel } from "@/lib/otaDisplay";
@@ -108,6 +110,8 @@ function continueTiles(shelf?: CatalogShelf, teachActive?: boolean): Tile[] {
 
 export function Home() {
   const [otaChannels, setOtaChannels] = useState<OtaChannel[]>([]);
+  const [otaReady, setOtaReady] = useState(false);
+  const [catalogReady, setCatalogReady] = useState(false);
   const [catalog, setCatalog] = useState<CatalogView>({
     shelves: [],
     teach: { active: false, skill_id: null, message: null },
@@ -117,6 +121,7 @@ export function Home() {
   const hasOta = otaChannels.length > 0;
   const primary = primaryOtaChannel(otaChannels);
   const continueShelf = catalog.shelves.find((s) => s.id === "continue");
+  const harvesting = continueShelf?.status === "harvesting";
 
   const shelves: Shelf[] = useMemo(() => {
     const apps: Tile[] = [...APP_TILES];
@@ -136,24 +141,37 @@ export function Home() {
     };
     return [
       { id: "apps", title: "Apps", tiles: apps },
-      {
-        id: "continue",
-        title: continueShelf?.title ?? "Continue watching",
-        tiles: continueTiles(continueShelf, catalog.teach.active),
-      },
+      ...(catalogReady
+        ? [
+            {
+              id: "continue",
+              title: continueShelf?.title ?? "Continue watching",
+              tiles: continueTiles(continueShelf, catalog.teach.active),
+            },
+          ]
+        : []),
       ...(hasOta ? [canaisShelf] : []),
     ];
-  }, [otaChannels, hasOta, primary, continueShelf, catalog.teach.active]);
+  }, [
+    otaChannels,
+    hasOta,
+    primary,
+    continueShelf,
+    catalog.teach.active,
+    catalogReady,
+  ]);
 
   useEffect(() => {
     void api
       .listOtaChannels()
       .then(setOtaChannels)
-      .catch(() => setOtaChannels([]));
+      .catch(() => setOtaChannels([]))
+      .finally(() => setOtaReady(true));
     void api
       .getCatalog()
       .then(setCatalog)
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setCatalogReady(true));
     // Never auto-harvest on mount — that steals focus into the Netflix nest.
     // Opt in only for debugging: ZAPPE_AUTO_HARVEST=1
     void api.autoHarvestEnabled().then((on) => {
@@ -252,51 +270,56 @@ export function Home() {
   }, [activate, currentShelf, focus.index, move]);
 
   return (
-    <div className="flex h-full flex-col bg-background px-10 py-8">
-      <header className="mb-6 flex items-end justify-between">
-        <div>
-          <p className="text-sm uppercase tracking-[0.3em] text-muted-foreground">Zappe</p>
-          <h1 className="text-3xl font-semibold">Home</h1>
-        </div>
+    <div className="tv-page">
+      <header className="mb-[var(--tv-space-4)] flex items-end justify-between gap-[var(--tv-space-3)]">
+        <BrandMark />
         {catalog.teach.active && (
-          <p className="max-w-md text-right text-sm text-muted-foreground">
-            {catalog.teach.message}
-          </p>
+          <p className="tv-caption max-w-xl text-right">{catalog.teach.message}</p>
         )}
       </header>
 
-      <div className="flex-1 space-y-8 overflow-y-auto pb-10">
-        {shelves.map((shelf) => (
-          <section key={shelf.id} aria-label={shelf.title}>
-            <h2 className="mb-3 text-xl text-muted-foreground">{shelf.title}</h2>
-            <div className="shelf-scroll">
-              {shelf.tiles.map((tile, index) => {
-                const focused =
-                  focus.shelf_id === shelf.id && focus.index === index;
-                return (
-                  <Button
-                    key={tile.id}
-                    variant="secondary"
-                    size="tile"
-                    className={cn(
-                      "shrink-0 bg-card text-card-foreground",
-                      focused && "focus-tile",
-                    )}
-                    onClick={() => {
-                      setFocus({ shelf_id: shelf.id, index });
-                      void activate(tile);
-                    }}
-                  >
-                    <span className="text-2xl font-semibold">{tile.title}</span>
-                    {tile.subtitle && (
-                      <span className="text-sm text-muted-foreground">{tile.subtitle}</span>
-                    )}
-                  </Button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+      <div className="flex-1 space-y-[var(--tv-space-4)] overflow-y-auto pb-[var(--tv-space-4)]">
+        {shelves.map((shelf) => {
+          const showHarvest = shelf.id === "continue" && harvesting;
+          return (
+            <section key={shelf.id} aria-label={shelf.title}>
+              <h2 className="tv-shelf-title">{shelf.title}</h2>
+              {showHarvest && <div className="tv-progress" aria-hidden />}
+              <div className="shelf-scroll">
+                {shelf.tiles.map((tile, index) => {
+                  const focused =
+                    focus.shelf_id === shelf.id && focus.index === index;
+                  const wide = shelf.id === "continue" || tile.kind === "catalog";
+                  return (
+                    <Button
+                      key={tile.id}
+                      variant="secondary"
+                      size="tile"
+                      className={cn(
+                        "shrink-0 bg-card text-card-foreground",
+                        wide && "tv-tile-wide",
+                        focused && "focus-tile",
+                      )}
+                      onClick={() => {
+                        setFocus({ shelf_id: shelf.id, index });
+                        void activate(tile);
+                      }}
+                    >
+                      <span className="tv-tile-title">{tile.title}</span>
+                      {tile.subtitle && (
+                        <span className="tv-tile-sub">{tile.subtitle}</span>
+                      )}
+                    </Button>
+                  );
+                })}
+              </div>
+            </section>
+          );
+        })}
+        {!catalogReady && (
+          <ShelfSkeleton title="Continue watching" count={4} wide />
+        )}
+        {!otaReady && <ShelfSkeleton title="Canais" count={3} />}
       </div>
     </div>
   );

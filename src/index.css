@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+:root {
+  /* 10-foot / 4K density — one scale so type, tiles, and focus stay coherent. */
+  --tv-space-1: 0.85rem;
+  --tv-space-2: 1.4rem;
+  --tv-space-3: 2.25rem;
+  --tv-space-4: 3.25rem;
+  --tv-space-5: 4.75rem;
+  --tv-type-kicker: 1.2rem;
+  --tv-type-caption: 1.4rem;
+  --tv-type-body: 1.7rem;
+  --tv-type-title: 2.2rem;
+  --tv-type-display: 3.6rem;
+  --tv-type-hero: 5.25rem;
+  --tv-tile-w: 21rem;
+  --tv-tile-h: 13.25rem;
+  --tv-tile-wide-w: 27.5rem;
+  --tv-tile-wide-h: 15.5rem;
+  --tv-focus-width: 0.45rem;
+  --tv-focus-offset: 0.5rem;
+  --tv-logo: 4.75rem;
+  --tv-logo-lg: 8.5rem;
+  --tv-radius: 1.15rem;
+  --brand-accent: oklch(0.72 0.14 45);
+}
+
 @theme {
   --color-background: oklch(0.12 0.02 265);
   --color-foreground: oklch(0.95 0.01 265);
@@ -10,7 +35,7 @@
   --color-muted: oklch(0.22 0.02 265);
   --color-muted-foreground: oklch(0.7 0.02 265);
   --color-ring: oklch(0.78 0.16 55);
-  --radius-lg: 0.75rem;
+  --radius-lg: 1.15rem;
 }
 
 * {
@@ -34,24 +59,299 @@ body {
   overflow: hidden;
 }
 
+.tv-page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  background: var(--color-background);
+  padding: var(--tv-space-4) var(--tv-space-5);
+}
+
+.tv-kicker {
+  font-size: var(--tv-type-kicker);
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.tv-display {
+  font-size: var(--tv-type-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.tv-title {
+  font-size: var(--tv-type-title);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.tv-body {
+  font-size: var(--tv-type-body);
+  line-height: 1.45;
+}
+
+.tv-caption {
+  font-size: var(--tv-type-caption);
+  color: var(--color-muted-foreground);
+  line-height: 1.4;
+}
+
+.tv-shelf-title {
+  margin-bottom: var(--tv-space-2);
+  font-size: var(--tv-type-title);
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+}
+
+.tv-tile {
+  width: var(--tv-tile-w);
+  height: var(--tv-tile-h);
+  padding: var(--tv-space-2);
+  border-radius: var(--tv-radius);
+}
+
+.tv-tile-wide {
+  width: var(--tv-tile-wide-w);
+  height: var(--tv-tile-wide-h);
+}
+
+.tv-tile-title {
+  font-size: var(--tv-type-title);
+  font-weight: 600;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.tv-tile-sub {
+  font-size: var(--tv-type-caption);
+  color: var(--color-muted-foreground);
+}
+
+.tv-logo,
+.tv-logo-mark {
+  width: var(--tv-logo);
+  height: var(--tv-logo);
+  flex-shrink: 0;
+  margin-right: var(--tv-space-2);
+  object-fit: contain;
+}
+
+.tv-logo-lg,
+.tv-logo-mark-lg {
+  width: var(--tv-logo-lg);
+  height: var(--tv-logo-lg);
+  margin-right: var(--tv-space-3);
+}
+
+.tv-logo-mark,
+.tv-logo-mark-lg,
+.splash-mark {
+  display: grid;
+  place-items: center;
+  border-radius: 28%;
+  background: color-mix(in oklab, var(--brand-accent) 22%, var(--color-card));
+  color: var(--brand-accent);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.tv-logo-mark {
+  font-size: calc(var(--tv-logo) * 0.48);
+}
+
+.tv-logo-mark-lg {
+  font-size: calc(var(--tv-logo-lg) * 0.48);
+}
+
+.tv-wordmark {
+  font-size: var(--tv-type-display);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.tv-wordmark-lg {
+  font-size: var(--tv-type-hero);
+}
+
+.tv-tagline {
+  margin-top: 0.25rem;
+  font-size: var(--tv-type-body);
+  color: var(--color-muted-foreground);
+}
+
 .focus-tile {
-  outline: 4px solid var(--color-ring);
-  outline-offset: 4px;
-  transform: scale(1.04);
+  outline: var(--tv-focus-width) solid var(--color-ring);
+  outline-offset: var(--tv-focus-offset);
+  transform: scale(1.06);
+  box-shadow: 0 0 0 calc(var(--tv-focus-width) + var(--tv-focus-offset))
+    color-mix(in oklab, var(--color-ring) 22%, transparent);
   transition:
-    transform 0.15s ease,
-    outline 0.15s ease;
+    transform 0.22s ease,
+    outline 0.22s ease,
+    box-shadow 0.22s ease;
 }
 
 .shelf-scroll {
   display: flex;
-  gap: 1.25rem;
+  gap: var(--tv-space-3);
   overflow-x: auto;
-  padding: 0.5rem 0.25rem 1rem;
+  padding: var(--tv-space-1) var(--tv-space-1) var(--tv-space-2);
   scroll-behavior: smooth;
   scrollbar-width: none;
 }
 
 .shelf-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.tv-progress {
+  height: 0.4rem;
+  width: 18rem;
+  margin-bottom: var(--tv-space-2);
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--brand-accent) 22%, transparent);
+}
+
+.tv-progress::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-accent);
+  animation: tv-progress-slide 1.9s ease-in-out infinite;
+}
+
+.tv-skeleton-tile {
+  width: var(--tv-tile-w);
+  height: var(--tv-tile-h);
+  flex-shrink: 0;
+  border-radius: var(--tv-radius);
+  background: linear-gradient(
+    105deg,
+    var(--color-muted) 0%,
+    color-mix(in oklab, var(--color-muted) 55%, white) 46%,
+    var(--color-muted) 100%
+  );
+  background-size: 220% 100%;
+  animation: tv-shimmer 2.6s ease-in-out infinite;
+}
+
+.splash-screen {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-background);
+}
+
+.splash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: splash-enter 0.7s ease both;
+}
+
+.splash-art {
+  width: min(22rem, 28vw);
+  height: min(22rem, 28vw);
+  margin-bottom: var(--tv-space-3);
+  object-fit: contain;
+}
+
+.splash-mark {
+  width: min(14rem, 22vw);
+  height: min(14rem, 22vw);
+  margin-bottom: var(--tv-space-3);
+  font-size: 6rem;
+}
+
+.splash-name {
+  font-size: var(--tv-type-hero);
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.splash-tagline {
+  margin-top: var(--tv-space-1);
+  font-size: var(--tv-type-title);
+  color: var(--color-muted-foreground);
+}
+
+.splash-pulse {
+  width: 7rem;
+  height: 0.45rem;
+  margin-top: var(--tv-space-3);
+  border-radius: 999px;
+  background: var(--brand-accent);
+  animation: splash-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes splash-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.7rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes splash-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scaleX(0.72);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes tv-shimmer {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes tv-progress-slide {
+  0% {
+    transform: translateX(-40%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-tile,
+  .shelf-scroll,
+  .splash-inner,
+  .splash-pulse,
+  .tv-progress::after,
+  .tv-skeleton-tile {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .splash-inner {
+    opacity: 1;
+    transform: none;
+  }
+
+  .splash-pulse {
+    opacity: 0.7;
+    transform: none;
+  }
 }
