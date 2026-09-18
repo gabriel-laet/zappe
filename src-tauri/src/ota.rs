@@ -298,18 +298,20 @@ pub fn resolve_channel_name(requested: &str, names: &[String]) -> Option<String>
     if req.is_empty() {
         return None;
     }
-    if let Some(hit) = names.iter().find(|n| n.as_str() == req) {
+
+    // Match the same HD-first list the Canais shelf shows. Raw section
+    // names like `TV GLOBO` must not bypass `filter_and_sort_channels`.
+    let playable = filter_and_sort_channels(names.to_vec());
+    if playable.is_empty() {
+        return None;
+    }
+    if let Some(hit) = playable.iter().find(|n| n.as_str() == req) {
         return Some(hit.clone());
     }
 
     let req_fold = fold_name(req);
-    if let Some(hit) = names.iter().find(|n| fold_name(n) == req_fold) {
+    if let Some(hit) = playable.iter().find(|n| fold_name(n) == req_fold) {
         return Some(hit.clone());
-    }
-
-    let playable = filter_and_sort_channels(names.to_vec());
-    if playable.is_empty() {
-        return None;
     }
 
     let req_key = channel_base_key(req);
@@ -409,7 +411,7 @@ impl OtaSession {
 
     pub async fn play(&self, channel: &str, conf: &Path) -> Result<()> {
         let mut inner = self.inner.lock().await;
-        stop_inner(&mut inner).await;
+        stop_inner(&mut inner, self.fake).await;
 
         if !conf.exists() {
             return Err(anyhow!(
@@ -450,7 +452,7 @@ impl OtaSession {
             .with_context(|| format!("open {}", log_path.display()))?;
 
         let script = if self.fake {
-            fake_pipeline_script()
+            "exec /bin/sleep 5".into()
         } else {
             pipeline_script(&conf.display().to_string(), channel)
         };
@@ -473,7 +475,7 @@ impl OtaSession {
 
     pub async fn stop(&self) {
         let mut inner = self.inner.lock().await;
-        stop_inner(&mut inner).await;
+        stop_inner(&mut inner, self.fake).await;
     }
 
     #[cfg(test)]
@@ -492,16 +494,23 @@ impl OtaSession {
     }
 }
 
-async fn stop_inner(inner: &mut OtaInner) {
+async fn stop_inner(inner: &mut OtaInner, fake: bool) {
     if let Some(mut child) = inner.pipeline_child.take() {
         kill_pipeline(&mut child).await;
     }
-    sweep_stray_ota_processes(inner.mpv_pid);
+    if !fake {
+        sweep_stray_ota_processes(inner.mpv_pid);
+    }
     inner.active_channel = None;
     inner.active_conf = None;
     inner.mpv_pid = None;
     // Frontend/demux nodes stay busy for a beat after SIGKILL.
-    sleep(Duration::from_millis(200)).await;
+    let settle = if fake {
+        Duration::from_millis(20)
+    } else {
+        Duration::from_millis(200)
+    };
+    sleep(settle).await;
 }
 
 fn spawn_pipeline(script: &str, log_file: std::fs::File) -> Result<Child> {
@@ -621,10 +630,6 @@ fn pipeline_script(conf: &str, channel: &str) -> String {
     )
 }
 
-fn fake_pipeline_script() -> String {
-    "exec sleep 30".into()
-}
-
 fn ota_log_path() -> Result<PathBuf> {
     ensure_data_dir()?;
     Ok(data_dir().join("ota-pipeline.log"))
@@ -675,6 +680,16 @@ async fn wait_pipeline_ready(
     channel: &str,
     look_for_mpv: bool,
 ) -> Result<Option<u32>> {
+    if !look_for_mpv {
+        if let Some(status) = child.try_wait().context("poll OTA pipeline")? {
+            let tail = read_log_tail(log_path, 400);
+            return Err(anyhow!(
+                "OTA failed for '{channel}' (pipeline exited {status}).{tail}"
+            ));
+        }
+        return Ok(child.id());
+    }
+
     let deadline = Instant::now() + Duration::from_millis(2000);
     loop {
         if let Some(status) = child.try_wait().context("poll OTA pipeline")? {
@@ -954,7 +969,7 @@ BBC ONE:8:...
         let _ = fs::remove_file(&conf);
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn concurrent_play_serializes_to_one_pipeline() {
         let conf = write_temp_conf("race", br_conf_text());
         let session = Arc::new(OtaSession::new_fake());
