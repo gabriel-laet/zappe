@@ -1,5 +1,7 @@
-//! Global ATONGX shortcuts so the remote still works when the guide is hidden
-//! behind the Chrome nest or mpv. D-pad / OK stay with the focused surface.
+//! Compositor-level ATONGX shortcuts (fallback while the guide has focus).
+//! Nested gamescope+Chrome eats these, and BrowserBack / BrowserHome fail to
+//! register ("Unknown scancode"). The evdev watcher in `hid.rs` is the path
+//! that always returns to the guide. D-pad / OK stay with the focused surface.
 //! This is Zappe HID mapping — not a Samsung TV API.
 
 use tauri::{AppHandle, Emitter, Manager};

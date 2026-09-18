@@ -174,7 +174,7 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 | Harvest | Nest starts windowed, dump, hide nest; guide stays up |
 | Stream tile | Guide hides → gamescope fullscreen |
 | OTA | Guide hides → mpv fullscreen |
-| Back / Escape | Hide nest or stop mpv → guide fullscreen + focus |
+| Back / Home / Power | Kill nest child gamescope (never the kiosk) or stop mpv → guide fullscreen + focus. Evdev on the XING WEI dongle; Power never shuts the box down. |
 | Quit | Stop OTA; kill a Zappe-launched nest |
 
 Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
@@ -186,7 +186,7 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 | Button | This PR |
 | --- | --- |
 | D-pad + OK (orange ring) | Guide focus / activate (stays with nest / mpv when playing) |
-| Home, Back, DEL | Return to guide / end playback (also global while nest is up) |
+| Home, Back, DEL | Return to guide / end playback. Evdev on XING WEI (`KEY_BACK` 158 / `KEY_HOMEPAGE` 172) so nest Chrome cannot eat them. |
 | Play / Pause | Space into Chrome nest or mpv |
 | PAGE up / down | Jump a shelf |
 | Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
@@ -213,6 +213,8 @@ This is Zappe HID mapping, not a Samsung TV API. Whisper: `ZAPPE_WHISPER_BIN` (`
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
 | `ZAPPE_WHISPER_BIN` | whisper.cpp binary for the red-mic button (pt-BR) |
 | `ZAPPE_VOICE_FAKE` | fake transcript for voice tests (no mic) |
+| `ZAPPE_HID_DISABLE` | `1` skips the ATONGX evdev watcher |
+| `ZAPPE_HID_NAME` | extra substring to match `/dev/input` names |
 
 ## OTA
 

@@ -3,6 +3,7 @@ mod atongx;
 mod branding;
 mod catalog;
 mod harvest;
+mod hid;
 mod nest;
 mod ota;
 mod paths;
@@ -265,9 +266,8 @@ async fn remote_home(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     Ok(())
 }
 
-/// Power never shuts the box down. If something is playing, return to the guide.
-#[tauri::command]
-async fn remote_power(app: AppHandle, state: State<'_, AppState>) -> Result<String, String> {
+pub(crate) async fn remote_power_inner(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>();
     let surface = {
         let playback = state.playback.lock().unwrap();
         playback.surface.clone()
@@ -279,8 +279,14 @@ async fn remote_power(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
     log::info!("ATONGX power — stop playback, return to guide");
     playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
-    playback::finish_return_to_guide(&app, &mut *playback);
+    playback::finish_return_to_guide(app, &mut *playback);
     Ok("power:home".into())
+}
+
+/// Power never shuts the box down. If something is playing, return to the guide.
+#[tauri::command]
+async fn remote_power(app: AppHandle) -> Result<String, String> {
+    remote_power_inner(&app).await
 }
 
 /// Menu opens Connect. If the nest / mpv is up, return to the guide first.
@@ -337,6 +343,7 @@ pub fn run() {
         .plugin(atongx::plugin())
         .setup(|app| {
             atongx::register(app.handle());
+            hid::start(app.handle().clone());
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);
