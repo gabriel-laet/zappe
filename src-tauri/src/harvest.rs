@@ -65,11 +65,18 @@ pub async fn run_harvest(
     playback: PlaybackSurface,
     req: HarvestRequest,
 ) -> HarvestOutcome {
+    if let Err(err) = skill::install_bundled_skills() {
+        log::warn!("could not plant bundled skills in data dir: {err:#}");
+    }
+
     let skill = match skill::load_skill(&req.skill_id) {
         Ok(s) => s,
         Err(err) => {
-            let message = format!("skill load failed: {err:#}");
+            let message = format!(
+                "Netflix skill not found ({err}). Expected bundled netflix.continue_watching.v1 or a YAML under ~/.local/share/zappe/skills."
+            );
             log::error!("{message}");
+            write_error_shelf(catalog, &req.skill_id, "Continue watching", &message);
             return fail_outcome(&req.skill_id, ShelfStatus::Error, message, false);
         }
     };
@@ -150,10 +157,15 @@ async fn harvest_skill(
         return map_extract(skill, &tree);
     }
 
+    // Enable AT-SPI before launching Chrome so the nest registers on the bus.
+    a11y::ensure_a11y_enabled().await?;
+
     if !req.skip_nest && playback != PlaybackSurface::Chrome {
         if let Err(err) = nest.open_url(&skill.open.url, NestMode::Harvest).await {
             log::warn!("nest start for harvest failed: {err:#}");
         }
+        // Hide immediately so the HDMI kiosk stays on the guide during the wait.
+        keep_guide_after_harvest(nest).await;
         let wait = std::time::Duration::from_millis(skill.open.wait_ms);
         tokio::time::sleep(wait).await;
     } else if playback == PlaybackSurface::Chrome {
@@ -169,7 +181,7 @@ async fn harvest_skill(
                 match map_extract(skill, &tree) {
                     Ok(rows) => {
                         if playback != PlaybackSurface::Chrome {
-                            nest.hide().await;
+                            keep_guide_after_harvest(nest).await;
                         }
                         return Ok(rows);
                     }
@@ -184,9 +196,14 @@ async fn harvest_skill(
     }
 
     if playback != PlaybackSurface::Chrome {
-        nest.hide().await;
+        keep_guide_after_harvest(nest).await;
     }
     Err(last_err.unwrap_or_else(|| anyhow_none()))
+}
+
+async fn keep_guide_after_harvest(nest: &NestManager) {
+    nest.hide().await;
+    crate::wm::nudge_guide_fullscreen(None);
 }
 
 fn anyhow_none() -> anyhow::Error {
@@ -222,6 +239,21 @@ fn classify_fail(skill: &Skill, err: &anyhow::Error) -> (ShelfStatus, bool) {
         return (status, skill.on_fail.teach);
     }
     (ShelfStatus::Error, false)
+}
+
+fn write_error_shelf(catalog: &CatalogStore, skill_id: &str, title: &str, message: &str) {
+    let shelf = CatalogShelf {
+        id: "continue".into(),
+        skill_id: skill_id.to_string(),
+        title: title.to_string(),
+        status: ShelfStatus::Error,
+        message: Some(message.to_string()),
+        rows: Vec::new(),
+        updated_at: Some(now_secs()),
+    };
+    if let Err(err) = catalog.upsert_shelf(shelf) {
+        log::warn!("catalog write failed: {err:#}");
+    }
 }
 
 fn write_shelf(
@@ -299,5 +331,51 @@ mod tests {
         assert!(parse_auto_harvest(Some("1")));
         assert!(parse_auto_harvest(Some("true")));
         assert!(parse_auto_harvest(Some("YES")));
+    }
+
+    #[test]
+    fn a11y_disabled_is_error_not_teach() {
+        use crate::a11y::A11Y_DISABLED_MSG;
+        use crate::catalog::ShelfStatus;
+        let skill = load_skill(NETFLIX_CONTINUE_WATCHING_V1).unwrap();
+        let err = anyhow::anyhow!(A11Y_DISABLED_MSG);
+        let (status, teach) = super::classify_fail(&skill, &err);
+        assert_eq!(status, ShelfStatus::Error);
+        assert!(!teach);
+    }
+
+    #[tokio::test]
+    async fn fixture_harvest_writes_catalog_json() {
+        use crate::catalog::ShelfStatus;
+        let prev = std::env::var_os("ZAPPE_DATA_DIR");
+        let dir = std::env::temp_dir().join(format!(
+            "zappe-harvest-cli-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("ZAPPE_DATA_DIR", &dir);
+        let mut req = super::HarvestRequest::for_skill(NETFLIX_CONTINUE_WATCHING_V1);
+        req.fixture = Some(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../fixtures/a11y/netflix.continue_watching.sample.json"),
+        );
+        req.skip_nest = true;
+        let out = super::run_cli(req).await.expect("fixture harvest");
+        assert_eq!(out.status, ShelfStatus::Ok);
+        assert!(out.rows >= 2, "rows={}", out.rows);
+        let json = std::fs::read_to_string(dir.join("catalog.json")).expect("catalog.json");
+        assert!(json.contains("The Bear"), "{json}");
+        assert!(
+            json.contains("\"status\": \"ok\"") || json.contains("\"status\":\"ok\""),
+            "{json}"
+        );
+        match prev {
+            Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),
+            None => std::env::remove_var("ZAPPE_DATA_DIR"),
+        }
     }
 }

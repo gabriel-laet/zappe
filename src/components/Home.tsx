@@ -249,7 +249,11 @@ export function Home() {
         } else if (tile.kind === "sync") {
           toast.message("Harvesting Continue Watching from Chrome…");
           const out = await api.harvestNow();
-          toast.message(out.message);
+          if (out.status === "ok" || out.status === "empty" || out.status === "harvesting") {
+            toast.message(out.message);
+          } else {
+            toast.error(out.message);
+          }
         } else if (tile.kind === "teach") {
           const skillId = tile.serviceId ?? "netflix.continue_watching.v1";
           const state = await api.beginTeach(skillId);

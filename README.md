@@ -97,6 +97,31 @@ Dump the tree while debugging:
 cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tmp/zappe-a11y.json
 ```
 
+### First Sync on the appliance
+
+Home never harvests on mount (that stole the HDMI nest). Use the **Sync Netflix** tile only.
+
+1. Netflix must already be signed in on the shared profile: `~/.local/share/zappe/chrome-profile`.
+2. AT-SPI: `busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled`. Sync sets this `true` when it is `false`; if it stays off you get a guide toast naming `IsEnabled`.
+3. Skill file: `ls ~/.local/share/zappe/skills/netflix.continue_watching.v1.yaml` (updater + first launch plant it; the binary also embeds the YAML).
+4. On Home, focus **Sync Netflix** (or **Retry sync**) and press OK. Stay on the guide — harvest launches Chrome minimized / without gamescope `-f`, then hides the nest.
+5. **Success:** toast `harvested N titles`; `~/.local/share/zappe/catalog.json` has a `continue` shelf with `status: ok` and `rows`; Home tiles refresh via `catalog-changed`.
+6. **Failure:** error toast (a11y still disabled, skill missing, or empty Continue Watching). `catalog.json` still updates with `status` + `message` so you can read it on the box.
+
+```bash
+# After Sync
+test -s ~/.local/share/zappe/catalog.json && python - <<'PY'
+import json, pathlib
+p = pathlib.Path.home() / ".local/share/zappe/catalog.json"
+data = json.loads(p.read_text())
+shelf = next((s for s in data.get("shelves", []) if s.get("id") == "continue"), None)
+print("status", shelf and shelf.get("status"), "rows", shelf and len(shelf.get("rows") or []))
+print((shelf or {}).get("message") or "")
+for row in (shelf or {}).get("rows") or []:
+    print("-", row.get("title"))
+PY
+```
+
 ## First-run setup
 
 The living-room box has **no physical keyboard**. Couch input is the TV remote plus a phone.
@@ -154,7 +179,7 @@ Missing file → defaults. Invalid JSON → log and fall back. See [`packaging/a
     https://www.netflix.com/watch/…
   ```
 
-Harvest uses the same profile **without** `-f`, then hides the nest (best-effort: Hyprland special workspace). Netflix chrome may flash; hiding after harvest is enough for v1.
+Harvest uses the same profile **without** gamescope and **without** `-f` (a second DRM nest would steal HDMI). Chrome starts minimized / off-screen when the compositor honors it, then the nest is hidden and the guide is raised. Netflix chrome may flash briefly on some sessions.
 
 `ZAPPE_NEST=chrome` skips gamescope (dev fallback). `ZAPPE_HARVEST_FIXTURE` / `zappe-harvest --fixture` skip the live dump.
 
@@ -171,7 +196,7 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 | Phase | Behavior |
 | --- | --- |
 | Guide | Tauri visible, D-pad on shelves |
-| Harvest | Nest starts windowed, dump, hide nest; guide stays up |
+| Harvest | Chrome (no gamescope) minimized, dump, hide nest; guide stays up |
 | Stream tile | Guide hides → gamescope fullscreen |
 | OTA | Guide hides → mpv fullscreen |
 | Back / Home / Power | Kill nest child gamescope (never the kiosk) or stop mpv → guide fullscreen + focus. Evdev on the XING WEI dongle; Power never shuts the box down. |

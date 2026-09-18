@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::a11y::A11yNode;
 use crate::catalog::CatalogRow;
-use crate::paths::skills_override_dir;
+use crate::paths::{skill_search_dirs, skills_override_dir};
 
 pub const NETFLIX_CONTINUE_WATCHING_V1: &str = "netflix.continue_watching.v1";
 
@@ -182,13 +182,32 @@ pub fn bundled_skills() -> Result<Vec<Skill>> {
     Ok(vec![parse_skill(BUNDLED_NETFLIX_CW)?])
 }
 
-/// User overrides in `~/.local/share/zappe/skills` win over bundled ids.
-pub fn load_skills() -> Result<Vec<Skill>> {
-    let mut skills = bundled_skills()?;
+/// Write the embedded Netflix skill into `~/.local/share/zappe/skills`
+/// so the appliance data dir always has a file the CLI / updater can see.
+pub fn install_bundled_skills() -> Result<()> {
+    crate::paths::ensure_data_dir()?;
     let dir = skills_override_dir();
-    if dir.is_dir() {
-        let mut entries: Vec<PathBuf> = std::fs::read_dir(&dir)
-            .with_context(|| format!("read {}", dir.display()))?
+    std::fs::create_dir_all(&dir).with_context(|| format!("create skill dir {}", dir.display()))?;
+    let path = dir.join("netflix.continue_watching.v1.yaml");
+    std::fs::write(&path, BUNDLED_NETFLIX_CW)
+        .with_context(|| format!("write {}", path.display()))?;
+    Ok(())
+}
+
+fn merge_skill(skills: &mut Vec<Skill>, skill: Skill) {
+    if let Some(existing) = skills.iter_mut().find(|s| s.id == skill.id) {
+        *existing = skill;
+    } else {
+        skills.push(skill);
+    }
+}
+
+fn load_skill_dir(skills: &mut Vec<Skill>, dir: &Path) {
+    if !dir.is_dir() {
+        return;
+    }
+    let mut entries: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(rd) => rd
             .filter_map(|e| e.ok())
             .map(|e| e.path())
             .filter(|p| {
@@ -197,20 +216,39 @@ pub fn load_skills() -> Result<Vec<Skill>> {
                     Some("yaml" | "yml" | "json")
                 )
             })
-            .collect();
-        entries.sort();
-        for path in entries {
-            match load_skill_file(&path) {
-                Ok(skill) => {
-                    if let Some(existing) = skills.iter_mut().find(|s| s.id == skill.id) {
-                        *existing = skill;
-                    } else {
-                        skills.push(skill);
-                    }
-                }
-                Err(err) => log::warn!("skip skill {}: {err:#}", path.display()),
-            }
+            .collect(),
+        Err(err) => {
+            log::warn!("read skill dir {}: {err}", dir.display());
+            return;
         }
+    };
+    entries.sort();
+    for path in entries {
+        match load_skill_file(&path) {
+            Ok(skill) => merge_skill(skills, skill),
+            Err(err) => log::warn!("skip skill {}: {err:#}", path.display()),
+        }
+    }
+}
+
+/// Bundled ids first; later dirs win. User overrides in
+/// `~/.local/share/zappe/skills` are last so they beat the checkout copy.
+pub fn load_skills() -> Result<Vec<Skill>> {
+    let mut skills = match bundled_skills() {
+        Ok(s) => s,
+        Err(err) => {
+            log::error!("bundled Netflix skill failed to parse: {err:#}");
+            Vec::new()
+        }
+    };
+    for dir in skill_search_dirs() {
+        load_skill_dir(&mut skills, &dir);
+    }
+    if skills.is_empty() {
+        return Err(anyhow!(
+            "no harvest skills found (bundled parse failed and no YAML under {})",
+            skills_override_dir().display()
+        ));
     }
     Ok(skills)
 }
@@ -219,7 +257,12 @@ pub fn load_skill(id: &str) -> Result<Skill> {
     load_skills()?
         .into_iter()
         .find(|s| s.id == id)
-        .ok_or_else(|| anyhow!("unknown skill '{id}'"))
+        .ok_or_else(|| {
+            anyhow!(
+                "unknown skill '{id}' (looked in bundled embed, {}, $ZAPPE_SKILLS_DIR, $ZAPPE_SRC/skills, next to the binary)",
+                skills_override_dir().display()
+            )
+        })
 }
 
 pub fn extract_rows(tree: &A11yNode, skill: &Skill) -> Result<Vec<CatalogRow>, ExtractError> {
@@ -461,6 +504,31 @@ mod tests {
                 assert!(tried.iter().any(|t| t.contains("Continue")));
             }
             other => panic!("expected AnchorMissing, got {other}"),
+        }
+    }
+
+    #[test]
+    fn load_skill_finds_bundled_netflix_without_data_dir() {
+        let skill = load_skill(NETFLIX_CONTINUE_WATCHING_V1).unwrap();
+        assert_eq!(skill.id, NETFLIX_CONTINUE_WATCHING_V1);
+        assert!(skill.open.url.contains("netflix.com"));
+    }
+
+    #[test]
+    fn install_bundled_writes_override_yaml() {
+        let prev = std::env::var_os("ZAPPE_DATA_DIR");
+        let dir = std::env::temp_dir().join(format!("zappe-skills-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("ZAPPE_DATA_DIR", &dir);
+        install_bundled_skills().unwrap();
+        let path = dir.join("skills/netflix.continue_watching.v1.yaml");
+        assert!(path.is_file(), "{}", path.display());
+        let on_disk = load_skill_file(&path).unwrap();
+        assert_eq!(on_disk.id, NETFLIX_CONTINUE_WATCHING_V1);
+        match prev {
+            Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),
+            None => std::env::remove_var("ZAPPE_DATA_DIR"),
         }
     }
 }

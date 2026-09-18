@@ -203,7 +203,7 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     let already_running = !chrome_pids_for_profile(&profile).is_empty();
     if already_running {
         // Existing Chrome singleton: open the URL in that session (no second nest).
-        navigate_existing(&chrome, &profile, url)?;
+        navigate_existing(&chrome, &profile, url, mode)?;
         apply_mode(mode);
         return Ok(());
     }
@@ -211,7 +211,7 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     let mut guard = inner.lock().await;
     if guard.child.is_some() {
         drop(guard);
-        navigate_existing(&chrome, &profile, url)?;
+        navigate_existing(&chrome, &profile, url, mode)?;
         apply_mode(mode);
         return Ok(());
     }
@@ -279,8 +279,8 @@ fn spawn_nest(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Resul
         .with_context(|| format!("spawn nest {}", argv[0]))
 }
 
-fn navigate_existing(chrome: &Path, profile: &Path, url: &str) -> Result<()> {
-    let args = chrome_args(profile, Some(url));
+fn navigate_existing(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Result<()> {
+    let args = chrome_args_for_mode(profile, Some(url), mode);
     if !has_no_cdp_flags(&args) {
         return Err(anyhow!(
             "refusing to launch Chrome with automation/CDP flags"
@@ -314,12 +314,15 @@ pub struct NestLaunch {
 impl NestLaunch {
     pub fn new(chrome: PathBuf, profile: PathBuf, url: Option<String>, mode: NestMode) -> Self {
         let (width, height) = nest_size();
+        // Harvest must not spawn a second gamescope: on the appliance kiosk that
+        // steals HDMI/DRM. Play still wraps Chrome when gamescope is available.
+        let gamescope = match mode {
+            NestMode::Harvest => None,
+            NestMode::Play if prefer_gamescope() => find_gamescope(),
+            NestMode::Play => None,
+        };
         Self {
-            gamescope: if prefer_gamescope() {
-                find_gamescope()
-            } else {
-                None
-            },
+            gamescope,
             chrome,
             profile,
             url,
@@ -331,30 +334,37 @@ impl NestLaunch {
 
     pub fn argv(&self) -> Vec<String> {
         let mut chrome_cmd = vec![self.chrome.display().to_string()];
-        chrome_cmd.extend(chrome_args(&self.profile, self.url.as_deref()));
+        chrome_cmd.extend(chrome_args_for_mode(
+            &self.profile,
+            self.url.as_deref(),
+            self.mode,
+        ));
 
-        if let Some(gs) = &self.gamescope {
-            let mut args = vec![
-                gs.display().to_string(),
-                "-W".into(),
-                self.width.to_string(),
-                "-H".into(),
-                self.height.to_string(),
-            ];
-            if self.mode == NestMode::Play {
-                args.push("-f".into());
+        // Safety net: never wrap harvest in gamescope even if the struct
+        // was built by hand with a gamescope path (tests / callers).
+        if self.mode != NestMode::Harvest {
+            if let Some(gs) = &self.gamescope {
+                let mut args = vec![
+                    gs.display().to_string(),
+                    "-W".into(),
+                    self.width.to_string(),
+                    "-H".into(),
+                    self.height.to_string(),
+                ];
+                if self.mode == NestMode::Play {
+                    args.push("-f".into());
+                }
+                args.push("--".into());
+                args.extend(chrome_cmd);
+                return args;
             }
-            args.push("--".into());
-            args.extend(chrome_cmd);
-            args
-        } else {
             if prefer_gamescope() {
                 log::warn!(
                     "gamescope not found; launching Chrome directly. Install gamescope for the living-room nest."
                 );
             }
-            chrome_cmd
         }
+        chrome_cmd
     }
 
     pub fn has_no_cdp_flags(&self) -> bool {
@@ -363,6 +373,10 @@ impl NestLaunch {
 }
 
 pub fn chrome_args(profile: &Path, url: Option<&str>) -> Vec<String> {
+    chrome_args_for_mode(profile, url, NestMode::Play)
+}
+
+pub fn chrome_args_for_mode(profile: &Path, url: Option<&str>, mode: NestMode) -> Vec<String> {
     let mut args = vec![
         format!("--user-data-dir={}", profile.display()),
         "--no-first-run".into(),
@@ -370,6 +384,13 @@ pub fn chrome_args(profile: &Path, url: Option<&str>) -> Vec<String> {
         "--disable-session-crashed-bubble".into(),
         "--force-renderer-accessibility".into(),
     ];
+    if mode == NestMode::Harvest {
+        // Stay off the HDMI kiosk: no --kiosk / --start-fullscreen, start
+        // minimized and parked off-screen when the compositor honors it.
+        args.push("--start-minimized".into());
+        args.push("--window-size=1280,720".into());
+        args.push("--window-position=-32000,-32000".into());
+    }
     if let Some(url) = url {
         args.push(url.to_string());
     }
@@ -784,7 +805,28 @@ mod tests {
         };
         let argv = launch.argv();
         assert!(!argv.contains(&"-f".into()));
+        assert!(!argv.iter().any(|a| a.contains("gamescope")));
+        assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
+        assert!(argv.iter().any(|a| a == "--start-minimized"));
+        assert!(argv.iter().any(|a| a.contains("user-data-dir=")));
+        assert!(!argv
+            .iter()
+            .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
         assert!(launch.has_no_cdp_flags());
+    }
+
+    #[test]
+    fn harvest_new_skips_gamescope() {
+        let launch = NestLaunch::new(
+            PathBuf::from("/usr/bin/google-chrome-stable"),
+            PathBuf::from("/tmp/zappe/chrome-profile"),
+            Some("https://www.netflix.com/browse".into()),
+            NestMode::Harvest,
+        );
+        assert!(launch.gamescope.is_none());
+        let argv = launch.argv();
+        assert!(!argv.iter().any(|a| a.contains("gamescope")));
+        assert!(argv.iter().any(|a| a == "--start-minimized"));
     }
 
     #[test]

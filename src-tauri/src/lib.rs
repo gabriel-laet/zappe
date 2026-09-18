@@ -137,6 +137,13 @@ async fn harvest_now(
 ) -> Result<HarvestOutcome, String> {
     let id = skill_id.unwrap_or_else(|| NETFLIX_CONTINUE_WATCHING_V1.to_string());
     let surface = state.playback.lock().unwrap().surface.clone();
+    if let Err(err) = state
+        .catalog
+        .mark_harvesting("continue", &id, "Continue watching")
+    {
+        log::warn!("catalog harvesting mark failed: {err:#}");
+    }
+    let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
     let outcome = harvest::run_harvest(
         &state.nest,
         &state.catalog,
@@ -145,6 +152,7 @@ async fn harvest_now(
         HarvestRequest::for_skill(id),
     )
     .await;
+    // Always emit after harvest (ok / empty / error / teach) so Home shelves refresh.
     let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
     Ok(outcome)
 }
@@ -368,6 +376,9 @@ pub fn run() {
         .setup(|app| {
             atongx::register(app.handle());
             hid::start(app.handle().clone());
+            if let Err(err) = skill::install_bundled_skills() {
+                log::warn!("could not plant bundled harvest skills: {err:#}");
+            }
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);

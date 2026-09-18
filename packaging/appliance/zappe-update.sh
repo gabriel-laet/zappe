@@ -155,6 +155,14 @@ else
   log "sudo -n unavailable; skipped ${SYSTEM_BIN} (kiosk PATH uses ${HOME}/bin)"
 fi
 
+# Plant harvest skills next to catalog.json so the appliance always has
+# netflix.continue_watching.v1.yaml even if an older binary looked on disk.
+if [[ -d "${ZAPPE_SRC}/skills" ]]; then
+  mkdir -p "${ZAPPE_DATA_DIR}/skills"
+  cp -f "${ZAPPE_SRC}/skills/"*.yaml "${ZAPPE_DATA_DIR}/skills/" 2>/dev/null || true
+  log "installed harvest skills -> ${ZAPPE_DATA_DIR}/skills"
+fi
+
 printf '%s\n' "${remote_sha}" > "${INSTALLED_SHA}"
 log "wrote ${INSTALLED_SHA}"
 
