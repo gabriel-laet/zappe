@@ -2,7 +2,7 @@
 
 Living-room remote (ATONGX / XING WEI 2.4G) must drive **Netflix inside the Chrome nest**, not only the Tauri guide.
 
-This is Zappe HID → nest injection. No CDP, no `--enable-automation`, no Samsung TV API.
+This is Zappe HID → nest injection. No CDP, no `--enable-automation`. Volume / mute are a separate Samsung Device Connect path — see [`samsung-tv.md`](samsung-tv.md).
 
 ## Stack
 

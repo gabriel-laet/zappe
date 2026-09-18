@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::remote_stubs::{remote_mute, remote_volume};
+use crate::remote::{apply_mute, apply_volume};
 
 /// Linux `input-event-codes.h` values we actually dispatch.
 pub const KEY_ESC: u16 = 1;
@@ -387,13 +387,13 @@ async fn dispatch(app: AppHandle, action: HidAction) {
             crate::remote_pointer_inner(&app);
         }
         HidAction::VolumeUp => {
-            let _ = remote_volume(1);
+            let _ = apply_volume(Some(&app), 1).await;
         }
         HidAction::VolumeDown => {
-            let _ = remote_volume(-1);
+            let _ = apply_volume(Some(&app), -1).await;
         }
         HidAction::Mute => {
-            let _ = remote_mute();
+            let _ = apply_mute(Some(&app)).await;
         }
     }
 }

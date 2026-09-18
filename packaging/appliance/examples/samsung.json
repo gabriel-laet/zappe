@@ -1,0 +1,7 @@
+{
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/samsung.json. Token is written on Device Connect pair; never commit a live token.",
+  "host": "192.168.3.6",
+  "port": 8001,
+  "securePort": 8002,
+  "name": "Zappe"
+}

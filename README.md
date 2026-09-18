@@ -216,11 +216,11 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 | PAGE up / down | Jump a shelf |
 | Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
 | Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click |
-| VOL +/−, Mute | `pactl` ±5% / mute (guide + global) |
+| VOL +/−, Mute | Samsung TV Device Connect (`KEY_VOLUP` / `KEY_VOLDOWN` / `KEY_MUTE`). Pulse `pactl` if the TV is unreachable (one toast). |
 | Menu | Open Connect (returns to guide first if playing) |
-| Power | Return to guide — never shuts the box down |
+| Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
 
-This is Zappe HID mapping, not a Samsung TV API. Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
+Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
 
 ## Environment
 
@@ -240,6 +240,12 @@ This is Zappe HID mapping, not a Samsung TV API. Whisper: `ZAPPE_WHISPER_BIN` (`
 | `ZAPPE_VOICE_FAKE` | fake transcript for voice tests (no mic) |
 | `ZAPPE_HID_DISABLE` | `1` skips the ATONGX evdev watcher |
 | `ZAPPE_HID_NAME` | extra substring to match `/dev/input` names |
+| `ZAPPE_SAMSUNG_HOST` | Samsung TV IP (default `192.168.3.6`) |
+| `ZAPPE_SAMSUNG_PORT` | Device Connect `ws://` port (default `8001`) |
+| `ZAPPE_SAMSUNG_SECURE_PORT` | `wss://` fallback (default `8002`) |
+| `ZAPPE_SAMSUNG_TOKEN` | Device Connect token (prefer `~/.local/share/zappe/samsung.json`) |
+| `ZAPPE_SAMSUNG_NAME` | Client name shown on the TV pair popup (default `Zappe`) |
+| `ZAPPE_SAMSUNG_DISABLE` | `1` skips Samsung and uses `pactl` only |
 
 ## OTA
 

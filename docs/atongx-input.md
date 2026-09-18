@@ -2,7 +2,7 @@
 
 Living-room box: **no physical keyboard**. Couch input is this remote plus a phone at `zappe-tv.local` (device-code login is the next PR).
 
-Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). This is Zappe HID mapping — not a Samsung TV API.
+Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). Nest nav is Zappe HID. Volume / mute are Samsung Device Connect keys — see [`samsung-tv.md`](samsung-tv.md).
 
 When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough for Back / Home: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
 
@@ -22,9 +22,9 @@ While the Chrome nest is playing, D-pad + OK + Space are grabbed as compositor s
 | Menu | `menu` | Open Connect (phone) |
 | PAGE up / down | `pageUp` `pageDown` | Jump a shelf row |
 | Mic (red) | `voice` | Whisper pt-BR (`voice_listen`) |
-| VOL + / − | `volumeUp` `volumeDown` | `pactl set-sink-volume` ±5% |
+| VOL + / − | `volumeUp` `volumeDown` | Samsung `KEY_VOLUP` / `KEY_VOLDOWN`; `pactl` ±5% if the TV is unreachable |
 | DEL | `delete` | Same as Back (no on-TV typing) |
-| Mute | `mute` | `pactl set-sink-mute toggle` |
+| Mute | `mute` | Samsung `KEY_MUTE`; `pactl` toggle if the TV is unreachable |
 
 ## Evdev keycodes (XING WEI 2.4G USB)
 
@@ -78,6 +78,6 @@ Build with `npm run tauri -- build --no-bundle` (never plain `cargo build --rele
 1. `journalctl --user -u zappe.service -f` — look for `ATONGX evdev watching XING WEI … grab=true` on the consumer node.
 2. Open Netflix (or any nest). Press **Back** — nest gamescope+Chrome die, guide is fullscreen. Repeat with **Home** and **Power**. Box stays on.
 3. `pgrep -a gamescope` while the nest is up shows two processes (kiosk `-- zappe` and nest Chrome). After Back, only the kiosk remains.
-4. VOL / Mute still change Pulse (`pactl get-sink-volume @DEFAULT_SINK@`).
+4. VOL / Mute move the **Samsung TV** volume (OSD). Log: `ATONGX volume+ via samsung`. Pulse (`pactl get-sink-volume`) stays put unless Device Connect failed — then one toast and pactl. See [`samsung-tv.md`](samsung-tv.md).
 5. D-pad moves Netflix focus; OK activates. See [`nest-input.md`](nest-input.md).
 6. Optional: `sudo evtest` as above if Back / Home is ignored — add the printed `KEY_*` to `action_for_keycode` in `src-tauri/src/hid.rs`.

@@ -6,8 +6,8 @@
 //! Always-on: Home / Back / Play-Pause / Menu / Mic / VOL / Mute / pointer.
 //! While Chrome is playing: D-pad + OK + Space are grabbed and injected into
 //! the nest (see `nest_input`). They are unregistered on return-to-guide so
-//! the Home shelves keep spatial focus. This is Zappe HID mapping — not a
-//! Samsung TV API.
+//! the Home shelves keep spatial focus. Volume / mute are Samsung Device
+//! Connect keys (see `samsung.rs`); nest nav is still Zappe HID, not a TV API.
 //!
 //! Back / Home themselves are owned by the evdev + return-to-guide path.
 //! Do not send those into Netflix from here.
@@ -17,7 +17,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut, ShortcutSt
 
 use crate::nest_input;
 use crate::playback::PlaybackSurface;
-use crate::remote_stubs::{remote_mute, remote_volume};
+use crate::remote::{apply_mute, apply_volume};
 use crate::{return_to_guide, AppState};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,13 +164,13 @@ async fn dispatch(app: AppHandle, action: GlobalAction) {
             crate::remote_pointer_inner(&app);
         }
         GlobalAction::VolumeUp => {
-            let _ = remote_volume(1);
+            let _ = apply_volume(Some(&app), 1).await;
         }
         GlobalAction::VolumeDown => {
-            let _ = remote_volume(-1);
+            let _ = apply_volume(Some(&app), -1).await;
         }
         GlobalAction::Mute => {
-            let _ = remote_mute();
+            let _ = apply_mute(Some(&app)).await;
         }
     }
 }

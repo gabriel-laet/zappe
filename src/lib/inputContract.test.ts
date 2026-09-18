@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { classifyAtongx } from "./remoteMap.ts";
+import { tvControlToast, type TvControlEvent } from "./tvControl.ts";
 import { parseVoicePtBr } from "./voicePtBr.ts";
 
 function key(code: string, extra: Partial<KeyboardEvent> = {}): KeyboardEvent {
@@ -32,6 +33,27 @@ describe("classifyAtongx", () => {
     assert.equal(classifyAtongx(key("Delete")), "delete");
     assert.equal(classifyAtongx(key("F2")), "pointer");
     assert.equal(classifyAtongx(key("Power")), "power");
+  });
+});
+
+describe("tvControlToast", () => {
+  it("uses the Samsung fallback copy once, then the short label", () => {
+    const fallback: TvControlEvent = {
+      action: "volume+",
+      via: "pactl",
+      message: "TV Samsung offline (192.168.3.6:8001) — volume no PulseAudio do aparelho.",
+      first_fallback: true,
+    };
+    assert.match(tvControlToast(fallback), /Samsung/);
+    assert.match(tvControlToast(fallback), /PulseAudio/);
+    assert.equal(
+      tvControlToast({ ...fallback, first_fallback: false, message: "Volume +" }),
+      "Volume +",
+    );
+    assert.equal(
+      tvControlToast({ action: "mute", via: "samsung", message: "Mudo", first_fallback: false }),
+      "Mudo",
+    );
   });
 });
 

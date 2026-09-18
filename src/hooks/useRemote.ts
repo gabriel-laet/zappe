@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { api, onGuidePointer } from "@/lib/tauri";
+import { api, onGuidePointer, onTvControl } from "@/lib/tauri";
 import { classifyAtongx } from "@/lib/remoteMap";
+import { tvControlToast } from "@/lib/tvControl";
 
 function applyPointer(on?: boolean) {
   if (typeof on === "boolean") {
@@ -50,24 +51,15 @@ export function useRemote(enabled: boolean) {
         return;
       }
       if (action === "volumeUp") {
-        void api
-          .remoteVolume(1)
-          .then(() => toast.message("Volume +"))
-          .catch(() => toast.message("Volume +"));
+        void api.remoteVolume(1).catch(() => toast.message("Volume +"));
         return;
       }
       if (action === "volumeDown") {
-        void api
-          .remoteVolume(-1)
-          .then(() => toast.message("Volume −"))
-          .catch(() => toast.message("Volume −"));
+        void api.remoteVolume(-1).catch(() => toast.message("Volume −"));
         return;
       }
       if (action === "mute") {
-        void api
-          .remoteMute()
-          .then(() => toast.message("Mudo"))
-          .catch(() => toast.message("Mudo"));
+        void api.remoteMute().catch(() => toast.message("Mudo"));
         return;
       }
       if (action === "menu") {
@@ -87,12 +79,19 @@ export function useRemote(enabled: boolean) {
 
     window.addEventListener("keydown", onKey);
     let unlistenPointer: (() => void) | undefined;
+    let unlistenTv: (() => void) | undefined;
     void onGuidePointer((on) => applyPointer(on)).then((fn) => {
       unlistenPointer = fn;
+    });
+    void onTvControl((event) => {
+      toast.message(tvControlToast(event));
+    }).then((fn) => {
+      unlistenTv = fn;
     });
     return () => {
       window.removeEventListener("keydown", onKey);
       unlistenPointer?.();
+      unlistenTv?.();
     };
   }, [enabled]);
 }

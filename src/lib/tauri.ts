@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Branding } from "@/lib/branding";
+import type { TvControlEvent } from "@/lib/tvControl";
 
 export type GuideFocus = { shelf_id: string; index: number };
 
@@ -139,4 +140,8 @@ export function onVoiceArm(cb: () => void) {
 
 export function onGuidePointer(cb: (on?: boolean) => void) {
   return listen<boolean>("guide-pointer", (e) => cb(e.payload));
+}
+
+export function onTvControl(cb: (event: TvControlEvent) => void) {
+  return listen<TvControlEvent>("tv-control", (e) => cb(e.payload));
 }

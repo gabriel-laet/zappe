@@ -2,9 +2,11 @@
  * ATONGX air-mouse contract (living-room remote).
  *
  * Every physical button has a named action in the guide / nest. Volume and
- * mute call `pactl`. Menu opens Connect. Power returns to the guide and
- * never shuts the box down. Pointer toggles the CSS cursor on the guide
- * and a real nest cursor while Chrome is playing (see nest-input.md).
+ * mute go to the Samsung TV (Device Connect), then `pactl` if the TV is
+ * unreachable. Menu opens Connect. Power returns to the guide and never
+ * shuts the box down or sends KEY_POWER to the TV. Pointer toggles the CSS
+ * cursor on the guide and a real nest cursor while Chrome is playing
+ * (see nest-input.md).
  *
  * Cheap ATONGX HID maps vary; we accept common KeyboardEvent.code aliases.
  */

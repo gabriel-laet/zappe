@@ -14,3 +14,6 @@ feras-tv-branding/
 /branding.json
 /logo.png
 /splash.png
+
+# Live Samsung Device Connect token — never commit
+/samsung.json

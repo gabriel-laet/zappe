@@ -42,3 +42,16 @@ If `branding.json` is missing, the guide uses in-code defaults (`Zappe` + Apple 
 | `theme.focusRing` | no | `subtle-scale` (default). |
 
 Unknown keys (`_example`, `_comment`) are ignored. No taglines on the feras TV mark.
+
+## Samsung TV (Device Connect)
+
+Volume / mute on the ATONGX go to the living-room Samsung over Wi-Fi. Copy the sample (no token) and pair on the TV — see [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).
+
+```bash
+mkdir -p ~/.local/share/zappe
+cp packaging/appliance/examples/samsung.json ~/.local/share/zappe/samsung.json
+# allow "Zappe" in Device Connect Manager; the kiosk writes token into that file
+systemctl --user restart zappe.service
+```
+
+Never commit a live `token`. `ZAPPE_SAMSUNG_HOST` / `ZAPPE_SAMSUNG_TOKEN` override the file. `ZAPPE_SAMSUNG_DISABLE=1` forces PulseAudio.

@@ -9,7 +9,8 @@ mod nest_input;
 mod ota;
 mod paths;
 pub(crate) mod playback;
-pub(crate) mod remote_stubs;
+pub(crate) mod remote;
+mod samsung;
 mod setup;
 mod skill;
 mod skills;
@@ -25,7 +26,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
 use nest::{NestManager, NestStatus};
-use remote_stubs::{remote_mute, remote_volume};
+use remote::{remote_mute, remote_volume};
 use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
@@ -376,6 +377,9 @@ pub fn run() {
         .setup(|app| {
             atongx::register(app.handle());
             hid::start(app.handle().clone());
+            tauri::async_runtime::spawn(async {
+                crate::samsung::startup_probe().await;
+            });
             if let Err(err) = skill::install_bundled_skills() {
                 log::warn!("could not plant bundled harvest skills: {err:#}");
             }
