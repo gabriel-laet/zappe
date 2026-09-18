@@ -14,7 +14,7 @@ import {
 } from "@/lib/branding";
 import { api, type CatalogView, type OtaChannel } from "@/lib/tauri";
 
-const SPLASH_MIN_MS = 700;
+const SPLASH_MIN_MS = 1200;
 const BOOT_CAP_MS = 4000;
 
 const EMPTY_CATALOG: CatalogView = {
@@ -22,10 +22,10 @@ const EMPTY_CATALOG: CatalogView = {
   teach: { active: false, skill_id: null, message: null },
 };
 
-function preferHomePreview(): boolean {
+function previewFlag(value: string): boolean {
   return (
     Boolean(import.meta.env.DEV) &&
-    new URLSearchParams(window.location.search).get("preview") === "home"
+    new URLSearchParams(window.location.search).get("preview") === value
   );
 }
 
@@ -67,7 +67,7 @@ export default function App() {
       const [completed, remote, catalog, ota] = await Promise.all([
         settle(
           api.getSetupState().then((s) => s.completed),
-          preferHomePreview(),
+          previewFlag("home"),
         ),
         settle(api.getBranding(), DEFAULT_BRANDING),
         settle(api.getCatalog(), EMPTY_CATALOG),
@@ -81,7 +81,9 @@ export default function App() {
       setSetupDone(completed);
       setInitialCatalog(catalog);
       setInitialOta(ota);
-      setReady(true);
+      if (!previewFlag("splash")) {
+        setReady(true);
+      }
     })();
 
     return () => {

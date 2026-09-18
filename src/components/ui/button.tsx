@@ -15,8 +15,8 @@ const buttonVariants = cva(
       size: {
         default: "h-16 px-9",
         lg: "h-20 px-12 text-2xl",
-        tile: "tv-tile",
-        poster: "tv-poster",
+        tile: "tv-tile whitespace-normal",
+        poster: "tv-poster whitespace-normal",
       },
     },
     defaultVariants: {

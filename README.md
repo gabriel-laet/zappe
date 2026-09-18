@@ -136,7 +136,7 @@ Copy [`fixtures/branding.example.json`](fixtures/branding.example.json) to one o
 
 Field env vars override the file: `ZAPPE_BRAND_NAME`, `ZAPPE_BRAND_WORDMARK`, `ZAPPE_BRAND_TAGLINE`, `ZAPPE_BRAND_ACCENT`, `ZAPPE_BRAND_LOGO`.
 
-For `npm run dev:web` only, `VITE_ZAPPE_BRAND_*` (same suffixes) apply at build time.
+For `npm run dev:web` only, `VITE_ZAPPE_BRAND_*` (same suffixes) apply at build time. Dev query flags: `?preview=home` skips setup; `?preview=splash` holds the boot splash.
 
 The Tauri command `get_branding` reads this layer at boot. Harvest, gamescope nest, and OTA paths are unchanged.
 

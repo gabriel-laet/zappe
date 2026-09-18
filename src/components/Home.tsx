@@ -339,7 +339,7 @@ export function Home({ initialCatalog, initialOta }: HomeProps) {
       <div className="flex-1 space-y-10 overflow-y-auto pb-12">
         {shelves.map((shelf) => (
           <section key={shelf.id} aria-label={shelf.title}>
-            <h2 className="mb-4 text-2xl text-muted-foreground">{shelf.title}</h2>
+            <h2 className="mb-4 text-3xl text-muted-foreground">{shelf.title}</h2>
             <div className="shelf-scroll">
               {shelf.tiles.map((tile, index) => {
                 const focused =
@@ -360,11 +360,11 @@ export function Home({ initialCatalog, initialOta }: HomeProps) {
                       void activate(tile);
                     }}
                   >
-                    <span className="text-3xl leading-tight font-semibold">
+                    <span className="line-clamp-3 text-3xl leading-tight font-semibold text-pretty">
                       {tile.title}
                     </span>
                     {tile.subtitle && (
-                      <span className="mt-2 text-lg text-muted-foreground">
+                      <span className="mt-2 line-clamp-2 text-lg text-muted-foreground text-pretty">
                         {tile.subtitle}
                       </span>
                     )}

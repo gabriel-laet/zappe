@@ -6,8 +6,8 @@ export function BootSplash() {
   return (
     <div className="boot-splash" role="status" aria-live="polite">
       <div className="splash-rise">
-        <BrandMark size="splash" className="brand-breathe flex-col" />
-        <p className="text-2xl text-muted-foreground">{brand.tagline}</p>
+        <BrandMark size="splash" className="brand-breathe flex-col items-center" />
+        <p className="text-3xl text-muted-foreground">{brand.tagline}</p>
         <div className="splash-bar" aria-hidden />
       </div>
       <span className="sr-only">Loading {brand.name}</span>

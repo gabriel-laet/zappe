@@ -13,7 +13,7 @@ export function ShelfSkeleton({
 }: ShelfSkeletonProps) {
   return (
     <section aria-busy="true" aria-label={`${title} loading`}>
-      <h2 className="mb-4 text-2xl text-muted-foreground">{title}</h2>
+      <h2 className="mb-4 text-3xl text-muted-foreground">{title}</h2>
       <div className="shelf-scroll">
         {Array.from({ length: count }, (_, i) => (
           <div
