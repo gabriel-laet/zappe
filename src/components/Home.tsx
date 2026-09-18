@@ -6,6 +6,7 @@ import { ShelfSkeleton } from "@/components/ShelfSkeleton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { primaryOtaChannel } from "@/lib/otaDisplay";
+import { atongx } from "@/lib/remoteMap";
 import {
   api,
   onCatalogChanged,
@@ -223,6 +224,8 @@ export function Home() {
   const activate = useCallback(
     async (tile: Tile) => {
       const f = { shelf_id: focus.shelf_id, index: focus.index };
+      const handoff = tile.kind === "app" || tile.kind === "catalog" || tile.kind === "ota";
+      if (handoff) document.body.classList.add("tv-handoff");
       try {
         if (tile.kind === "app" && tile.serviceId) {
           await api.openApp(tile.serviceId, f);
@@ -248,6 +251,7 @@ export function Home() {
           toast.message("Connect from your phone at zappe-tv.local, then Sync.");
         }
       } catch (e) {
+        document.body.classList.remove("tv-handoff");
         toast.error(String(e));
       }
     },
@@ -274,19 +278,19 @@ export function Home() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (connectOpen) return;
-      if (e.code === "ArrowUp") {
+      if (atongx.isUp(e)) {
         e.preventDefault();
         move(-1, 0);
-      } else if (e.code === "ArrowDown") {
+      } else if (atongx.isDown(e)) {
         e.preventDefault();
         move(1, 0);
-      } else if (e.code === "ArrowLeft") {
+      } else if (atongx.isLeft(e)) {
         e.preventDefault();
         move(0, -1);
-      } else if (e.code === "ArrowRight") {
+      } else if (atongx.isRight(e)) {
         e.preventDefault();
         move(0, 1);
-      } else if (e.code === "Enter" || e.code === "NumpadEnter") {
+      } else if (atongx.isActivate(e)) {
         e.preventDefault();
         const tile = currentShelf.tiles[focus.index];
         if (tile) void activate(tile);
@@ -313,7 +317,7 @@ export function Home() {
         {shelves.map((shelf) => {
           const showHarvest = shelf.id === "continue" && harvesting;
           return (
-            <section key={shelf.id} aria-label={shelf.title}>
+            <section key={shelf.id} className="tv-shelf" aria-label={shelf.title}>
               <h2 className="tv-shelf-title">{shelf.title}</h2>
               {showHarvest && <div className="tv-progress" aria-hidden />}
               <div className="shelf-scroll">
@@ -331,6 +335,15 @@ export function Home() {
                         wide && "tv-tile-wide",
                         focused && "focus-tile",
                       )}
+                      ref={(node) => {
+                        if (focused && node) {
+                          node.scrollIntoView({
+                            behavior: "smooth",
+                            inline: "center",
+                            block: "nearest",
+                          });
+                        }
+                      }}
                       onClick={() => {
                         setFocus({ shelf_id: shelf.id, index });
                         void activate(tile);

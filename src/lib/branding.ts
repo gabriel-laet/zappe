@@ -1,5 +1,7 @@
 export const DEFAULT_BRAND_NAME = "Zappe";
-export const DEFAULT_ACCENT = "oklch(0.72 0.14 45)";
+export const DEFAULT_ACCENT = "#E85A1B";
+export const DEFAULT_BACKGROUND = "#000000";
+export const DEFAULT_IDLE_TIMEOUT = 120;
 
 export type Branding = {
   name: string;
@@ -7,6 +9,13 @@ export type Branding = {
   tagline: string | null;
   logo_data_url: string | null;
   splash_data_url: string | null;
+  idle_data_url: string | null;
+  idle_mode: "screensaver" | "off";
+  idle_timeout_seconds: number;
+  idle_animation: string;
+  theme_style: string;
+  theme_background: string;
+  theme_focus: string;
   source: "default" | "user";
 };
 
@@ -16,6 +25,13 @@ export const DEFAULT_BRANDING: Branding = {
   tagline: null,
   logo_data_url: null,
   splash_data_url: null,
+  idle_data_url: null,
+  idle_mode: "screensaver",
+  idle_timeout_seconds: DEFAULT_IDLE_TIMEOUT,
+  idle_animation: "soft-breathe",
+  theme_style: "apple-tv",
+  theme_background: DEFAULT_BACKGROUND,
+  theme_focus: "subtle-scale",
   source: "default",
 };
 
@@ -24,5 +40,25 @@ export function applyBrandingCss(branding: Branding) {
   root.style.setProperty("--brand-accent", branding.accent);
   root.style.setProperty("--color-primary", branding.accent);
   root.style.setProperty("--color-ring", branding.accent);
+  root.style.setProperty("--color-background", branding.theme_background);
+  root.dataset.theme = branding.theme_style;
+  root.dataset.focus = branding.theme_focus;
   document.title = branding.name;
+}
+
+export function normalizeBranding(raw: Partial<Branding> | null | undefined): Branding {
+  if (!raw) return DEFAULT_BRANDING;
+  return {
+    ...DEFAULT_BRANDING,
+    ...raw,
+    tagline: raw.tagline ?? null,
+    logo_data_url: raw.logo_data_url ?? null,
+    splash_data_url: raw.splash_data_url ?? null,
+    idle_data_url: raw.idle_data_url ?? raw.logo_data_url ?? null,
+    idle_mode: raw.idle_mode === "off" ? "off" : "screensaver",
+    idle_timeout_seconds: Math.min(
+      3600,
+      Math.max(15, raw.idle_timeout_seconds ?? DEFAULT_IDLE_TIMEOUT),
+    ),
+  };
 }

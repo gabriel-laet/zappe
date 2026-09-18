@@ -10,6 +10,7 @@ mod setup;
 mod skill;
 mod skills;
 mod teach;
+mod voice;
 mod wm;
 
 use std::sync::Mutex;
@@ -20,6 +21,7 @@ use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
 use nest::{NestManager, NestStatus};
+use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
 pub use harvest::{HarvestOutcome, HarvestRequest};
@@ -110,6 +112,11 @@ fn get_catalog(state: State<AppState>) -> CatalogView {
 #[tauri::command]
 fn get_branding() -> BrandingView {
     branding::load_branding()
+}
+
+#[tauri::command]
+fn voice_listen() -> VoiceOutcome {
+    voice::listen()
 }
 
 #[tauri::command]
@@ -336,6 +343,7 @@ pub fn run() {
             list_ota_channels,
             get_catalog,
             get_branding,
+            voice_listen,
             auto_harvest_enabled,
             harvest_now,
             begin_teach,

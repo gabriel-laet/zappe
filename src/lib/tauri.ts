@@ -65,6 +65,12 @@ export type CatalogView = {
   teach: TeachView;
 };
 
+export type VoiceOutcome = {
+  armed: boolean;
+  transcript: string | null;
+  message: string;
+};
+
 export type HarvestOutcome = {
   skill_id: string;
   status: ShelfStatus;
@@ -82,6 +88,7 @@ export const api = {
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
   getCatalog: () => invoke<CatalogView>("get_catalog"),
   getBranding: () => invoke<Branding>("get_branding"),
+  voiceListen: () => invoke<VoiceOutcome>("voice_listen"),
   autoHarvestEnabled: () => invoke<boolean>("auto_harvest_enabled"),
   harvestNow: (skillId?: string) =>
     invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),

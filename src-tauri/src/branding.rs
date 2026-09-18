@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::paths;
 
 pub const DEFAULT_NAME: &str = "Zappe";
-pub const DEFAULT_ACCENT: &str = "oklch(0.72 0.14 45)";
-const MAX_ASSET_BYTES: u64 = 4 * 1024 * 1024;
+pub const DEFAULT_ACCENT: &str = "#E85A1B";
+pub const DEFAULT_BACKGROUND: &str = "#000000";
+pub const DEFAULT_IDLE_TIMEOUT: u32 = 120;
+const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_NAME_CHARS: usize = 40;
 const MAX_TAGLINE_CHARS: usize = 80;
 
@@ -24,6 +26,13 @@ pub struct BrandingView {
     pub tagline: Option<String>,
     pub logo_data_url: Option<String>,
     pub splash_data_url: Option<String>,
+    pub idle_data_url: Option<String>,
+    pub idle_mode: String,
+    pub idle_timeout_seconds: u32,
+    pub idle_animation: String,
+    pub theme_style: String,
+    pub theme_background: String,
+    pub theme_focus: String,
     pub source: String,
 }
 
@@ -35,6 +44,13 @@ impl Default for BrandingView {
             tagline: None,
             logo_data_url: None,
             splash_data_url: None,
+            idle_data_url: None,
+            idle_mode: "screensaver".to_string(),
+            idle_timeout_seconds: DEFAULT_IDLE_TIMEOUT,
+            idle_animation: "soft-breathe".to_string(),
+            theme_style: "apple-tv".to_string(),
+            theme_background: DEFAULT_BACKGROUND.to_string(),
+            theme_focus: "subtle-scale".to_string(),
             source: "default".to_string(),
         }
     }
@@ -54,6 +70,34 @@ struct BrandingFile {
     splash: Option<String>,
     #[serde(default)]
     tagline: Option<String>,
+    #[serde(default)]
+    idle: Option<IdleFile>,
+    #[serde(default)]
+    theme: Option<ThemeFile>,
+}
+
+#[derive(Debug, Deserialize)]
+struct IdleFile {
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    asset: Option<String>,
+    #[serde(default, alias = "timeoutSeconds", alias = "timeout_seconds")]
+    timeout_seconds: Option<u32>,
+    #[serde(default)]
+    animation: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ThemeFile {
+    #[serde(default)]
+    style: Option<String>,
+    #[serde(default)]
+    background: Option<String>,
+    #[serde(default, alias = "focusRing", alias = "focus_ring")]
+    focus_ring: Option<String>,
+    #[serde(default)]
+    accent: Option<String>,
 }
 
 pub fn load_branding() -> BrandingView {
@@ -130,7 +174,65 @@ fn resolve_branding(dir: &Path, file: BrandingFile) -> BrandingView {
         .as_deref()
         .and_then(|spec| load_asset_data_url(dir, spec, "splash"));
 
+    if let Some(theme) = &file.theme {
+        if let Some(style) = sanitize_token(theme.style.as_deref(), 24) {
+            view.theme_style = style;
+        }
+        if let Some(bg) = theme.background.as_deref().map(str::trim) {
+            if is_safe_css_color(bg) {
+                view.theme_background = bg.to_string();
+            } else if !bg.is_empty() {
+                log::warn!("branding theme.background {bg:?} rejected; using default");
+            }
+        }
+        if let Some(focus) = sanitize_token(theme.focus_ring.as_deref(), 32) {
+            view.theme_focus = focus;
+        }
+        if let Some(accent) = theme.accent.as_deref().map(str::trim) {
+            if is_safe_css_color(accent) {
+                view.accent = accent.to_string();
+            }
+        }
+    }
+
+    if let Some(idle) = &file.idle {
+        if let Some(mode) = sanitize_token(idle.mode.as_deref(), 24) {
+            view.idle_mode = if mode == "off" {
+                "off".to_string()
+            } else {
+                "screensaver".to_string()
+            };
+        }
+        if let Some(anim) = sanitize_token(idle.animation.as_deref(), 32) {
+            view.idle_animation = anim;
+        }
+        if let Some(secs) = idle.timeout_seconds {
+            view.idle_timeout_seconds = secs.clamp(15, 3600);
+        }
+        view.idle_data_url = idle
+            .asset
+            .as_deref()
+            .and_then(|spec| load_asset_data_url(dir, spec, "idle"));
+    }
+    if view.idle_data_url.is_none() {
+        view.idle_data_url = view.logo_data_url.clone();
+    }
+
     view
+}
+
+fn sanitize_token(raw: Option<&str>, max_chars: usize) -> Option<String> {
+    let value = raw?.trim().to_ascii_lowercase();
+    if value.is_empty() || value.len() > max_chars {
+        return None;
+    }
+    if !value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    Some(value)
 }
 
 fn sanitize_text(raw: Option<&str>, max_chars: usize) -> Option<String> {
@@ -337,6 +439,44 @@ mod tests {
             .unwrap()
             .starts_with("data:image/png;base64,"));
         assert!(view.splash_data_url.is_none());
+        assert_eq!(view.idle_mode, "screensaver");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn idle_and_theme_feras_shape() {
+        let dir = temp_dir();
+        fs::write(dir.join("logo.png"), TINY_PNG).unwrap();
+        fs::write(
+            dir.join("branding.json"),
+            r##"{
+              "name": "Feras TV",
+              "logo": "logo.png",
+              "idle": {
+                "mode": "screensaver",
+                "asset": "logo.png",
+                "timeoutSeconds": 120,
+                "animation": "soft-breathe"
+              },
+              "theme": {
+                "style": "apple-tv",
+                "background": "#000000",
+                "focusRing": "subtle-scale"
+              }
+            }"##,
+        )
+        .unwrap();
+        let view = load_branding_from(&dir);
+        assert_eq!(view.name, "Feras TV");
+        assert_eq!(view.theme_background, "#000000");
+        assert_eq!(view.theme_style, "apple-tv");
+        assert_eq!(view.theme_focus, "subtle-scale");
+        assert_eq!(view.idle_mode, "screensaver");
+        assert_eq!(view.idle_timeout_seconds, 120);
+        assert_eq!(view.idle_animation, "soft-breathe");
+        assert!(view.logo_data_url.is_some());
+        assert!(view.idle_data_url.is_some());
+        assert!(view.tagline.is_none());
         let _ = fs::remove_dir_all(dir);
     }
 

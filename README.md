@@ -72,7 +72,7 @@ npm install
 npm run tauri dev
 ```
 
-Production build: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Query helpers in Vite only: `?guide=1` skips first-run, `?brand=example` applies the sample wordmark/accent, `?splash=1` holds the boot splash.
+Production build: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=feras` name/theme, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Logo still comes from the data dir when Tauri is running.
 
 ### Harvest Continue Watching (Linux)
 
@@ -121,25 +121,23 @@ Preferred path (Linux XDG):
 ~/.local/share/zappe/branding.json
 ```
 
-`$ZAPPE_DATA_DIR` overrides that directory (same as catalog / Chrome profile). Optional `logo` and `splash` files sit next to `branding.json`, or use an absolute path.
+`$ZAPPE_DATA_DIR` overrides that directory. Put `logo.png` next to `branding.json` (Feras TV circular badge — **not in git**).
 
 ```bash
 mkdir -p ~/.local/share/zappe
-# sample schema only — edit, then add your own images
 cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
-cp /path/to/your/logo.png ~/.local/share/zappe/logo.png
-systemctl --user restart zappe.service   # or relaunch zappe
+cp /path/to/feras-tv-logo.png ~/.local/share/zappe/logo.png
+systemctl --user restart zappe.service
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `name` | Wordmark on splash, Home, and first-run setup (default `Zappe`) |
-| `accent` | CSS color for primary actions and D-pad focus rings |
-| `logo` | Path relative to the data dir, or absolute (`png` / `jpg` / `webp` / `gif`) |
-| `splash` | Optional boot image (same path rules as `logo`) |
-| `tagline` | Optional line under the wordmark |
+| `name` | `Feras TV` on the appliance. Default in code is `Zappe`. No pet names / taglines. |
+| `logo` | Circular badge path (`png` / `jpg` / `webp` / `gif`) |
+| `idle` | `{ mode, asset, timeoutSeconds, animation }` — screensaver after ~2 min |
+| `theme` | `{ style: "apple-tv", background: "#000000", focusRing: "subtle-scale" }` |
 
-Missing file → defaults. Invalid JSON or an unsafe/unknown accent → log and fall back. See [`packaging/appliance/examples/README.md`](packaging/appliance/examples/README.md).
+Missing file → defaults. Invalid JSON → log and fall back. See [`packaging/appliance/examples/README.md`](packaging/appliance/examples/README.md).
 
 ## Chrome profile / nest
 
@@ -180,15 +178,20 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 
 Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
 
-## Remote (TV remote — no keyboard)
+## Remote (ATONGX — no keyboard)
+
+Couch input is the TV remote (plus phone for login). Map lives in `src/lib/remoteMap.ts`.
 
 | Key | Action |
 | --- | --- |
-| Arrows | move focus |
-| Enter | activate tile |
-| Escape / Backspace / BrowserBack | back to guide |
-| Home | end playback |
-| Space / MediaPlayPause | play/pause in the nest (HID) |
+| D-pad | move focus (Apple TV–style scale + glow) |
+| OK / Enter | activate tile |
+| Back / Escape / BrowserBack | back to guide |
+| Home | end playback / guide |
+| Play/Pause / Space | play/pause in the nest (HID) |
+| **Red** (`ColorF0Red` / F9) | Whisper pt-BR mic — `início`, `voltar`, `Netflix`, … |
+
+Whisper: set `ZAPPE_WHISPER_BIN` to a whisper.cpp binary (`-l pt`). Optional `arecord` for capture. `ZAPPE_VOICE_FAKE=netflix` exercises the grammar without a mic.
 
 ## Environment
 
@@ -204,6 +207,8 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
 | `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
+| `ZAPPE_WHISPER_BIN` | whisper.cpp binary for the red-mic button (pt-BR) |
+| `ZAPPE_VOICE_FAKE` | fake transcript for voice tests (no mic) |
 
 ## OTA
 

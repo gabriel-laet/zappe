@@ -1,27 +1,24 @@
 import { useEffect } from "react";
 import { api } from "@/lib/tauri";
+import { atongx } from "@/lib/remoteMap";
 
 export function useRemote(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
     const onKey = (e: KeyboardEvent) => {
-      const code = e.code;
-      if (
-        code === "Escape" ||
-        code === "BrowserBack" ||
-        code === "Backspace"
-      ) {
+      if (atongx.isVoice(e)) return;
+      if (atongx.isBack(e)) {
         e.preventDefault();
         void api.remoteBack();
         return;
       }
-      if (code === "Home" || code === "BrowserHome") {
+      if (atongx.isHome(e)) {
         e.preventDefault();
         void api.remoteHome();
         return;
       }
-      if (code === "Space" || code === "MediaPlayPause") {
+      if (atongx.isPlayPause(e)) {
         e.preventDefault();
         void api.remotePlayPause();
       }

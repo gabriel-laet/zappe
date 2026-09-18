@@ -1,9 +1,17 @@
 {
   "_example": true,
-  "_comment": "EXAMPLE ONLY — not used by the app. Copy to ~/.local/share/zappe/branding.json (or $ZAPPE_DATA_DIR/branding.json) and point logo/splash at your own files. Do not commit personal brand assets to this repo.",
-  "name": "Living Room",
-  "accent": "#E8A84C",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put logo.png next to it. Do not commit the Feras TV PNG or any personal brand assets to this repo.",
+  "name": "Feras TV",
   "logo": "logo.png",
-  "splash": "splash.png",
-  "tagline": "What are we watching?"
+  "idle": {
+    "mode": "screensaver",
+    "asset": "logo.png",
+    "timeoutSeconds": 120,
+    "animation": "soft-breathe"
+  },
+  "theme": {
+    "style": "apple-tv",
+    "background": "#000000",
+    "focusRing": "subtle-scale"
+  }
 }
