@@ -359,7 +359,7 @@ export function Home() {
                           node.scrollIntoView({
                             behavior: "smooth",
                             inline: "center",
-                            block: "nearest",
+                            block: "center",
                           });
                         }
                       }}
