@@ -279,9 +279,16 @@ mod tests {
                 binding.button
             );
         }
-        assert!(map().bindings.iter().flat_map(|b| &b.keys).any(|k| {
-            k.confidence == "needs_device" && !k.web_codes.is_empty() || k.confidence == "hid"
-        }));
+        assert!(map()
+            .bindings
+            .iter()
+            .flat_map(|b| &b.keys)
+            .any(|k| k.confidence == "hid" && !k.web_codes.is_empty()));
+        assert!(map()
+            .bindings
+            .iter()
+            .flat_map(|b| &b.keys)
+            .any(|k| k.confidence == "needs_device"));
         assert_eq!(map().device.product.contains("XING WEI"), true);
         assert!(map().device.aliases.iter().any(|a| a == "ATONGX"));
     }
