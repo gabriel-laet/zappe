@@ -7,6 +7,7 @@
     "dev": "tauri dev",
     "dev:web": "vite",
     "build": "tsc -b && vite build",
+    "check:input": "node --experimental-strip-types --test src/lib/inputContract.test.ts",
     "preview": "vite preview",
     "tauri": "tauri"
   },

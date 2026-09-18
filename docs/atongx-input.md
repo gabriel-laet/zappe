@@ -4,10 +4,12 @@ Living-room box: **no physical keyboard**. Couch input is this remote plus a pho
 
 Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). This is Zappe HID mapping — not a Samsung TV API.
 
+When the guide is hidden (nest / mpv), the same actions are registered as **global shortcuts** (`src-tauri/src/atongx.rs`) so Home / Back / Play-Pause / Menu / Mic / VOL / Mute / pointer still do something. D-pad + OK stay with the focused player.
+
 | Button on device | Action | This PR |
 | --- | --- | --- |
 | Power | `power` | Stop playback and return to the guide. Never shuts the box down. |
-| Play / Pause | `playpause` | HID play/pause in the nest / mpv |
+| Play / Pause | `playpause` | Space into the Chrome nest, or Space into mpv for OTA |
 | Mouse-cursor toggle | `pointer` | Toggles `tv-pointer-on` (show/hide CSS cursor) |
 | D-pad ↑ ↓ ← → | `up` `down` `left` `right` | Guide focus |
 | OK (orange ring) | `ok` | Activate focused tile |

@@ -131,3 +131,11 @@ export function onCatalogChanged(cb: (catalog: CatalogView) => void) {
 export function onGuideMenu(cb: () => void) {
   return listen("guide-menu", () => cb());
 }
+
+export function onVoiceArm(cb: () => void) {
+  return listen("voice-arm", () => cb());
+}
+
+export function onGuidePointer(cb: () => void) {
+  return listen("guide-pointer", () => cb());
+}

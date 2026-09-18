@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type GuideFocus } from "@/lib/tauri";
+import { api, onVoiceArm, type GuideFocus } from "@/lib/tauri";
 import { atongx } from "@/lib/remoteMap";
 import { parseVoicePtBr } from "@/lib/voicePtBr";
 
@@ -64,7 +64,16 @@ export function useVoiceMic(enabled: boolean) {
       void run();
     };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    let unlistenArm: (() => void) | undefined;
+    void onVoiceArm(() => {
+      void run();
+    }).then((fn) => {
+      unlistenArm = fn;
+    });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      unlistenArm?.();
+    };
   }, [enabled]);
 
   return message;

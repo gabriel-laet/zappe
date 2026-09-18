@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/tauri";
+import { api, onGuidePointer } from "@/lib/tauri";
 import { classifyAtongx } from "@/lib/remoteMap";
+
+function togglePointer() {
+  document.documentElement.classList.toggle("tv-pointer-on");
+  const on = document.documentElement.classList.contains("tv-pointer-on");
+  toast.message(on ? "Ponteiro" : "Controle");
+}
 
 export function useRemote(enabled: boolean) {
   useEffect(() => {
@@ -36,9 +42,7 @@ export function useRemote(enabled: boolean) {
         return;
       }
       if (action === "pointer") {
-        document.documentElement.classList.toggle("tv-pointer-on");
-        const on = document.documentElement.classList.contains("tv-pointer-on");
-        toast.message(on ? "Ponteiro" : "Controle");
+        togglePointer();
         return;
       }
       if (action === "volumeUp") {
@@ -78,6 +82,13 @@ export function useRemote(enabled: boolean) {
     };
 
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    let unlistenPointer: (() => void) | undefined;
+    void onGuidePointer(() => togglePointer()).then((fn) => {
+      unlistenPointer = fn;
+    });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      unlistenPointer?.();
+    };
   }, [enabled]);
 }

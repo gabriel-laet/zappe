@@ -436,6 +436,10 @@ fn nest_size() -> (u32, u32) {
     (width, height)
 }
 
+pub fn send_media_key(key: &str) {
+    send_key_best_effort(key);
+}
+
 fn send_key_best_effort(key: &str) {
     let key = key.trim().to_ascii_lowercase();
     let mapped = match key.as_str() {

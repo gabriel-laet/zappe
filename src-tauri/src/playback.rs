@@ -110,11 +110,23 @@ pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController
     }
 }
 
-pub fn toggle_play_pause(nest: &NestManager, playback: &PlaybackController) {
-    if playback.surface == PlaybackSurface::Chrome {
-        let nest = nest.clone();
-        tauri::async_runtime::spawn(async move {
-            nest.send_key("space").await;
-        });
+pub fn toggle_play_pause(
+    nest: &NestManager,
+    ota: &OtaSession,
+    playback: &PlaybackController,
+) {
+    match playback.surface {
+        PlaybackSurface::Chrome => {
+            let nest = nest.clone();
+            tauri::async_runtime::spawn(async move {
+                nest.send_key("space").await;
+            });
+        }
+        PlaybackSurface::Ota => {
+            let pid = ota.latest_mpv_pid();
+            wm::nudge_mpv_fullscreen(pid);
+            crate::nest::send_media_key("space");
+        }
+        PlaybackSurface::Idle => {}
     }
 }

@@ -185,15 +185,17 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 
 | Button | This PR |
 | --- | --- |
-| D-pad + OK (orange ring) | Guide focus / activate |
-| Home, Back, DEL | Guide / end playback |
-| Play / Pause | Nest / mpv HID |
+| D-pad + OK (orange ring) | Guide focus / activate (stays with nest / mpv when playing) |
+| Home, Back, DEL | Return to guide / end playback (also global while nest is up) |
+| Play / Pause | Space into Chrome nest or mpv |
 | PAGE up / down | Jump a shelf |
-| Mic (red) | Whisper pt-BR stub — `abrir Netflix`, `pausar`, `voltar`, `canal Globo` |
-| Air-mouse cursor toggle | Shows / hides CSS pointer (`tv-pointer-on`). HID next PR |
-| VOL +/−, Mute, Menu, Power | Logged stubs (`remote_volume` / `mute` / `menu` / `power`) |
+| Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
+| Air-mouse cursor toggle | Shows / hides CSS pointer (`tv-pointer-on`) |
+| VOL +/−, Mute | `pactl` ±5% / mute (guide + global) |
+| Menu | Open Connect (returns to guide first if playing) |
+| Power | Return to guide — never shuts the box down |
 
-Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
+This is Zappe HID mapping, not a Samsung TV API. Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes remain the login path — never on-TV typing.
 
 ## Environment
 

@@ -1,12 +1,13 @@
 mod a11y;
+mod atongx;
 mod branding;
 mod catalog;
 mod harvest;
 mod nest;
 mod ota;
 mod paths;
-mod playback;
-mod remote_stubs;
+pub(crate) mod playback;
+pub(crate) mod remote_stubs;
 mod setup;
 mod skill;
 mod skills;
@@ -34,7 +35,7 @@ use skill::NETFLIX_CONTINUE_WATCHING_V1;
 use skills::Service;
 use teach::{TeachMode, TeachState};
 
-struct AppState {
+pub(crate) struct AppState {
     nest: NestManager,
     ota: ota::OtaSession,
     playback: Mutex<PlaybackController>,
@@ -222,8 +223,8 @@ fn playback_status(state: State<AppState>) -> PlaybackStatus {
     state.playback.lock().unwrap().status()
 }
 
-#[tauri::command]
-async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn remote_back_inner(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
     let surface = {
         let playback = state.playback.lock().unwrap();
         playback.surface.clone()
@@ -233,14 +234,19 @@ async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     }
     playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
-    playback::finish_return_to_guide(&app, &mut *playback);
+    playback::finish_return_to_guide(app, &mut *playback);
     Ok(())
+}
+
+#[tauri::command]
+async fn remote_back(app: AppHandle) -> Result<(), String> {
+    remote_back_inner(&app).await
 }
 
 #[tauri::command]
 fn remote_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     let playback = state.playback.lock().unwrap();
-    playback::toggle_play_pause(&state.nest, &*playback);
+    playback::toggle_play_pause(&state.nest, &state.ota, &*playback);
     Ok(())
 }
 
@@ -277,10 +283,11 @@ async fn remote_power(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
     Ok("power:home".into())
 }
 
-/// Menu opens the phone-connect sheet in the guide (no on-TV typing).
+/// Menu opens Connect. If the nest / mpv is up, return to the guide first.
 #[tauri::command]
-fn remote_menu(app: AppHandle) -> Result<String, String> {
+async fn remote_menu(app: AppHandle) -> Result<String, String> {
     log::info!("ATONGX menu");
+    return_to_guide(&app).await;
     let _ = app.emit("guide-menu", ());
     Ok("menu".into())
 }
@@ -297,7 +304,7 @@ fn open_onepassword_extension(
     Ok(())
 }
 
-async fn return_to_guide(app: &AppHandle) {
+pub(crate) async fn return_to_guide(app: &AppHandle) {
     let state = app.state::<AppState>();
     let surface = {
         let playback = state.playback.lock().unwrap();
@@ -327,25 +334,9 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state == ShortcutState::Pressed {
-                        let handle = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            return_to_guide(&handle).await;
-                        });
-                    }
-                })
-                .build(),
-        )
+        .plugin(atongx::plugin())
         .setup(|app| {
-            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
-            let esc = Shortcut::new(None, Code::Escape);
-            let back = Shortcut::new(None, Code::BrowserBack);
-            let _ = app.global_shortcut().register(esc);
-            let _ = app.global_shortcut().register(back);
+            atongx::register(app);
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);
