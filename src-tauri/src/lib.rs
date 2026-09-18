@@ -336,7 +336,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(atongx::plugin())
         .setup(|app| {
-            atongx::register(app);
+            atongx::register(app.handle());
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);
