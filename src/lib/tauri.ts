@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Branding } from "@/lib/branding";
+import type { AtongxAction, AtongxDispatch, AtongxIface } from "@/lib/remoteMap";
 
 export type GuideFocus = { shelf_id: string; index: number };
 
@@ -138,4 +139,19 @@ export function onVoiceArm(cb: () => void) {
 
 export function onGuidePointer(cb: () => void) {
   return listen("guide-pointer", () => cb());
+}
+
+/** Evdev / fallback-shortcut classification. Nest focus can subscribe here. */
+export type AtongxInputEvent = {
+  action: AtongxAction;
+  key: string;
+  code: number;
+  value: number;
+  iface: AtongxIface;
+  device: string;
+  dispatch: AtongxDispatch;
+};
+
+export function onAtongxAction(cb: (ev: AtongxInputEvent) => void) {
+  return listen<AtongxInputEvent>("atongx-action", (e) => cb(e.payload));
 }

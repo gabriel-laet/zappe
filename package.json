@@ -7,7 +7,7 @@
     "dev": "tauri dev",
     "dev:web": "vite",
     "build": "tsc -b && vite build",
-    "check:input": "node --experimental-strip-types --test src/lib/inputContract.test.ts",
+    "check:input": "node --experimental-strip-types --test src/lib/inputContract.test.ts && python3 packaging/appliance/capture-atongx.py --list --devices-file packaging/appliance/examples/xing-wei-devices.txt",
     "check:updater": "bash scripts/check-updater.sh",
     "preview": "vite preview",
     "tauri": "tauri"

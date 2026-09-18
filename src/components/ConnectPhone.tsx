@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { classifyAtongx } from "@/lib/remoteMap";
 import { cn } from "@/lib/utils";
 
 export const COMPANION_HOST = "zappe-tv.local";
@@ -7,13 +8,8 @@ export const COMPANION_HOST = "zappe-tv.local";
 export function ConnectPhone({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (
-        e.code === "Escape" ||
-        e.code === "BrowserBack" ||
-        e.code === "Backspace" ||
-        e.code === "Enter" ||
-        e.code === "NumpadEnter"
-      ) {
+      const action = classifyAtongx(e);
+      if (action === "back" || action === "delete" || action === "ok") {
         e.preventDefault();
         e.stopPropagation();
         onClose();

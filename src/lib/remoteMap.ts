@@ -1,12 +1,16 @@
 /**
- * ATONGX air-mouse contract (living-room remote).
+ * ATONGX / XING WEI air-mouse contract (living-room remote).
  *
- * Every physical button has a named action in the guide / nest. Volume and
- * mute call `pactl`. Menu opens Connect. Power returns to the guide and
- * never shuts the box down. Pointer toggles the CSS cursor.
+ * Source of truth: [`atongx-map.json`](./atongx-map.json) — physical button →
+ * linux KEY_* / EV_KEY → `AtongxAction`. The guide still classifies
+ * KeyboardEvent.code when a key reaches the webview. Under gamescope the
+ * Consumer Control keys (Back / Home / Play-Pause / Menu) do not register as
+ * Tauri global shortcuts; Rust reads those from evdev instead.
  *
- * Cheap ATONGX HID maps vary; we accept common KeyboardEvent.code aliases.
+ * This is Zappe HID mapping — not a Samsung TV API.
  */
+
+import rawMap from "./atongx-map.json" with { type: "json" };
 
 export type AtongxAction =
   | "up"
@@ -28,42 +32,113 @@ export type AtongxAction =
   | "pointer"
   | "delete";
 
-const SETS: Record<AtongxAction, ReadonlySet<string>> = {
-  up: new Set(["ArrowUp"]),
-  down: new Set(["ArrowDown"]),
-  left: new Set(["ArrowLeft"]),
-  right: new Set(["ArrowRight"]),
-  ok: new Set(["Enter", "NumpadEnter", "Select"]),
-  back: new Set(["Escape", "BrowserBack", "GoBack", "Back"]),
-  home: new Set(["Home", "BrowserHome"]),
-  menu: new Set(["ContextMenu", "F1", "LaunchApp1"]),
-  playpause: new Set(["Space", "MediaPlayPause", "MediaPlay", "MediaPause"]),
-  pageUp: new Set(["PageUp"]),
-  pageDown: new Set(["PageDown"]),
-  voice: new Set(["ColorF0Red", "F9", "F8", "Red"]),
-  volumeUp: new Set(["AudioVolumeUp", "VolumeUp", "XF86AudioRaiseVolume"]),
-  volumeDown: new Set(["AudioVolumeDown", "VolumeDown", "XF86AudioLowerVolume"]),
-  mute: new Set(["AudioVolumeMute", "VolumeMute", "XF86AudioMute"]),
-  power: new Set(["Power", "PowerOff", "Sleep", "XF86PowerOff"]),
-  pointer: new Set(["F2", "F6", "F7"]),
-  delete: new Set(["Delete", "Backspace"]),
+export type AtongxDispatch = "global" | "focus";
+export type AtongxIface = "keyboard" | "mouse" | "consumer" | "system";
+export type AtongxConfidence = "hid" | "alias" | "needs_device";
+
+export type AtongxKey = {
+  name: string;
+  code: number;
+  iface: AtongxIface;
+  confidence: AtongxConfidence;
+  webCodes: string[];
 };
+
+export type AtongxBinding = {
+  button: string;
+  action: AtongxAction;
+  dispatch: AtongxDispatch;
+  note?: string;
+  keys: AtongxKey[];
+};
+
+export type AtongxMap = {
+  version: number;
+  device: {
+    product: string;
+    aliases: string[];
+    usb: { vendor: string; product: string };
+    matchNames: string[];
+    nodes: {
+      id: string;
+      byId: string;
+      eventHint: string;
+      iface: AtongxIface;
+      grab: boolean;
+      note: string;
+    }[];
+  };
+  bindings: AtongxBinding[];
+};
+
+export const ATONGX_MAP = rawMap as AtongxMap;
+export const ATONGX_BINDINGS: readonly AtongxBinding[] = ATONGX_MAP.bindings;
+
+const ACTIONS = new Set<string>(ATONGX_BINDINGS.map((b) => b.action));
+
+function isAction(value: string): value is AtongxAction {
+  return ACTIONS.has(value);
+}
+
+const WEB_TO_ACTION = new Map<string, AtongxAction>();
+const EVKEY_TO_ACTION = new Map<number, AtongxAction>();
+const KEYNAME_TO_ACTION = new Map<string, AtongxAction>();
+
+for (const binding of ATONGX_BINDINGS) {
+  KEYNAME_TO_ACTION.set(binding.action, binding.action);
+  for (const key of binding.keys) {
+    if (!EVKEY_TO_ACTION.has(key.code)) {
+      EVKEY_TO_ACTION.set(key.code, binding.action);
+    }
+    KEYNAME_TO_ACTION.set(key.name, binding.action);
+    KEYNAME_TO_ACTION.set(key.name.replace(/^KEY_/, ""), binding.action);
+    for (const web of key.webCodes) {
+      if (!WEB_TO_ACTION.has(web)) {
+        WEB_TO_ACTION.set(web, binding.action);
+      }
+    }
+  }
+}
 
 function codeOf(e: KeyboardEvent): string {
   return e.code || e.key;
 }
 
+/** Classify a DOM key event (guide / Connect, or leftover HID → webview). */
 export function classifyAtongx(e: KeyboardEvent): AtongxAction | null {
-  const code = codeOf(e);
-  if (e.key === "ColorF0Red" || e.keyCode === 403) return "voice";
-  for (const [action, codes] of Object.entries(SETS) as [AtongxAction, ReadonlySet<string>][]) {
-    if (codes.has(code) || codes.has(e.key)) return action;
+  const byCode = WEB_TO_ACTION.get(codeOf(e));
+  if (byCode) return byCode;
+  const byKey = WEB_TO_ACTION.get(e.key);
+  if (byKey) return byKey;
+  // Chrome TV leftover: ColorF0Red used keyCode 403. Linux KEY_RED is 398.
+  if (e.keyCode === 403) return "voice";
+  if (typeof e.keyCode === "number" && e.keyCode > 0) {
+    const byLegacy = classifyAtongxEvkey(e.keyCode);
+    if (byLegacy) return byLegacy;
   }
   return null;
 }
 
+/** Classify a linux EV_KEY code (the evdev / capture-script path). */
+export function classifyAtongxEvkey(code: number): AtongxAction | null {
+  return EVKEY_TO_ACTION.get(code) ?? null;
+}
+
+/** Classify `KEY_BACK`, `BACK`, or an `AtongxAction` name. */
+export function classifyAtongxKeyName(name: string): AtongxAction | null {
+  const trimmed = name.trim();
+  if (isAction(trimmed)) return trimmed;
+  return KEYNAME_TO_ACTION.get(trimmed) ?? KEYNAME_TO_ACTION.get(trimmed.toUpperCase()) ?? null;
+}
+
+export function bindingForAction(action: AtongxAction): AtongxBinding | undefined {
+  return ATONGX_BINDINGS.find((b) => b.action === action);
+}
+
 export const atongx = {
   classify: classifyAtongx,
+  classifyEvkey: classifyAtongxEvkey,
+  classifyKeyName: classifyAtongxKeyName,
   isLeft: (e: KeyboardEvent) => classifyAtongx(e) === "left",
   isRight: (e: KeyboardEvent) => classifyAtongx(e) === "right",
   isUp: (e: KeyboardEvent) => classifyAtongx(e) === "up",
@@ -78,25 +153,15 @@ export const atongx = {
   isPageDown: (e: KeyboardEvent) => classifyAtongx(e) === "pageDown",
 };
 
-/** Human table for README / next-PR wiring. */
-export const ATONGX_BUTTONS: { action: AtongxAction; button: string; status: "wired" | "stub" }[] =
-  [
-    { action: "power", button: "Power", status: "wired" },
-    { action: "playpause", button: "Play / Pause", status: "wired" },
-    { action: "pointer", button: "Air-mouse cursor toggle", status: "wired" },
-    { action: "up", button: "D-pad Up", status: "wired" },
-    { action: "down", button: "D-pad Down", status: "wired" },
-    { action: "left", button: "D-pad Left", status: "wired" },
-    { action: "right", button: "D-pad Right", status: "wired" },
-    { action: "ok", button: "OK (center / orange ring)", status: "wired" },
-    { action: "home", button: "Home", status: "wired" },
-    { action: "back", button: "Back", status: "wired" },
-    { action: "menu", button: "Menu", status: "wired" },
-    { action: "pageUp", button: "PAGE up", status: "wired" },
-    { action: "pageDown", button: "PAGE down", status: "wired" },
-    { action: "voice", button: "Mic (red)", status: "wired" },
-    { action: "volumeUp", button: "VOL +", status: "wired" },
-    { action: "volumeDown", button: "VOL −", status: "wired" },
-    { action: "delete", button: "DEL", status: "wired" },
-    { action: "mute", button: "Mute", status: "wired" },
-  ];
+/** Human table for README / capture prompts. */
+export const ATONGX_BUTTONS: {
+  action: AtongxAction;
+  button: string;
+  status: "wired" | "stub";
+  dispatch: AtongxDispatch;
+}[] = ATONGX_BINDINGS.map((b) => ({
+  action: b.action,
+  button: b.button,
+  status: "wired" as const,
+  dispatch: b.dispatch,
+}));

@@ -181,7 +181,7 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 
 ## Remote (ATONGX air mouse — no keyboard)
 
-Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classifyAtongx` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts).
+Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and [`src/lib/atongx-map.json`](src/lib/atongx-map.json) (`classifyAtongx` / `classifyAtongxEvkey` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts)). Consumer Control keys are read from evdev — not Tauri global shortcuts — because `BrowserBack` / `BrowserHome` / `MediaPlayPause` / `ContextMenu` fail to register under gamescope. Capture a new remote with [`packaging/appliance/capture-atongx.sh`](packaging/appliance/capture-atongx.sh).
 
 | Button | This PR |
 | --- | --- |

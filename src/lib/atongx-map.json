@@ -1,0 +1,431 @@
+{
+  "version": 1,
+  "device": {
+    "product": "XING WEI 2.4G USB USB Composite Device",
+    "aliases": ["XING WEI", "ATONGX"],
+    "usb": { "vendor": "2320", "product": "0912" },
+    "matchNames": ["XING WEI", "ATONGX"],
+    "nodes": [
+      {
+        "id": "keyboard",
+        "byId": "usb-XING_WEI_2.4G_USB_USB_Composite_Device-if02-event-kbd",
+        "eventHint": "event3",
+        "iface": "keyboard",
+        "grab": false,
+        "note": "Boot keyboard (HID if02). D-pad / OK / PAGE stay here so the focused nest or mpv still sees them."
+      },
+      {
+        "id": "mouse",
+        "byId": "usb-XING_WEI_2.4G_USB_USB_Composite_Device-if03-event-mouse",
+        "eventHint": "event4",
+        "iface": "mouse",
+        "grab": false,
+        "note": "Air-mouse REL/BTN. Not classified as AtongxAction; nest pointer is a sibling."
+      },
+      {
+        "id": "consumer",
+        "byId": "usb-XING_WEI_2.4G_USB_USB_Composite_Device-event-if03",
+        "eventHint": "event5",
+        "iface": "consumer",
+        "grab": true,
+        "note": "HID Consumer Control on if03. Back / Home / Play / VOL / Mute / Menu. Grab so gamescope-Chrome does not eat BrowserBack."
+      },
+      {
+        "id": "system",
+        "byId": "usb-XING_WEI_2.4G_USB_USB_Composite_Device-event-if??",
+        "eventHint": "event6",
+        "iface": "system",
+        "grab": true,
+        "note": "HID System Control. Power / Sleep. Name usually contains 'System Control'."
+      }
+    ]
+  },
+  "bindings": [
+    {
+      "button": "D-pad Up",
+      "action": "up",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_UP",
+          "code": 103,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["ArrowUp"]
+        }
+      ]
+    },
+    {
+      "button": "D-pad Down",
+      "action": "down",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_DOWN",
+          "code": 108,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["ArrowDown"]
+        }
+      ]
+    },
+    {
+      "button": "D-pad Left",
+      "action": "left",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_LEFT",
+          "code": 105,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["ArrowLeft"]
+        }
+      ]
+    },
+    {
+      "button": "D-pad Right",
+      "action": "right",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_RIGHT",
+          "code": 106,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["ArrowRight"]
+        }
+      ]
+    },
+    {
+      "button": "OK (center / orange ring)",
+      "action": "ok",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_ENTER",
+          "code": 28,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["Enter", "NumpadEnter"]
+        },
+        {
+          "name": "KEY_SELECT",
+          "code": 353,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": ["Select"]
+        },
+        {
+          "name": "KEY_OK",
+          "code": 352,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": []
+        }
+      ]
+    },
+    {
+      "button": "Back",
+      "action": "back",
+      "dispatch": "global",
+      "note": "Observed as BrowserBack in the guide; Tauri global-shortcut registration fails for that code under gamescope. Primary path is evdev KEY_BACK on Consumer Control.",
+      "keys": [
+        {
+          "name": "KEY_BACK",
+          "code": 158,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["BrowserBack", "GoBack", "Back"]
+        },
+        {
+          "name": "KEY_ESC",
+          "code": 1,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": ["Escape"]
+        }
+      ]
+    },
+    {
+      "button": "Home",
+      "action": "home",
+      "dispatch": "global",
+      "note": "Observed as BrowserHome; global-shortcut registration fails. Primary path is evdev KEY_HOMEPAGE (AC Home) on Consumer Control.",
+      "keys": [
+        {
+          "name": "KEY_HOMEPAGE",
+          "code": 172,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["BrowserHome"]
+        },
+        {
+          "name": "KEY_HOME",
+          "code": 102,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": ["Home"]
+        }
+      ]
+    },
+    {
+      "button": "Menu",
+      "action": "menu",
+      "dispatch": "global",
+      "note": "Observed as ContextMenu; global-shortcut registration fails. KEY_COMPOSE (HID keyboard Application / 0x070065) is the usual kernel mapping. KEY_MENU is the Consumer AC Menu alias. Confirm which node fires on zappe-tv.",
+      "keys": [
+        {
+          "name": "KEY_COMPOSE",
+          "code": 127,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["ContextMenu"]
+        },
+        {
+          "name": "KEY_MENU",
+          "code": 139,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": []
+        },
+        {
+          "name": "KEY_CONTEXT_MENU",
+          "code": 438,
+          "iface": "consumer",
+          "confidence": "alias",
+          "webCodes": []
+        },
+        {
+          "name": "KEY_F1",
+          "code": 59,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F1"]
+        }
+      ]
+    },
+    {
+      "button": "Play / Pause",
+      "action": "playpause",
+      "dispatch": "global",
+      "note": "Observed as MediaPlayPause; global-shortcut registration fails. Primary path is evdev KEY_PLAYPAUSE (HID 0x0C00CD) on Consumer Control.",
+      "keys": [
+        {
+          "name": "KEY_PLAYPAUSE",
+          "code": 164,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["MediaPlayPause", "MediaPlay", "MediaPause"]
+        },
+        {
+          "name": "KEY_PLAY",
+          "code": 207,
+          "iface": "consumer",
+          "confidence": "alias",
+          "webCodes": []
+        },
+        {
+          "name": "KEY_SPACE",
+          "code": 57,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": ["Space"]
+        }
+      ]
+    },
+    {
+      "button": "PAGE up",
+      "action": "pageUp",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_PAGEUP",
+          "code": 104,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["PageUp"]
+        }
+      ]
+    },
+    {
+      "button": "PAGE down",
+      "action": "pageDown",
+      "dispatch": "focus",
+      "keys": [
+        {
+          "name": "KEY_PAGEDOWN",
+          "code": 109,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["PageDown"]
+        }
+      ]
+    },
+    {
+      "button": "Mic (red)",
+      "action": "voice",
+      "dispatch": "global",
+      "note": "Needs on-device confirmation. G10S-class boards usually emit KEY_SEARCH or KEY_VOICECOMMAND on Consumer Control; some ATONGX firmwares send KEY_F8/F9 on the keyboard iface instead. ColorF0Red is a leftover Android-TV web alias, not a Linux KEY_*.",
+      "keys": [
+        {
+          "name": "KEY_SEARCH",
+          "code": 217,
+          "iface": "consumer",
+          "confidence": "needs_device",
+          "webCodes": []
+        },
+        {
+          "name": "KEY_VOICECOMMAND",
+          "code": 582,
+          "iface": "consumer",
+          "confidence": "needs_device",
+          "webCodes": []
+        },
+        {
+          "name": "KEY_F8",
+          "code": 66,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F8"]
+        },
+        {
+          "name": "KEY_F9",
+          "code": 67,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F9"]
+        },
+        {
+          "name": "KEY_RED",
+          "code": 398,
+          "iface": "consumer",
+          "confidence": "needs_device",
+          "webCodes": ["ColorF0Red", "Red"]
+        }
+      ]
+    },
+    {
+      "button": "VOL +",
+      "action": "volumeUp",
+      "dispatch": "global",
+      "keys": [
+        {
+          "name": "KEY_VOLUMEUP",
+          "code": 115,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["AudioVolumeUp", "VolumeUp", "XF86AudioRaiseVolume"]
+        }
+      ]
+    },
+    {
+      "button": "VOL −",
+      "action": "volumeDown",
+      "dispatch": "global",
+      "keys": [
+        {
+          "name": "KEY_VOLUMEDOWN",
+          "code": 114,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["AudioVolumeDown", "VolumeDown", "XF86AudioLowerVolume"]
+        }
+      ]
+    },
+    {
+      "button": "Mute",
+      "action": "mute",
+      "dispatch": "global",
+      "keys": [
+        {
+          "name": "KEY_MUTE",
+          "code": 113,
+          "iface": "consumer",
+          "confidence": "hid",
+          "webCodes": ["AudioVolumeMute", "VolumeMute", "XF86AudioMute"]
+        }
+      ]
+    },
+    {
+      "button": "Power",
+      "action": "power",
+      "dispatch": "global",
+      "note": "HID System Power Down on the System Control node. Never powers the box off — Zappe returns to the guide.",
+      "keys": [
+        {
+          "name": "KEY_POWER",
+          "code": 116,
+          "iface": "system",
+          "confidence": "hid",
+          "webCodes": ["Power", "PowerOff"]
+        },
+        {
+          "name": "KEY_SLEEP",
+          "code": 142,
+          "iface": "system",
+          "confidence": "alias",
+          "webCodes": ["Sleep", "XF86PowerOff"]
+        }
+      ]
+    },
+    {
+      "button": "Air-mouse cursor toggle",
+      "action": "pointer",
+      "dispatch": "global",
+      "note": "Needs on-device confirmation. Many G10S / ATONGX boards toggle the gyro in firmware and send no EV_KEY (only REL_* starts/stops). Others emit KEY_F2 / F6 / F7 / F10. If capture prints nothing, treat the button as local and keep CSS pointer on a Menu long-press later.",
+      "keys": [
+        {
+          "name": "KEY_F2",
+          "code": 60,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F2"]
+        },
+        {
+          "name": "KEY_F6",
+          "code": 64,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F6"]
+        },
+        {
+          "name": "KEY_F7",
+          "code": 65,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F7"]
+        },
+        {
+          "name": "KEY_F10",
+          "code": 68,
+          "iface": "keyboard",
+          "confidence": "needs_device",
+          "webCodes": ["F10"]
+        }
+      ]
+    },
+    {
+      "button": "DEL",
+      "action": "delete",
+      "dispatch": "global",
+      "note": "Same living-room meaning as Back (no on-TV typing). Confirm KEY_DELETE vs KEY_BACKSPACE on zappe-tv.",
+      "keys": [
+        {
+          "name": "KEY_DELETE",
+          "code": 111,
+          "iface": "keyboard",
+          "confidence": "hid",
+          "webCodes": ["Delete"]
+        },
+        {
+          "name": "KEY_BACKSPACE",
+          "code": 14,
+          "iface": "keyboard",
+          "confidence": "alias",
+          "webCodes": ["Backspace"]
+        }
+      ]
+    }
+  ]
+}
