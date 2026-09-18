@@ -10,7 +10,9 @@ export function Splash() {
     <div className="splash-screen" role="status" aria-live="polite">
       <div className="splash-inner">
         {art ? (
-          <BrandArt src={art} alt={brand.name} className="splash-art" />
+          <span className="splash-art-frame">
+            <BrandArt src={art} alt={brand.name} className="splash-art" />
+          </span>
         ) : (
           <>
             <span className="splash-mark" aria-hidden>

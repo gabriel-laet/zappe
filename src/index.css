@@ -383,18 +383,28 @@ button.tv-tile {
   animation: splash-enter 0.8s var(--ease-out-tv) both;
 }
 
-.splash-art,
-.screensaver-badge {
+.splash-art-frame,
+.screensaver-badge-frame {
+  display: block;
   width: min(22rem, 38vw);
   height: min(22rem, 38vw);
+  overflow: hidden;
   border-radius: 50%;
-  object-fit: cover;
   background: transparent;
   -webkit-mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
   mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
 }
 
-.splash-art {
+.splash-art-frame .splash-art,
+.screensaver-badge-frame .screensaver-badge {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: transparent;
+  transform: scale(1.08);
+}
+
+.splash-art-frame {
   animation: splash-logo-breathe 3.8s ease-in-out infinite;
 }
 
@@ -429,7 +439,7 @@ button.tv-tile {
   animation: screensaver-float 22s ease-in-out infinite;
 }
 
-.screensaver-badge,
+.screensaver-badge-frame,
 .screensaver-mark {
   animation: screensaver-breathe 6.5s ease-in-out infinite;
 }
@@ -551,12 +561,12 @@ button.tv-tile {
   .tv-tile,
   .shelf-scroll,
   .splash-inner,
-  .splash-art,
+  .splash-art-frame,
   .tv-progress::after,
   .tv-skeleton-tile,
   .tv-shelf,
   .screensaver-drift,
-  .screensaver-badge,
+  .screensaver-badge-frame,
   .screensaver-mark,
   .voice-dot,
   body.tv-handoff {
@@ -566,7 +576,7 @@ button.tv-tile {
 
   .splash-inner,
   .tv-shelf,
-  .splash-art {
+  .splash-art-frame {
     opacity: 1;
     transform: none;
   }

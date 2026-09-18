@@ -11,7 +11,9 @@ export function Screensaver() {
       <div className="screensaver-vignette" />
       <div className="screensaver-drift">
         {art ? (
-          <BrandArt src={art} alt="" className="screensaver-badge" />
+          <span className="screensaver-badge-frame">
+            <BrandArt src={art} alt="" className="screensaver-badge" />
+          </span>
         ) : (
           <span className="screensaver-mark" aria-hidden>
             {letter}
