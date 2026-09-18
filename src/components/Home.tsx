@@ -157,8 +157,8 @@ export function Home() {
               tiles: [
                 {
                   id: "connect-phone",
-                  title: "Connect account (phone)",
-                  subtitle: "zappe-tv.local — no TV typing",
+                  title: "Connect account",
+                  subtitle: "zappe-tv.local",
                   kind: "connect" as const,
                 },
               ],
