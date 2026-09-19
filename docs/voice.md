@@ -4,8 +4,8 @@ The living-room air mouse’s **red mic** is a constrained couch remote, not a c
 
 ## How a press starts listen
 
-1. ATONGX / XING WEI evdev sees Voice (`KEY_F8` / `KEY_F9` / `KEY_RECORD` / `KEY_VOICECOMMAND` / `KEY_ASSISTANT` / `KEY_DICTATE`). Linux has no `KEY_MIC`; we treat **Voice / `KEY_VOICECOMMAND` (0x246)** as that alias.
-2. The grabbed consumer node (and the keyboard node, for Voice only) emits `voice-arm` on press and `voice-release` on release. Compositor shortcuts still register **F8 / F9**. The guide also listens for `keydown` / `keyup` on those codes.
+1. ATONGX / XING WEI evdev sees Voice from the shared map (`src/lib/atongx-map.json`): locked `KEY_SEARCH` **217** / `KEY_VOICECOMMAND` **582**, plus aliases F8 / F9 / RECORD / RED / ASSISTANT / MICMUTE / DICTATE. Linux has no `KEY_MIC`; that name is an alias for **Voice / `KEY_VOICECOMMAND` (0x246)**. Rematch with `ZAPPE_HID_VOICE_CODE`.
+2. The grabbed consumer node (and the ungrabbed keyboard node, for Voice + Pointer) emits `voice-arm` on press and `voice-release` on release. Compositor shortcuts still register **F8 / F9**. The guide also listens for `keydown` / `keyup` on those codes.
 3. `useVoiceMic` calls `voice_begin` (starts `arecord` 16 kHz mono). The overlay shows **Ouvindo…**. Nothing hides the guide.
 4. **Hold:** release → `voice_end` (SIGINT `arecord`, then whisper). **Tap** (release &lt; 350 ms): keep recording ~4 s. Hard cap ~6–8 s.
 5. Transcript goes through [`src/lib/voicePtBr.ts`](../src/lib/voicePtBr.ts). Known intents run; chatter is a toast only.
@@ -74,7 +74,7 @@ sudo evtest /dev/input/event3   # keyboard node
 
 Note `KEY_*` and `(code)`. Then either:
 
-- wait for / merge the parallel “capture mic/pointer codes” change, or
+- `./packaging/appliance/zappe-atongx-capture --mic-pointer` and paste any `(unmapped)` line into `src/lib/atongx-map.json`, or
 - set `Environment=ZAPPE_HID_VOICE_CODE=582` (example) on `zappe.service` and restart.
 
 Journal: `ATONGX evdev Voice code=…`. Accepts existing Voice / `KEY_MIC` alias plus the env extra.
