@@ -68,8 +68,9 @@ v1 is **wake-only**, not a power toggle:
 
 On the TV, turn on **Power On with Mobile** / **IP Remote** (wording varies: Settings → General → External Device Manager → Device Connection Manager, or Expert Settings). Instant On / network standby keeps `:8001` reachable; otherwise configure `mac`.
 
-```bash
-# ~/.local/share/zappe/samsung.json — generic example
+Generic `samsung.json` with wake enabled (copy MAC from the TV’s network settings; never commit a live token):
+
+```json
 {
   "host": "192.168.3.6",
   "port": 8001,

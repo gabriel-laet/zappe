@@ -1315,6 +1315,16 @@ mod tests {
     }
 
     #[test]
+    fn example_samsung_json_parses_with_wake_off() {
+        let text = include_str!("../../packaging/appliance/examples/samsung.json");
+        let file: SamsungFile = serde_json::from_str(text).expect("example samsung.json");
+        assert_eq!(file.host.as_deref(), Some("192.168.3.6"));
+        assert_eq!(file.wake_on_power, Some(false));
+        assert!(file.token.is_none(), "example must not ship a token");
+        assert!(file.mac.is_none());
+    }
+
+    #[test]
     fn persist_token_keeps_wake_fields() {
         let _g = lock_env();
         let prev = std::env::var_os("ZAPPE_DATA_DIR");
