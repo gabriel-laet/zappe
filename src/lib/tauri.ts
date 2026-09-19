@@ -109,6 +109,8 @@ export const api = {
   getCatalog: () => invoke<CatalogView>("get_catalog"),
   getBranding: () => invoke<Branding>("get_branding"),
   voiceListen: () => invoke<VoiceOutcome>("voice_listen"),
+  voiceBegin: () => invoke<VoiceOutcome>("voice_begin"),
+  voiceEnd: () => invoke<VoiceOutcome>("voice_end"),
   autoHarvestEnabled: () => invoke<boolean>("auto_harvest_enabled"),
   harvestNow: (skillId?: string) =>
     invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),
@@ -155,6 +157,10 @@ export function onGuideMenu(cb: () => void) {
 
 export function onVoiceArm(cb: () => void) {
   return listen("voice-arm", () => cb());
+}
+
+export function onVoiceRelease(cb: () => void) {
+  return listen("voice-release", () => cb());
 }
 
 export function onGuidePointer(cb: (on?: boolean) => void) {
