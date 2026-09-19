@@ -55,6 +55,7 @@ Playback is a URL into the nest (deep link when harvest found one). Play/pause, 
 - `dvbv5-tools` + `mpv` — OTA / TV aberta
 - Channel list: `~/tv/channels.conf`, `~/.config/zappe/channels.conf`, or `~/.local/share/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
 - `xorg-server-xvfb` — optional invisible login backend (`ZAPPE_LOGIN_BACKEND=xvfb`). Default login uses the same hidden Chrome path as harvest (no second gamescope).
+- `alsa-utils` + local whisper.cpp — red-mic pt-BR. `packaging/appliance/install-whisper.sh` (see [`docs/voice.md`](docs/voice.md)). Cloud Whisper is opt-in (`ZAPPE_WHISPER_URL`) only.
 
 ### Chrome accessibility (harvest)
 
@@ -224,13 +225,13 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 | Home, Back, DEL | Return to guide / end playback. Evdev on XING WEI (`KEY_BACK` 158 / `KEY_HOMEPAGE` 172) so nest Chrome cannot eat them. |
 | Play / Pause | Space into Chrome nest or mpv |
 | PAGE up / down | Jump a shelf |
-| Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
+| Mic (red) | Whisper pt-BR (hold/tap). `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo`, `sincronizar`. See [`docs/voice.md`](docs/voice.md). |
 | Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click |
 | VOL +/−, Mute | Samsung TV Device Connect (`KEY_VOLUP` / `KEY_VOLDOWN` / `KEY_MUTE`). Pulse `pactl` if the TV is unreachable (one toast). |
 | Menu | Open Connect (returns to guide first if playing) |
 | Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
 
-Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes are the login path — never on-TV typing.
+Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper (local whisper.cpp, pt-BR): [`docs/voice.md`](docs/voice.md). Model: `~/.local/share/zappe/whisper/ggml-small.bin`. `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes are the login path — never on-TV typing.
 
 ## Environment
 
@@ -246,10 +247,17 @@ Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsun
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
 | `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
-| `ZAPPE_WHISPER_BIN` | whisper.cpp binary for the red-mic button (pt-BR) |
+| `ZAPPE_WHISPER_BIN` | whisper.cpp `whisper-cli` for the red-mic button (pt-BR) |
+| `ZAPPE_WHISPER_MODEL` | ggml model (default `~/.local/share/zappe/whisper/ggml-small.bin`) |
+| `ZAPPE_WHISPER_KIND` | `cpp` (default), `raw` (bin prints transcript), never implied cloud |
+| `ZAPPE_WHISPER_URL` | opt-in cloud POST (off unless set) |
+| `ZAPPE_WHISPER_TOKEN` | Bearer token for `ZAPPE_WHISPER_URL` |
+| `ZAPPE_VOICE_SECONDS` | max `arecord` window (default 5, clamp 2–8) |
+| `ZAPPE_ALSA_DEVICE` | `arecord -D` override |
 | `ZAPPE_VOICE_FAKE` | fake transcript for voice tests (no mic) |
 | `ZAPPE_HID_DISABLE` | `1` skips the ATONGX evdev watcher |
 | `ZAPPE_HID_NAME` | extra substring to match `/dev/input` names |
+| `ZAPPE_HID_VOICE_CODE` | extra evdev code(s) for the red mic if the map is wrong |
 | `ZAPPE_SAMSUNG_HOST` | Samsung TV IP (default `192.168.3.6`) |
 | `ZAPPE_SAMSUNG_PORT` | Device Connect `ws://` port (default `8001`) |
 | `ZAPPE_SAMSUNG_SECURE_PORT` | `wss://` fallback (default `8002`) |

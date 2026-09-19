@@ -21,7 +21,7 @@ While the Chrome nest is playing, D-pad + OK + Space are grabbed as compositor s
 | Back | `back` | Hide nest / stop OTA |
 | Menu | `menu` | Open Connect (phone) |
 | PAGE up / down | `pageUp` `pageDown` | Jump a shelf row |
-| Mic (red) | `voice` | Whisper pt-BR (`voice_listen`) |
+| Mic (red) | `voice` | Whisper pt-BR — hold/tap → `voice_begin` / `voice_end` (see [`voice.md`](voice.md)) |
 | VOL + / − | `volumeUp` `volumeDown` | Samsung `KEY_VOLUP` / `KEY_VOLDOWN`; `pactl` ±5% if the TV is unreachable |
 | DEL | `delete` | Same as Back (no on-TV typing) |
 | Mute | `mute` | Samsung `KEY_MUTE`; `pactl` toggle if the TV is unreachable |
@@ -43,6 +43,7 @@ Match is by name / by-id (`XING WEI`, `XING_WEI`, `ATONGX`, `2.4G USB`), overrid
 | Back | `KEY_BACK`, also `KEY_ESC` / `KEY_EXIT` / `KEY_DELETE` / `KEY_BACKSPACE` | **158** (1 / 174 / 111 / 14) | Consumer `KEY_BACK` is the usual ATONGX “BrowserBack”. Keyboard Escape is a fallback (not grabbed). |
 | Home | `KEY_HOMEPAGE`, also `KEY_HOME` | **172** (102) | Consumer `KEY_HOMEPAGE` is “BrowserHome”. |
 | Power | `KEY_POWER`, also `KEY_POWER2` / `KEY_SLEEP` | **116** (226 / 142) | Return to guide only — never ACPI shutdown. |
+| Mic (red) | `KEY_VOICECOMMAND` (alias `KEY_MIC`), `KEY_F8` / `KEY_F9` / `KEY_RECORD` / `KEY_ASSISTANT` / `KEY_DICTATE` | **582** (66 / 67 / 167 / 583 / 586) | Voice only. Linux has no `KEY_MIC`; rematch with `ZAPPE_HID_VOICE_CODE` if `evtest` prints another code. |
 
 Confirm on the box (do this once if a new dongle maps differently):
 
@@ -61,11 +62,15 @@ Zappe logs `ATONGX evdev watching … grab=true` and `ATONGX evdev Back code=158
 
 ## Voice (red mic)
 
-Grammar: [`src/lib/voicePtBr.ts`](../src/lib/voicePtBr.ts).
+Full path, lexicon, model location, and rematch: [`voice.md`](voice.md).
 
-Examples (pt-BR, short): `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo`.
+Press / hold the red mic → overlay **Ouvindo…** (guide stays) → local whisper.cpp (`-l pt` + `~/.local/share/zappe/whisper/ggml-small.bin`) → [`src/lib/voicePtBr.ts`](../src/lib/voicePtBr.ts).
 
-Runtime: `ZAPPE_WHISPER_BIN` + `arecord`. `ZAPPE_VOICE_FAKE=abrir netflix` for tests.
+Examples: `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo`, `Record`, `sincronizar`.
+
+- Install: `packaging/appliance/install-whisper.sh`
+- Tests without a mic: `ZAPPE_VOICE_FAKE=abrir netflix` or `npm run check:input`
+- Wrong scancode: `sudo evtest` the XING WEI node, then `ZAPPE_HID_VOICE_CODE=<n>` — do not invent pointer codes here.
 
 ## Branding (not this map)
 

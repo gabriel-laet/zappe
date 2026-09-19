@@ -39,6 +39,11 @@ pub const KEY_EXIT: u16 = 174;
 pub const KEY_POWER2: u16 = 226;
 pub const KEY_CONTEXT_MENU: u16 = 0x1b6;
 pub const KEY_VOICECOMMAND: u16 = 0x246;
+/// Living-room alias: Linux has no `KEY_MIC`. ATONGX dumps often label the red
+/// button Voice / `KEY_VOICECOMMAND`. Rematch with `ZAPPE_HID_VOICE_CODE`.
+pub const KEY_MIC: u16 = KEY_VOICECOMMAND;
+pub const KEY_ASSISTANT: u16 = 0x247;
+pub const KEY_DICTATE: u16 = 0x24a;
 
 const DEBOUNCE: Duration = Duration::from_millis(280);
 const RESCAN: Duration = Duration::from_secs(2);
@@ -59,15 +64,36 @@ pub enum HidAction {
     Mute,
 }
 
+/// Parse `ZAPPE_HID_VOICE_CODE` (comma / space / semicolon separated).
+pub fn parse_voice_codes(raw: &str) -> Vec<u16> {
+    raw.split([',', ' ', ';'])
+        .filter_map(|p| p.trim().parse::<u16>().ok())
+        .collect()
+}
+
+/// Extra Voice evdev codes from `ZAPPE_HID_VOICE_CODE`.
+/// Use this when a live `evtest` dump disagrees with the built-in map.
+pub fn extra_voice_codes() -> Vec<u16> {
+    std::env::var("ZAPPE_HID_VOICE_CODE")
+        .ok()
+        .map(|s| parse_voice_codes(&s))
+        .unwrap_or_default()
+}
+
 /// Full consumer-control map (grabbed node — nest never sees these).
 pub fn action_for_keycode(code: u16) -> Option<HidAction> {
+    if extra_voice_codes().contains(&code) {
+        return Some(HidAction::Voice);
+    }
     Some(match code {
         KEY_ESC | KEY_BACKSPACE | KEY_DELETE | KEY_BACK | KEY_EXIT => HidAction::Back,
         KEY_HOME | KEY_HOMEPAGE => HidAction::Home,
         KEY_POWER | KEY_POWER2 | KEY_SLEEP => HidAction::Power,
         KEY_F1 | KEY_COMPOSE | KEY_MENU | KEY_CONTEXT_MENU => HidAction::Menu,
         KEY_PLAYPAUSE => HidAction::PlayPause,
-        KEY_F8 | KEY_F9 | KEY_RECORD | KEY_VOICECOMMAND => HidAction::Voice,
+        KEY_F8 | KEY_F9 | KEY_RECORD | KEY_VOICECOMMAND | KEY_ASSISTANT | KEY_DICTATE => {
+            HidAction::Voice
+        }
         KEY_F2 => HidAction::Pointer,
         KEY_VOLUMEUP => HidAction::VolumeUp,
         KEY_VOLUMEDOWN => HidAction::VolumeDown,
@@ -76,11 +102,13 @@ pub fn action_for_keycode(code: u16) -> Option<HidAction> {
     })
 }
 
-/// Keyboard node is not grabbed. Only nest-escape keys are handled here so
-/// D-pad / OK / mic / pointer keep flowing to the focused surface + JS.
+/// Keyboard node is not grabbed. Nest-escape + Voice so the red mic still
+/// works while Chrome has focus. Pointer stays with JS (parallel capture PR).
 pub fn action_for_keyboard_passthrough(code: u16) -> Option<HidAction> {
     match action_for_keycode(code) {
-        Some(action @ (HidAction::Back | HidAction::Home | HidAction::Power)) => Some(action),
+        Some(action @ (HidAction::Back | HidAction::Home | HidAction::Power | HidAction::Voice)) => {
+            Some(action)
+        }
         _ => None,
     }
 }
@@ -329,7 +357,7 @@ mod linux {
                 }
             };
             for event in events {
-                let EventSummary::Key(_, key, 1) = event.destructure() else {
+                let EventSummary::Key(_, key, value) = event.destructure() else {
                     continue;
                 };
                 let code = key.0;
@@ -341,6 +369,19 @@ mod linux {
                 let Some(action) = action else {
                     continue;
                 };
+                if value == 0 {
+                    if action == HidAction::Voice {
+                        log::info!(
+                            "ATONGX evdev Voice release code={code} from {}",
+                            path.display()
+                        );
+                        let _ = app.emit("voice-release", ());
+                    }
+                    continue;
+                }
+                if value != 1 {
+                    continue;
+                }
                 if !should_dispatch(action, Instant::now()) {
                     continue;
                 }
@@ -428,10 +469,19 @@ mod tests {
         assert_eq!(KEY_POWER, 116);
         assert_eq!(KEY_ESC, 1);
         assert_eq!(KEY_HOME, 102);
+        assert_eq!(action_for_keycode(KEY_F8), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_F9), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_RECORD), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_VOICECOMMAND), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_MIC), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_ASSISTANT), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_DICTATE), Some(HidAction::Voice));
+        assert_eq!(KEY_MIC, KEY_VOICECOMMAND);
+        assert_eq!(KEY_VOICECOMMAND, 0x246);
     }
 
     #[test]
-    fn keyboard_passthrough_is_only_nest_escape() {
+    fn keyboard_passthrough_is_nest_escape_and_voice() {
         assert_eq!(
             action_for_keyboard_passthrough(KEY_BACK),
             Some(HidAction::Back)
@@ -444,10 +494,25 @@ mod tests {
             action_for_keyboard_passthrough(KEY_POWER),
             Some(HidAction::Power)
         );
+        assert_eq!(
+            action_for_keyboard_passthrough(KEY_F9),
+            Some(HidAction::Voice)
+        );
+        assert_eq!(
+            action_for_keyboard_passthrough(KEY_MIC),
+            Some(HidAction::Voice)
+        );
         assert_eq!(action_for_keyboard_passthrough(KEY_VOLUMEUP), None);
         assert_eq!(action_for_keyboard_passthrough(KEY_PLAYPAUSE), None);
-        assert_eq!(action_for_keyboard_passthrough(KEY_F9), None);
+        assert_eq!(action_for_keyboard_passthrough(KEY_F2), None);
         assert_eq!(action_for_keyboard_passthrough(30), None); // KEY_A
+    }
+
+    #[test]
+    fn voice_code_env_rematch() {
+        assert_eq!(parse_voice_codes("404, 511"), vec![404, 511]);
+        assert_eq!(parse_voice_codes("582"), vec![582]);
+        assert!(parse_voice_codes("").is_empty());
     }
 
     #[test]

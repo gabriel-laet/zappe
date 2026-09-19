@@ -147,8 +147,36 @@ fn get_branding() -> BrandingView {
 }
 
 #[tauri::command]
-fn voice_listen() -> VoiceOutcome {
-    voice::listen()
+async fn voice_listen() -> VoiceOutcome {
+    tauri::async_runtime::spawn_blocking(voice::listen)
+        .await
+        .unwrap_or_else(|err| VoiceOutcome {
+            armed: false,
+            transcript: None,
+            message: format!("voice_listen: {err}"),
+        })
+}
+
+#[tauri::command]
+async fn voice_begin() -> VoiceOutcome {
+    tauri::async_runtime::spawn_blocking(voice::begin)
+        .await
+        .unwrap_or_else(|err| VoiceOutcome {
+            armed: false,
+            transcript: None,
+            message: format!("voice_begin: {err}"),
+        })
+}
+
+#[tauri::command]
+async fn voice_end() -> VoiceOutcome {
+    tauri::async_runtime::spawn_blocking(voice::end)
+        .await
+        .unwrap_or_else(|err| VoiceOutcome {
+            armed: false,
+            transcript: None,
+            message: format!("voice_end: {err}"),
+        })
 }
 
 #[tauri::command]
@@ -437,6 +465,8 @@ pub fn run() {
             get_catalog,
             get_branding,
             voice_listen,
+            voice_begin,
+            voice_end,
             auto_harvest_enabled,
             harvest_now,
             begin_teach,

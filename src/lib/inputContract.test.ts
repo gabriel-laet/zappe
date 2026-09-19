@@ -34,6 +34,9 @@ describe("classifyAtongx", () => {
     assert.equal(classifyAtongx(key("PageUp")), "pageUp");
     assert.equal(classifyAtongx(key("PageDown")), "pageDown");
     assert.equal(classifyAtongx(key("F9")), "voice");
+    assert.equal(classifyAtongx(key("F8")), "voice");
+    assert.equal(classifyAtongx(key("Voice")), "voice");
+    assert.equal(classifyAtongx(key("MediaRecord")), "voice");
     assert.equal(classifyAtongx(key("ColorF0Red", { key: "ColorF0Red", keyCode: 403 })), "voice");
     assert.equal(classifyAtongx(key("AudioVolumeUp")), "volumeUp");
     assert.equal(classifyAtongx(key("AudioVolumeDown")), "volumeDown");
@@ -74,8 +77,10 @@ describe("parseVoicePtBr", () => {
     assert.deepEqual(parseVoicePtBr("mudo"), { type: "mute" });
     assert.deepEqual(parseVoicePtBr("ir para Globo"), { type: "ota", query: "globo" });
     assert.deepEqual(parseVoicePtBr("canal SBT"), { type: "ota", query: "sbt" });
+    assert.deepEqual(parseVoicePtBr("Record"), { type: "ota", query: "record" });
     assert.deepEqual(parseVoicePtBr("início"), { type: "home" });
     assert.deepEqual(parseVoicePtBr("pausar"), { type: "playpause" });
+    assert.deepEqual(parseVoicePtBr("sincronizar"), { type: "sync" });
     assert.equal(parseVoicePtBr("conte uma piada"), null);
   });
 });
