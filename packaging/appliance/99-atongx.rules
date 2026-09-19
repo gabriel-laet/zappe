@@ -1,0 +1,11 @@
+# XING WEI / ATONGX 2.4G USB Composite Device (VID 2320 / PID 0912).
+# Lets the zappe user read Consumer Control + System Control without root.
+#
+#   sudo cp packaging/appliance/99-atongx.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#   sudo usermod -aG input "$USER"
+#
+# Confirm: ls -l /dev/input/by-id/usb-XING_WEI_*
+
+SUBSYSTEM=="input", ATTRS{idVendor}=="2320", ATTRS{idProduct}=="0912", MODE="0660", GROUP="input", TAG+="uaccess"
+KERNEL=="hidraw*", ATTRS{idVendor}=="2320", ATTRS{idProduct}=="0912", MODE="0660", GROUP="input", TAG+="uaccess"

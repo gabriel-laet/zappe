@@ -1,5 +1,6 @@
 mod a11y;
 mod atongx;
+mod atongx_map;
 mod branding;
 mod catalog;
 mod companion;

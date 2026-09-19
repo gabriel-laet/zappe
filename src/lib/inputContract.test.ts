@@ -8,7 +8,13 @@ import {
   qrSvgMarkup,
 } from "./companion.ts";
 import { pickOtaChannel, primaryOtaChannel } from "./otaDisplay.ts";
-import { classifyAtongx } from "./remoteMap.ts";
+import {
+  ATONGX_BINDINGS,
+  ATONGX_MAP,
+  classifyAtongx,
+  classifyAtongxEvkey,
+  classifyAtongxKeyName,
+} from "./remoteMap.ts";
 import { tvControlToast, type TvControlEvent } from "./tvControl.ts";
 import { parseVoicePtBr } from "./voicePtBr.ts";
 
@@ -40,7 +46,102 @@ describe("classifyAtongx", () => {
     assert.equal(classifyAtongx(key("AudioVolumeMute")), "mute");
     assert.equal(classifyAtongx(key("Delete")), "delete");
     assert.equal(classifyAtongx(key("F2")), "pointer");
+    assert.equal(classifyAtongx(key("F6")), "pointer");
     assert.equal(classifyAtongx(key("Power")), "power");
+  });
+});
+
+describe("classifyAtongxEvkey", () => {
+  it("maps the XING WEI Consumer Control / keyboard EV_KEY codes", () => {
+    assert.equal(classifyAtongxEvkey(103), "up");
+    assert.equal(classifyAtongxEvkey(108), "down");
+    assert.equal(classifyAtongxEvkey(105), "left");
+    assert.equal(classifyAtongxEvkey(106), "right");
+    assert.equal(classifyAtongxEvkey(28), "ok");
+    assert.equal(classifyAtongxEvkey(158), "back");
+    assert.equal(classifyAtongxEvkey(1), "back");
+    assert.equal(classifyAtongxEvkey(172), "home");
+    assert.equal(classifyAtongxEvkey(164), "playpause");
+    assert.equal(classifyAtongxEvkey(127), "menu");
+    assert.equal(classifyAtongxEvkey(139), "menu");
+    assert.equal(classifyAtongxEvkey(115), "volumeUp");
+    assert.equal(classifyAtongxEvkey(114), "volumeDown");
+    assert.equal(classifyAtongxEvkey(113), "mute");
+    assert.equal(classifyAtongxEvkey(116), "power");
+    assert.equal(classifyAtongxEvkey(111), "delete");
+    assert.equal(classifyAtongxEvkey(217), "voice");
+    assert.equal(classifyAtongxEvkey(582), "voice");
+    assert.equal(classifyAtongxEvkey(583), "voice");
+    assert.equal(classifyAtongxEvkey(60), "pointer");
+    assert.equal(classifyAtongxEvkey(530), "pointer");
+    assert.equal(classifyAtongxEvkey(999), null);
+  });
+
+  it("accepts KEY_* names from the capture script", () => {
+    assert.equal(classifyAtongxKeyName("KEY_BACK"), "back");
+    assert.equal(classifyAtongxKeyName("HOMEPAGE"), "home");
+    assert.equal(classifyAtongxKeyName("playpause"), "playpause");
+    assert.equal(classifyAtongxKeyName("KEY_SEARCH"), "voice");
+    assert.equal(classifyAtongxKeyName("KEY_VOICECOMMAND"), "voice");
+    assert.equal(classifyAtongxKeyName("KEY_F2"), "pointer");
+    assert.equal(classifyAtongxKeyName("KEY_TOUCHPAD_TOGGLE"), "pointer");
+  });
+});
+
+describe("atongx-map.json", () => {
+  it("is the single living-room contract", () => {
+    assert.equal(ATONGX_MAP.device.usb.vendor, "2320");
+    assert.equal(ATONGX_MAP.device.usb.product, "0912");
+    assert.ok(ATONGX_MAP.device.nodes.some((n) => n.iface === "consumer" && n.grab));
+    assert.ok(ATONGX_MAP.device.nodes.some((n) => n.iface === "keyboard" && !n.grab));
+    const actions = new Set(ATONGX_BINDINGS.map((b) => b.action));
+    for (const needed of [
+      "up",
+      "down",
+      "left",
+      "right",
+      "ok",
+      "back",
+      "home",
+      "menu",
+      "playpause",
+      "pageUp",
+      "pageDown",
+      "voice",
+      "pointer",
+      "volumeUp",
+      "mute",
+      "power",
+    ]) {
+      assert.ok(actions.has(needed), `missing ${needed}`);
+    }
+    const back = ATONGX_BINDINGS.find((b) => b.action === "back");
+    assert.equal(back?.keys[0]?.name, "KEY_BACK");
+    assert.equal(back?.keys[0]?.code, 158);
+  });
+
+  it("locks Mic and Pointer scancodes and documents them", () => {
+    const voice = ATONGX_BINDINGS.find((b) => b.action === "voice");
+    const pointer = ATONGX_BINDINGS.find((b) => b.action === "pointer");
+    assert.equal(voice?.button, "Mic (red)");
+    assert.match(voice?.note ?? "", /Locked/);
+    assert.match(pointer?.note ?? "", /Locked/);
+    const voiceLocked = (voice?.keys ?? []).filter((k) => k.confidence === "locked");
+    const pointerLocked = (pointer?.keys ?? []).filter((k) => k.confidence === "locked");
+    assert.ok(voiceLocked.some((k) => k.name === "KEY_SEARCH" && k.code === 217));
+    assert.ok(voiceLocked.some((k) => k.name === "KEY_VOICECOMMAND" && k.code === 582));
+    assert.ok(pointerLocked.some((k) => k.name === "KEY_F2" && k.code === 60));
+    assert.ok(pointerLocked.some((k) => k.name === "KEY_TOUCHPAD_TOGGLE" && k.code === 530));
+    assert.ok((voice?.keys ?? []).some((k) => k.webCodes.includes("F9")));
+    assert.ok((pointer?.keys ?? []).some((k) => k.webCodes.includes("F2")));
+    assert.equal(
+      ATONGX_BINDINGS.find((b) => b.action === "up")?.dispatch,
+      "focus",
+      "D-pad must stay focus (not evdev-grabbed)",
+    );
+    assert.equal(ATONGX_BINDINGS.find((b) => b.action === "ok")?.dispatch, "focus");
+    assert.equal(voice?.dispatch, "global");
+    assert.equal(pointer?.dispatch, "global");
   });
 });
 

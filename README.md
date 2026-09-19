@@ -216,7 +216,7 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 
 ## Remote (ATONGX air mouse — no keyboard)
 
-Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classifyAtongx` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts).
+Full button contract: [`src/lib/atongx-map.json`](src/lib/atongx-map.json) (single table), [`docs/atongx-input.md`](docs/atongx-input.md), and `classifyAtongx` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts). Capture on the box: `./packaging/appliance/zappe-atongx-capture --mic-pointer`.
 
 | Button | This PR |
 | --- | --- |
@@ -224,8 +224,8 @@ Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classi
 | Home, Back, DEL | Return to guide / end playback. Evdev on XING WEI (`KEY_BACK` 158 / `KEY_HOMEPAGE` 172) so nest Chrome cannot eat them. |
 | Play / Pause | Space into Chrome nest or mpv |
 | PAGE up / down | Jump a shelf |
-| Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
-| Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click |
+| Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo`. Evdev `KEY_SEARCH` **217** / `KEY_VOICECOMMAND` **582** (locked). |
+| Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click. Evdev `KEY_F2` **60** / `KEY_TOUCHPAD_TOGGLE` **530** (locked). |
 | VOL +/−, Mute | Samsung TV Device Connect (`KEY_VOLUP` / `KEY_VOLDOWN` / `KEY_MUTE`). Pulse `pactl` if the TV is unreachable (one toast). |
 | Menu | Open Connect (returns to guide first if playing) |
 | Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
