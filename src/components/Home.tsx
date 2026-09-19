@@ -225,13 +225,9 @@ export function Home() {
       .then(setCatalog)
       .catch(() => undefined)
       .finally(() => setCatalogReady(true));
-    // Never auto-harvest on mount — that steals focus into the Netflix nest.
-    // Opt in only for debugging: ZAPPE_AUTO_HARVEST=1
-    void api.autoHarvestEnabled().then((on) => {
-      if (on) {
-        void api.harvestNow().catch((e) => toast.message(String(e)));
-      }
-    });
+    // Auto-harvest lives in the Rust scheduler (backoff + ZAPPE_AUTO_HARVEST
+    // kill switch). Do not call harvestNow on mount — catalog-changed used to
+    // remount this effect's callers and stack Chrome nests.
     let unlistenFocus: (() => void) | undefined;
     let unlistenCatalog: (() => void) | undefined;
     void onFocusRestore((f) => setFocus(f)).then((fn) => {
@@ -350,8 +346,10 @@ export function Home() {
     return () => window.removeEventListener("keydown", onKey);
   }, [activate, connectOpen, currentShelf, focus.index, move]);
 
+  const closeConnect = useCallback(() => setConnectOpen(false), []);
+
   if (connectOpen) {
-    return <ConnectPhone onClose={() => setConnectOpen(false)} />;
+    return <ConnectPhone onClose={closeConnect} />;
   }
 
   return (

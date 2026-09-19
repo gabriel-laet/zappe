@@ -78,7 +78,7 @@ Production build: `npm run tauri -- build --no-bundle` on the appliance (see upd
 
 ### Harvest Continue Watching (Linux)
 
-From the guide: focus **Sync Netflix** (Home does **not** harvest on launch — that stole focus into the nest). `ZAPPE_AUTO_HARVEST=1` restores the old auto-sync for debugging.
+From the guide: focus **Sync Netflix**. Home does **not** harvest on mount. Auto-harvest is a backend scheduler that is **off** unless `ZAPPE_AUTO_HARVEST=1`. On AT-SPI / nest failures it backs off 30s → 2m → 10m → 1h and disables itself after 3 consecutive storms so a dead accessibility bus cannot spawn Chrome in a tight loop.
 
 From a terminal (same store the UI reads):
 
@@ -101,7 +101,7 @@ cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tm
 
 ### First Sync on the appliance
 
-Home never harvests on mount (that stole the HDMI nest). Use the **Sync Netflix** tile only.
+Home never harvests on mount (that stacked Chrome nests when the catalog refreshed). Use the **Sync Netflix** tile, or set `ZAPPE_AUTO_HARVEST=1` for the backend scheduler (debug only; default off).
 
 1. Netflix must already be signed in on the shared profile: `~/.local/share/zappe/chrome-profile`.
 2. AT-SPI: `busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled`. Sync sets this `true` when it is `false`; if it stays off you get a guide toast naming `IsEnabled`.
@@ -245,7 +245,7 @@ Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsun
 | `ZAPPE_HARVEST_FIXTURE` | a11y JSON dump (skip live AT-SPI) |
 | `ZAPPE_A11Y_DUMP` | write the live tree to this path |
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
-| `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
+| `ZAPPE_AUTO_HARVEST` | Auto-harvest scheduler. Default **off**. Only `1` / `true` / `yes` / `on` enable it. `0`, `false`, empty, and unset skip every tick. After 3 AT-SPI/nest failures the process disables auto-harvest and logs once. |
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
 | `ZAPPE_WHISPER_BIN` | whisper.cpp `whisper-cli` for the red-mic button (pt-BR) |
 | `ZAPPE_WHISPER_MODEL` | ggml model (default `~/.local/share/zappe/whisper/ggml-small.bin`) |

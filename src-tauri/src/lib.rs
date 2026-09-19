@@ -21,6 +21,7 @@ mod voice;
 mod wm;
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
@@ -33,7 +34,7 @@ use remote::{remote_mute, remote_volume};
 use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
-pub use harvest::{HarvestOutcome, HarvestRequest};
+pub use harvest::{HarvestGate, HarvestOutcome, HarvestRequest};
 use ota::{ota_available, OtaChannel, OtaStatus};
 use playback::{GuideFocus, PlaybackController, PlaybackStatus, PlaybackSurface};
 use setup::{load_setup, save_setup, SetupState};
@@ -49,6 +50,7 @@ pub(crate) struct AppState {
     catalog: CatalogStore,
     teach: TeachMode,
     companion: CompanionHub,
+    harvest: HarvestGate,
 }
 
 #[derive(Serialize)]
@@ -192,6 +194,9 @@ async fn harvest_now(
     skill_id: Option<String>,
 ) -> Result<HarvestOutcome, String> {
     let id = skill_id.unwrap_or_else(|| NETFLIX_CONTINUE_WATCHING_V1.to_string());
+    let Some(_lease) = state.harvest.try_begin() else {
+        return Ok(harvest::already_running_outcome(id));
+    };
     let surface = state.playback.lock().unwrap().surface.clone();
     if let Err(err) = state
         .catalog
@@ -441,6 +446,11 @@ pub fn run() {
                 log::warn!("could not plant bundled harvest skills: {err:#}");
             }
 
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                auto_harvest_loop(handle).await;
+            });
+
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);
                 let _ = win.set_fullscreen(true);
@@ -456,6 +466,7 @@ pub fn run() {
             catalog,
             teach,
             companion,
+            harvest: HarvestGate::new(),
         })
         .invoke_handler(tauri::generate_handler![
             get_setup_state,
@@ -501,6 +512,78 @@ pub fn run() {
                 });
             }
         });
+}
+
+/// Backend auto-harvest scheduler. Honor `ZAPPE_AUTO_HARVEST` at start and
+/// on every tick. Storm failures back off 30s → 2m → 10m → 1h; three in a
+/// row disable auto-harvest for this process.
+async fn auto_harvest_loop(app: AppHandle) {
+    if harvest::auto_harvest_enabled() {
+        log::info!("auto-harvest scheduler started (ZAPPE_AUTO_HARVEST is on)");
+    } else {
+        log::info!(
+            "auto-harvest disabled (ZAPPE_AUTO_HARVEST unset/false/0) — scheduler will skip every tick"
+        );
+    }
+
+    let mut machine = harvest::AutoHarvestMachine::new();
+    loop {
+        if !harvest::auto_harvest_enabled() {
+            tokio::time::sleep(Duration::from_secs(
+                harvest::AUTO_HARVEST_DISABLED_POLL_SECS,
+            ))
+            .await;
+            continue;
+        }
+        if machine.is_disabled() {
+            return;
+        }
+
+        let outcome = {
+            let state = app.state::<AppState>();
+            let Some(_lease) = state.harvest.try_begin() else {
+                log::info!("auto-harvest tick skipped: harvest already running");
+                drop(state);
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                continue;
+            };
+            let surface = state.playback.lock().unwrap().surface.clone();
+            if let Err(err) = state.catalog.mark_harvesting(
+                "continue",
+                NETFLIX_CONTINUE_WATCHING_V1,
+                "Continue watching",
+            ) {
+                log::warn!("catalog harvesting mark failed: {err:#}");
+            }
+            let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
+            let outcome = harvest::run_harvest(
+                &state.nest,
+                &state.catalog,
+                &state.teach,
+                surface,
+                HarvestRequest::for_skill(NETFLIX_CONTINUE_WATCHING_V1),
+            )
+            .await;
+            let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
+            outcome
+        };
+
+        match machine.after_outcome(&outcome) {
+            harvest::AutoHarvestNext::StopLifetime => {
+                log::error!(
+                    "auto-harvest disabled for this process after {} consecutive failures ({}); \
+                     Chrome nest will not be respawned. Use Sync on the guide, or restart after fixing AT-SPI.",
+                    harvest::AUTO_HARVEST_MAX_FAILURES,
+                    outcome.message
+                );
+                return;
+            }
+            harvest::AutoHarvestNext::Wait(delay) => {
+                log::info!("auto-harvest next tick in {delay:?} ({})", outcome.message);
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
 }
 
 /// CLI / tests: harvest without starting the Tauri shell.

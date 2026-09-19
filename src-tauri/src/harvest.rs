@@ -2,8 +2,15 @@
 //!
 //! Failures log clearly and never panic the process. Missing anchors mark the
 //! skill stale and surface teach-mode instead of guessing a new path.
+//!
+//! Auto-harvest is a backend scheduler with a kill switch, single-flight lock,
+//! and exponential backoff. A broken AT-SPI bus must never respawn Chrome
+//! every second and melt the living-room box.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use serde::Serialize;
@@ -14,6 +21,16 @@ use crate::nest::{NestManager, NestMode};
 use crate::playback::PlaybackSurface;
 use crate::skill::{self, ExtractError, Skill};
 use crate::teach::TeachMode;
+
+/// After this many consecutive storm failures, auto-harvest stays off for
+/// the rest of the process. Manual Sync on the guide still works.
+pub const AUTO_HARVEST_MAX_FAILURES: u32 = 3;
+/// Wait after a successful (or non-storm) auto tick before the next one.
+pub const AUTO_HARVEST_SUCCESS_SECS: u64 = 3600;
+/// 30s → 2m → 10m → 1h. Never a one-second retry.
+pub const AUTO_HARVEST_BACKOFF_SECS: &[u64] = &[30, 120, 600, 3600];
+/// How often to re-read `ZAPPE_AUTO_HARVEST` when the scheduler is idle.
+pub const AUTO_HARVEST_DISABLED_POLL_SECS: u64 = 60;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HarvestOutcome {
@@ -32,7 +49,10 @@ pub struct HarvestRequest {
     pub skip_nest: bool,
 }
 
-/// Home must not harvest on mount unless this is set (debug / old behavior).
+/// Auto-harvest is **off** unless `ZAPPE_AUTO_HARVEST` is an explicit truthy
+/// value (`1` / `true` / `yes` / `on`). Empty, `0`, `false`, `off`, and unset
+/// all skip the scheduler — including when systemd sets
+/// `Environment=ZAPPE_AUTO_HARVEST=0`.
 pub fn auto_harvest_enabled() -> bool {
     parse_auto_harvest(std::env::var("ZAPPE_AUTO_HARVEST").ok().as_deref())
 }
@@ -45,6 +65,124 @@ fn parse_auto_harvest(raw: Option<&str>) -> bool {
         ),
         None => false,
     }
+}
+
+/// Single-flight lock: `harvest_now`, Connect, voice, and the auto scheduler
+/// share this so two callers cannot stack Chrome nests.
+#[derive(Clone, Default)]
+pub struct HarvestGate {
+    in_flight: Arc<AtomicBool>,
+}
+
+pub struct HarvestLease {
+    in_flight: Arc<AtomicBool>,
+}
+
+impl Drop for HarvestLease {
+    fn drop(&mut self) {
+        self.in_flight.store(false, Ordering::SeqCst);
+    }
+}
+
+impl HarvestGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn try_begin(&self) -> Option<HarvestLease> {
+        self.in_flight
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| HarvestLease {
+                in_flight: self.in_flight.clone(),
+            })
+    }
+
+    pub fn in_flight(&self) -> bool {
+        self.in_flight.load(Ordering::SeqCst)
+    }
+}
+
+pub fn already_running_outcome(skill_id: impl Into<String>) -> HarvestOutcome {
+    HarvestOutcome {
+        skill_id: skill_id.into(),
+        status: ShelfStatus::Harvesting,
+        message: "harvest already running; not starting another Chrome nest".into(),
+        rows: 0,
+        teach: false,
+    }
+}
+
+/// Pure auto-harvest backoff / kill-switch. One instance per process loop.
+#[derive(Clone, Debug, Default)]
+pub struct AutoHarvestMachine {
+    consecutive_storm_failures: u32,
+    disabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AutoHarvestNext {
+    Wait(Duration),
+    StopLifetime,
+}
+
+impl AutoHarvestMachine {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_disabled(&self) -> bool {
+        self.disabled
+    }
+
+    pub fn consecutive_storm_failures(&self) -> u32 {
+        self.consecutive_storm_failures
+    }
+
+    pub fn after_outcome(&mut self, outcome: &HarvestOutcome) -> AutoHarvestNext {
+        self.after_status(&outcome.status, &outcome.message)
+    }
+
+    pub fn after_status(&mut self, status: &ShelfStatus, message: &str) -> AutoHarvestNext {
+        if self.disabled {
+            return AutoHarvestNext::StopLifetime;
+        }
+        if matches!(status, ShelfStatus::Ok) {
+            self.consecutive_storm_failures = 0;
+            return AutoHarvestNext::Wait(Duration::from_secs(AUTO_HARVEST_SUCCESS_SECS));
+        }
+        if is_storm_failure_message(message) {
+            self.consecutive_storm_failures = self.consecutive_storm_failures.saturating_add(1);
+            if self.consecutive_storm_failures >= AUTO_HARVEST_MAX_FAILURES {
+                self.disabled = true;
+                return AutoHarvestNext::StopLifetime;
+            }
+            return AutoHarvestNext::Wait(backoff_after_failures(self.consecutive_storm_failures));
+        }
+        // Empty shelf / teach / extract miss: do not treat as a nest storm.
+        self.consecutive_storm_failures = 0;
+        AutoHarvestNext::Wait(Duration::from_secs(AUTO_HARVEST_SUCCESS_SECS))
+    }
+}
+
+/// Delay before the next auto tick after `n` consecutive storm failures.
+/// `n == 0` and `n == 1` both yield 30s so a bug cannot schedule 0s/1s.
+pub fn backoff_after_failures(n: u32) -> Duration {
+    let idx = n.saturating_sub(1) as usize;
+    let secs = AUTO_HARVEST_BACKOFF_SECS[idx.min(AUTO_HARVEST_BACKOFF_SECS.len() - 1)];
+    Duration::from_secs(secs.max(30))
+}
+
+/// AT-SPI timeout, missing Chrome on the bus, nest spawn/kill — these are
+/// the failures that used to tight-loop and pin the appliance at load ~13.
+pub fn is_storm_failure_message(message: &str) -> bool {
+    let m = message.to_ascii_lowercase();
+    m.contains("at-spi")
+        || m.contains("timed out")
+        || m.contains("no chrome")
+        || m.contains("nest start")
+        || m.contains("nest open")
+        || m.contains("accessibility")
 }
 
 impl HarvestRequest {
@@ -160,17 +298,26 @@ async fn harvest_skill(
     // Enable AT-SPI before launching Chrome so the nest registers on the bus.
     a11y::ensure_a11y_enabled().await?;
 
-    if !req.skip_nest && playback != PlaybackSurface::Chrome {
-        if let Err(err) = nest.open_url(&skill.open.url, NestMode::Harvest).await {
-            log::warn!("nest start for harvest failed: {err:#}");
-        }
+    // Hold the background nest slot for the whole dump so login cannot spawn
+    // a second Chrome, and so a failed hide/open cannot immediately respawn.
+    let _bg = if !req.skip_nest && playback != PlaybackSurface::Chrome {
+        let lease = nest.try_begin_background().ok_or_else(|| {
+            anyhow::anyhow!("harvest/login nest already running; not spawning another Chrome")
+        })?;
+        nest.open_url(&skill.open.url, NestMode::Harvest)
+            .await
+            .map_err(|err| anyhow::anyhow!("nest start for harvest failed: {err:#}"))?;
         // Hide immediately so the HDMI kiosk stays on the guide during the wait.
         keep_guide_after_harvest(nest).await;
         let wait = std::time::Duration::from_millis(skill.open.wait_ms);
         tokio::time::sleep(wait).await;
+        Some(lease)
     } else if playback == PlaybackSurface::Chrome {
         log::info!("harvest: nest already playing; dumping a11y without navigation");
-    }
+        None
+    } else {
+        None
+    };
 
     let mut last_err = None;
     let attempts = skill.open.retries.saturating_add(1).max(1);
@@ -301,9 +448,15 @@ pub async fn run_cli(req: HarvestRequest) -> Result<HarvestOutcome> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_auto_harvest;
+    use super::{
+        backoff_after_failures, is_storm_failure_message, parse_auto_harvest, AutoHarvestMachine,
+        AutoHarvestNext, HarvestGate, AUTO_HARVEST_BACKOFF_SECS, AUTO_HARVEST_MAX_FAILURES,
+        AUTO_HARVEST_SUCCESS_SECS,
+    };
     use crate::a11y::load_dump;
+    use crate::catalog::ShelfStatus;
     use crate::skill::{extract_rows, load_skill, NETFLIX_CONTINUE_WATCHING_V1};
+    use std::time::Duration;
 
     #[test]
     fn fixture_extracts_continue_watching() {
@@ -326,17 +479,126 @@ mod tests {
     fn auto_harvest_is_off_unless_explicitly_enabled() {
         assert!(!parse_auto_harvest(None));
         assert!(!parse_auto_harvest(Some("")));
+        assert!(!parse_auto_harvest(Some("   ")));
         assert!(!parse_auto_harvest(Some("0")));
         assert!(!parse_auto_harvest(Some("false")));
+        assert!(!parse_auto_harvest(Some("off")));
+        assert!(!parse_auto_harvest(Some("OFF")));
+        assert!(!parse_auto_harvest(Some("no")));
         assert!(parse_auto_harvest(Some("1")));
         assert!(parse_auto_harvest(Some("true")));
         assert!(parse_auto_harvest(Some("YES")));
+        assert!(parse_auto_harvest(Some(" on ")));
+    }
+
+    #[test]
+    fn backoff_is_exponential_and_never_sub_second() {
+        assert_eq!(AUTO_HARVEST_BACKOFF_SECS, &[30, 120, 600, 3600]);
+        assert_eq!(backoff_after_failures(0), Duration::from_secs(30));
+        assert_eq!(backoff_after_failures(1), Duration::from_secs(30));
+        assert_eq!(backoff_after_failures(2), Duration::from_secs(120));
+        assert_eq!(backoff_after_failures(3), Duration::from_secs(600));
+        assert_eq!(backoff_after_failures(4), Duration::from_secs(3600));
+        assert_eq!(backoff_after_failures(99), Duration::from_secs(3600));
+        for n in 0..8 {
+            assert!(
+                backoff_after_failures(n).as_secs() >= 30,
+                "backoff({n}) must never be a tight retry"
+            );
+        }
+    }
+
+    #[test]
+    fn storm_classifier_matches_appliance_incident() {
+        assert!(is_storm_failure_message(
+            "AT-SPI dump timed out after 12s — is Chrome accessibility enabled?"
+        ));
+        assert!(is_storm_failure_message(
+            "no Chrome/Chromium application on the AT-SPI bus (is the nest running?)"
+        ));
+        assert!(is_storm_failure_message(
+            "nest start for harvest failed: killed"
+        ));
+        assert!(!is_storm_failure_message(
+            "harvest returned no titles (signed-in Continue Watching empty?)"
+        ));
+        assert!(!is_storm_failure_message("harvested 4 titles"));
+    }
+
+    #[test]
+    fn auto_harvest_machine_backs_off_then_disables() {
+        let mut machine = AutoHarvestMachine::new();
+        assert_eq!(AUTO_HARVEST_MAX_FAILURES, 3);
+        let timeout = "AT-SPI dump timed out after 12s — is Chrome accessibility enabled?";
+        assert_eq!(
+            machine.after_status(&ShelfStatus::Error, timeout),
+            AutoHarvestNext::Wait(Duration::from_secs(30))
+        );
+        assert_eq!(machine.consecutive_storm_failures(), 1);
+        assert_eq!(
+            machine.after_status(
+                &ShelfStatus::Error,
+                "no Chrome/Chromium application on the AT-SPI bus"
+            ),
+            AutoHarvestNext::Wait(Duration::from_secs(120))
+        );
+        assert_eq!(
+            machine.after_status(&ShelfStatus::Error, "nest start for harvest failed"),
+            AutoHarvestNext::StopLifetime
+        );
+        assert!(machine.is_disabled());
+        assert_eq!(
+            machine.after_status(&ShelfStatus::Ok, "harvested 2 titles"),
+            AutoHarvestNext::StopLifetime
+        );
+    }
+
+    #[test]
+    fn auto_harvest_success_resets_storm_streak() {
+        let mut machine = AutoHarvestMachine::new();
+        let _ = machine.after_status(&ShelfStatus::Error, "AT-SPI dump timed out");
+        assert_eq!(
+            machine.after_status(&ShelfStatus::Ok, "harvested 3 titles"),
+            AutoHarvestNext::Wait(Duration::from_secs(AUTO_HARVEST_SUCCESS_SECS))
+        );
+        assert_eq!(machine.consecutive_storm_failures(), 0);
+        assert!(!machine.is_disabled());
+        assert_eq!(
+            machine.after_status(&ShelfStatus::Error, "AT-SPI dump timed out"),
+            AutoHarvestNext::Wait(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn empty_or_teach_is_not_a_storm() {
+        let mut machine = AutoHarvestMachine::new();
+        assert_eq!(
+            machine.after_status(
+                &ShelfStatus::Empty,
+                "harvest returned no titles (signed-in Continue Watching empty?)"
+            ),
+            AutoHarvestNext::Wait(Duration::from_secs(AUTO_HARVEST_SUCCESS_SECS))
+        );
+        assert_eq!(machine.consecutive_storm_failures(), 0);
+        assert!(!machine.is_disabled());
+    }
+
+    #[test]
+    fn harvest_gate_is_single_flight() {
+        let gate = HarvestGate::new();
+        let first = gate.try_begin().expect("first harvest");
+        assert!(gate.in_flight());
+        assert!(
+            gate.try_begin().is_none(),
+            "second harvest must not start while the first holds the gate"
+        );
+        drop(first);
+        assert!(gate.try_begin().is_some());
     }
 
     #[test]
     fn a11y_disabled_is_error_not_teach() {
         use crate::a11y::A11Y_DISABLED_MSG;
-        use crate::catalog::ShelfStatus;
         let skill = load_skill(NETFLIX_CONTINUE_WATCHING_V1).unwrap();
         let err = anyhow::anyhow!(A11Y_DISABLED_MSG);
         let (status, teach) = super::classify_fail(&skill, &err);

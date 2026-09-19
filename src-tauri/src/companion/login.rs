@@ -14,8 +14,8 @@ use tokio::process::{Child, Command};
 use super::sources::{self, AuthSource};
 use super::{Hub, SessionStatus};
 use crate::nest::{
-    chrome_args, chrome_args_for_mode, env_flag, find_chrome, has_no_cdp_flags, which,
-    NestManager, NestMode,
+    chrome_args, chrome_args_for_mode, env_flag, find_chrome, has_no_cdp_flags, which, NestManager,
+    NestMode,
 };
 use crate::nest_input::{inject_key_quiet, inject_text_quiet};
 use crate::paths::profile_dir;
@@ -30,7 +30,12 @@ pub enum LoginProvider {
 
 impl LoginProvider {
     pub fn parse(raw: Option<&str>) -> Self {
-        match raw.unwrap_or("password").trim().to_ascii_lowercase().as_str() {
+        match raw
+            .unwrap_or("password")
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "email_code" | "email-code" | "code" => Self::EmailCode,
             "google" => Self::Google,
             _ => Self::Password,
@@ -64,7 +69,8 @@ pub async fn drive_login(hub: Hub, nest: NestManager, job: LoginJob) {
         }
         Err(err) => {
             log::warn!("hidden login failed: {err:#}");
-            hub.set_error(format!("Sign-in did not finish: {err}")).await;
+            hub.set_error(format!("Sign-in did not finish: {err}"))
+                .await;
         }
     }
     nest.hide().await;
@@ -98,7 +104,9 @@ async fn run_login(hub: &Hub, nest: &NestManager, job: &LoginJob) -> Result<()> 
         match spawn_xvfb_chrome(&profile, start_url).await {
             Ok(child) => Some(child),
             Err(err) => {
-                log::info!("Xvfb login unavailable ({err:#}); using minimized Chrome (same as harvest)");
+                log::info!(
+                    "Xvfb login unavailable ({err:#}); using minimized Chrome (same as harvest)"
+                );
                 None
             }
         }
@@ -106,9 +114,15 @@ async fn run_login(hub: &Hub, nest: &NestManager, job: &LoginJob) -> Result<()> 
         None
     };
 
-    if xvfb.is_none() {
+    let _bg = if xvfb.is_none() {
+        let lease = nest.try_begin_background().ok_or_else(|| {
+            anyhow!("harvest/login nest already running; not spawning another Chrome")
+        })?;
         nest.open_url(start_url, NestMode::Login).await?;
-    }
+        Some(lease)
+    } else {
+        None
+    };
 
     keep_hidden(nest).await;
     let hide = spawn_keep_hidden(nest.clone());
