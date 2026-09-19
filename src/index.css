@@ -229,9 +229,9 @@ body.tv-handoff {
 }
 
 /*
-  Official logo.png is a circular feras badge on an opaque white square.
-  Clip to a round Apple TV–style mark so there is never a light plate.
-  Prefer a transparent PNG when replacing the asset.
+  Clip a user-supplied logo.png to a round Apple TV–style mark so an
+  opaque square plate never shows on the black chrome. Prefer a
+  transparent PNG when adding an appliance logo.
 */
 .tv-logo-frame,
 .tv-logo-frame-lg {

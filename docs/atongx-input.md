@@ -69,7 +69,7 @@ Runtime: `ZAPPE_WHISPER_BIN` + `arecord`. `ZAPPE_VOICE_FAKE=abrir netflix` for t
 
 ## Branding (not this map)
 
-Official feras TV lockup (tan dog **Beto**, tuxedo cat **Lek**, beige circle, lowercase “feras”) lives only under `~/.local/share/zappe/` — never git. See `branding.json` + `logo.png`. Do not invent a substitute mark.
+Optional appliance branding lives only under `~/.local/share/zappe/` — never git. See `branding.json` + `logo.png`.
 
 ## Manual verify (appliance)
 

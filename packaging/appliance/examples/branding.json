@@ -1,8 +1,8 @@
 {
   "_example": true,
-  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put the official hugging dog+cat PNG as logo.png next to it. Do not commit that PNG or any personal brand assets to this repo.",
-  "name": "feras TV",
-  "accent": "#C4A574",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put your own logo.png next to it. Do not commit personal brand assets to this repo.",
+  "name": "My TV",
+  "accent": "#E85A1B",
   "logo": "logo.png",
   "splash": "logo.png",
   "idle": {

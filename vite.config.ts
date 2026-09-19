@@ -59,8 +59,8 @@ function zappeBrandingPreview(): Plugin {
           const splashFile = path.join(dir, "splash.png");
           const hasLogo = fs.existsSync(logoFile);
           const hasSplash = fs.existsSync(splashFile);
-          let name = "feras TV";
-          let accent = "#C4A574";
+          let name = "Zappe";
+          let accent = "#E85A1B";
           try {
             const raw = JSON.parse(
               fs.readFileSync(path.join(dir, "branding.json"), "utf8"),

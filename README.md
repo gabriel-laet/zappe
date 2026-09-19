@@ -73,7 +73,7 @@ npm install
 npm run tauri dev
 ```
 
-Production build: `npm run tauri -- build --no-bundle` on the appliance (see updater). Full installer: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=feras` name/theme + data-dir logo, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Official artwork is served from `~/.local/share/zappe/` (never git).
+Production build: `npm run tauri -- build --no-bundle` on the appliance (see updater). Full installer: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=example` name/theme + data-dir logo, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Appliance artwork is served from `~/.local/share/zappe/` (never git).
 
 ### Harvest Continue Watching (Linux)
 
@@ -148,7 +148,7 @@ The TV only displays the code / QR / “Connected”. Email and password stay on
 
 ## Custom branding (appliance, not git)
 
-The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). The official **feras TV** lockup (hugging tan dog **Beto** + tuxedo cat **Lek**, beige circle, lowercase “feras”, “— TV —” — names are not shown in the UI) lives in the **user data dir** so it is never committed. Do not invent substitute marks.
+The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). Put your own `logo.png` + `branding.json` in the **user data dir** so artwork is never committed.
 
 Preferred path (Linux XDG):
 
@@ -156,20 +156,20 @@ Preferred path (Linux XDG):
 ~/.local/share/zappe/{branding.json,logo.png,splash.png}
 ```
 
-`$ZAPPE_DATA_DIR` overrides that directory. Put the official PNG next to `branding.json` (**not in git**). ~1.4MB is fine — the Rust loader emits a data URL (8 MiB cap). Vite preview serves the same files over `/__zappe_branding__/` so the browser path does not base64 the PNG.
+`$ZAPPE_DATA_DIR` overrides that directory. Put your PNG next to `branding.json` (**not in git**). The Rust loader emits a data URL (8 MiB cap). Vite preview serves the same files over `/__zappe_branding__/` so the browser path does not base64 the PNG.
 
 ```bash
 mkdir -p ~/.local/share/zappe
 cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
-cp /path/to/official-feras-tv.png ~/.local/share/zappe/logo.png
+cp /path/to/your-logo.png ~/.local/share/zappe/logo.png
 systemctl --user restart zappe.service
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `name` | `feras TV` on the appliance. Default in code is `Zappe`. No pet names / taglines. |
-| `accent` | Warm beige from the art (`#C4A574`). |
-| `logo` / `splash` | Official lockup (`png` / `jpg` / `webp` / `gif`). Header clips it to a circle so an opaque white plate still reads as a badge on black — prefer a transparent PNG. |
+| `name` | Product name on the appliance. Default in code is `Zappe`. |
+| `accent` | CSS color. Default `#E85A1B`. |
+| `logo` / `splash` | Image (`png` / `jpg` / `webp` / `gif`). Header clips it to a circle so an opaque white plate still reads as a badge on black — prefer a transparent PNG. |
 | `idle` | `{ mode, asset, timeoutSeconds, animation }` — screensaver after ~2 min |
 | `theme` | `{ style: "apple-tv", background: "#000000", focusRing: "subtle-scale" }` |
 

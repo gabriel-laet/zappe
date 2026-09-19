@@ -12,7 +12,7 @@ import { useVoiceMic } from "@/hooks/useVoiceMic";
 import {
   applyBrandingCss,
   DEFAULT_BRANDING,
-  ferasPreviewBranding,
+  examplePreviewBranding,
   loadDevDataDirBranding,
   normalizeBranding,
   type Branding,
@@ -21,17 +21,17 @@ import { api } from "@/lib/tauri";
 
 const SPLASH_MIN_MS = 900;
 
-/** Vite-only: `?guide=1` Home, `?brand=feras` name/theme, `?splash=1` hold splash, `?idle=3` screensaver in 3s. */
-function webPreview(): { forceGuide: boolean; wantFeras: boolean; idleSec: number | null } {
+/** Vite-only: `?guide=1` Home, `?brand=example` name/theme, `?splash=1` hold splash, `?idle=3` screensaver in 3s. */
+function webPreview(): { forceGuide: boolean; wantExample: boolean; idleSec: number | null } {
   if (!import.meta.env.DEV || typeof window === "undefined") {
-    return { forceGuide: false, wantFeras: false, idleSec: null };
+    return { forceGuide: false, wantExample: false, idleSec: null };
   }
   const params = new URLSearchParams(window.location.search);
   const idleRaw = params.get("idle");
   const idleSec = idleRaw ? Number(idleRaw) : null;
   return {
     forceGuide: params.get("guide") === "1",
-    wantFeras: params.get("brand") === "feras" || params.get("brand") === "example",
+    wantExample: params.get("brand") === "example",
     idleSec: idleSec && idleSec > 0 ? idleSec : null,
   };
 }
@@ -71,8 +71,8 @@ export default function App() {
           idle_data_url: resolved.idle_data_url ?? disk.idle_data_url,
         });
       }
-      if (preview.wantFeras) {
-        resolved = ferasPreviewBranding(resolved);
+      if (preview.wantExample) {
+        resolved = examplePreviewBranding(resolved);
       }
       setBranding(resolved);
       applyBrandingCss(resolved);

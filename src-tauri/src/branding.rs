@@ -15,7 +15,7 @@ pub const DEFAULT_NAME: &str = "Zappe";
 pub const DEFAULT_ACCENT: &str = "#E85A1B";
 pub const DEFAULT_BACKGROUND: &str = "#000000";
 pub const DEFAULT_IDLE_TIMEOUT: u32 = 120;
-/// Official feras lockup is ~1.4 MiB PNG; 8 MiB leaves headroom for data-URL IPC.
+/// 8 MiB leaves headroom for a typical appliance PNG as a data-URL IPC payload.
 const MAX_ASSET_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_NAME_CHARS: usize = 40;
 const MAX_TAGLINE_CHARS: usize = 80;
@@ -445,14 +445,14 @@ mod tests {
     }
 
     #[test]
-    fn idle_and_theme_feras_shape() {
+    fn idle_and_theme_example_shape() {
         let dir = temp_dir();
         fs::write(dir.join("logo.png"), TINY_PNG).unwrap();
         fs::write(
             dir.join("branding.json"),
             r##"{
-              "name": "feras TV",
-              "accent": "#C4A574",
+              "name": "My TV",
+              "accent": "#E85A1B",
               "logo": "logo.png",
               "splash": "logo.png",
               "idle": {
@@ -470,8 +470,8 @@ mod tests {
         )
         .unwrap();
         let view = load_branding_from(&dir);
-        assert_eq!(view.name, "feras TV");
-        assert_eq!(view.accent, "#C4A574");
+        assert_eq!(view.name, "My TV");
+        assert_eq!(view.accent, "#E85A1B");
         assert_eq!(view.theme_background, "#000000");
         assert_eq!(view.theme_style, "apple-tv");
         assert_eq!(view.theme_focus, "subtle-scale");
@@ -493,18 +493,18 @@ mod tests {
         fs::write(dir.join("logo.png"), &bytes).unwrap();
         fs::write(
             dir.join("branding.json"),
-            r##"{"name":"feras TV","accent":"#C4A574","logo":"logo.png"}"##,
+            r##"{"name":"My TV","accent":"#E85A1B","logo":"logo.png"}"##,
         )
         .unwrap();
         let view = load_branding_from(&dir);
-        let url = view.logo_data_url.expect("1.4MB logo should become a data URL");
+        let url = view.logo_data_url.expect("large logo should become a data URL");
         assert!(url.starts_with("data:image/png;base64,"));
         assert!(
             url.len() > 1_900_000,
             "base64 data URL too small: {}",
             url.len()
         );
-        assert_eq!(view.accent, "#C4A574");
+        assert_eq!(view.accent, "#E85A1B");
         let _ = fs::remove_dir_all(dir);
     }
 

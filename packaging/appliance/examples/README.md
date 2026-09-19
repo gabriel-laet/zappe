@@ -11,14 +11,14 @@ Zappe reads branding from the **user data dir**, never from this repository:
 
 Optional artwork sits next to that file (`logo.png`) or uses an absolute path.
 
-The official feras TV lockup (tan dog **Beto**, tuxedo cat **Lek**, beige circle, lowercase “feras”, “— TV —”) stays on the appliance. Pet names are not UI copy. **Do not commit that PNG, and do not invent a substitute mark.**
+Put your own `logo.png` + `branding.json` on the appliance. **Do not commit that PNG.**
 
 ### Drop branding on the living-room box
 
 ```bash
 mkdir -p ~/.local/share/zappe
 cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
-cp /path/to/feras-tv-logo.png ~/.local/share/zappe/logo.png
+cp /path/to/your-logo.png ~/.local/share/zappe/logo.png
 
 systemctl --user restart zappe.service
 ```
@@ -29,9 +29,9 @@ If `branding.json` is missing, the guide uses in-code defaults (`Zappe` + Apple 
 
 | Field | Required | Description |
 | --- | --- | --- |
-| `name` | no | Product name (e.g. `feras TV`). No pet names. Default `Zappe`. |
-| `accent` | no | Warm beige from the official art (`#C4A574`). |
-| `logo` | no | Image path relative to the data dir, or absolute. `png` / `jpg` / `webp` / `gif`, max 8 MiB (~1.4MB official PNG is fine). Header clips the circular badge; prefer a transparent PNG so no white plate remains. |
+| `name` | no | Product name (e.g. `Zappe` or `My TV`). Default `Zappe`. |
+| `accent` | no | CSS color. Default `#E85A1B`. |
+| `logo` | no | Image path relative to the data dir, or absolute. `png` / `jpg` / `webp` / `gif`, max 8 MiB. Header clips the image to a circle; prefer a transparent PNG so no white plate remains. |
 | `splash` | no | Splash image (defaults to `logo`). Shown `object-fit: contain`. |
 | `idle.mode` | no | `screensaver` (default) or `off`. |
 | `idle.asset` | no | Screensaver image (defaults to `logo`). |
@@ -41,7 +41,7 @@ If `branding.json` is missing, the guide uses in-code defaults (`Zappe` + Apple 
 | `theme.background` | no | CSS color, typically `#000000`. |
 | `theme.focusRing` | no | `subtle-scale` (default). |
 
-Unknown keys (`_example`, `_comment`) are ignored. No taglines on the feras TV mark.
+Unknown keys (`_example`, `_comment`) are ignored.
 
 ## Samsung TV (Device Connect)
 

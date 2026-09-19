@@ -10,7 +10,7 @@ chrome-profile/
 .env.*
 
 # Personal appliance branding — never commit logos or live branding.json
-feras-tv-branding/
+local-branding/
 /branding.json
 /logo.png
 /splash.png

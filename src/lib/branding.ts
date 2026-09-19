@@ -1,7 +1,7 @@
 export const DEFAULT_BRAND_NAME = "Zappe";
 export const DEFAULT_ACCENT = "#E85A1B";
-export const FERAS_PREVIEW_NAME = "feras TV";
-export const FERAS_PREVIEW_ACCENT = "#C4A574";
+export const EXAMPLE_PREVIEW_NAME = "My TV";
+export const EXAMPLE_PREVIEW_ACCENT = "#E85A1B";
 export const DEFAULT_BACKGROUND = "#000000";
 export const DEFAULT_IDLE_TIMEOUT = 120;
 
@@ -65,11 +65,11 @@ export function normalizeBranding(raw: Partial<Branding> | null | undefined): Br
   };
 }
 
-export function ferasPreviewBranding(base: Branding = DEFAULT_BRANDING): Branding {
+export function examplePreviewBranding(base: Branding = DEFAULT_BRANDING): Branding {
   return {
     ...base,
-    name: FERAS_PREVIEW_NAME,
-    accent: FERAS_PREVIEW_ACCENT,
+    name: EXAMPLE_PREVIEW_NAME,
+    accent: EXAMPLE_PREVIEW_ACCENT,
     source: "user",
   };
 }
