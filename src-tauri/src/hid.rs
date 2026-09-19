@@ -435,6 +435,16 @@ mod tests {
         assert_eq!(action_for_keycode(KEY_POWER), Some(HidAction::Power));
         assert_eq!(action_for_keycode(KEY_POWER2), Some(HidAction::Power));
         assert_eq!(action_for_keycode(KEY_SLEEP), Some(HidAction::Power));
+        assert_eq!(action_for_keycode(KEY_BACKSPACE), Some(HidAction::Back));
+        assert_eq!(action_for_keycode(KEY_F1), Some(HidAction::Menu));
+        assert_eq!(action_for_keycode(KEY_COMPOSE), Some(HidAction::Menu));
+        assert_eq!(action_for_keycode(KEY_MENU), Some(HidAction::Menu));
+        assert_eq!(action_for_keycode(KEY_CONTEXT_MENU), Some(HidAction::Menu));
+        assert_eq!(action_for_keycode(KEY_MUTE), Some(HidAction::Mute));
+        assert_eq!(
+            action_for_keycode(KEY_VOLUMEDOWN),
+            Some(HidAction::VolumeDown)
+        );
         assert_eq!(KEY_BACK, 158);
         assert_eq!(KEY_HOMEPAGE, 172);
         assert_eq!(KEY_POWER, 116);

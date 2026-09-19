@@ -95,15 +95,6 @@ pub enum AtongxIface {
 }
 
 impl AtongxIface {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Keyboard => "keyboard",
-            Self::Mouse => "mouse",
-            Self::Consumer => "consumer",
-            Self::System => "system",
-        }
-    }
-
     pub fn is_grab_iface(self) -> bool {
         matches!(self, Self::Consumer | Self::System)
     }
@@ -228,7 +219,9 @@ pub fn is_grab_keycode(code: u16) -> bool {
         .by_code
         .get(&code)
         .is_some_and(|(action, dispatch, iface, _, _)| {
-            action.is_evdev_dispatch() && *dispatch == AtongxDispatch::Global && iface.is_grab_iface()
+            action.is_evdev_dispatch()
+                && *dispatch == AtongxDispatch::Global
+                && iface.is_grab_iface()
         })
 }
 
@@ -261,10 +254,20 @@ mod tests {
         assert_eq!(action_for_evkey(226), Some(AtongxAction::Power));
         assert_eq!(action_for_evkey(111), Some(AtongxAction::Delete));
         assert_eq!(action_for_evkey(174), Some(AtongxAction::Back));
+        assert_eq!(spec.device.usb.vendor, "2320");
+        assert_eq!(spec.device.usb.product, "0912");
         assert!(name_matches("XING WEI 2.4G USB USB Composite Device"));
         assert!(name_matches("ATONGX Voice Remote"));
         assert!(name_matches("/dev/input/by-id/usb-XING_WEI_2.4G"));
         assert!(!name_matches("Logitech USB Keyboard"));
+        assert!(binding(AtongxAction::Voice)
+            .keys
+            .iter()
+            .any(|k| k.web_codes.iter().any(|c| c == "F9")));
+        assert!(binding(AtongxAction::Pointer)
+            .keys
+            .iter()
+            .any(|k| k.web_codes.iter().any(|c| c == "F2")));
     }
 
     #[test]
@@ -335,7 +338,10 @@ mod tests {
         assert!(!is_grab_keycode(66), "KEY_F8 is keyboard — do not grab");
         assert!(is_grab_keycode(217), "KEY_SEARCH is consumer — grab");
         assert!(is_grab_keycode(582), "KEY_VOICECOMMAND is consumer — grab");
-        assert!(is_grab_keycode(530), "KEY_TOUCHPAD_TOGGLE is consumer — grab");
+        assert!(
+            is_grab_keycode(530),
+            "KEY_TOUCHPAD_TOGGLE is consumer — grab"
+        );
         assert!(is_grab_keycode(158));
         assert!(is_grab_keycode(172));
     }
@@ -344,8 +350,24 @@ mod tests {
     fn every_binding_has_a_linux_key() {
         let actions: Vec<_> = map().bindings.iter().map(|b| b.action.as_str()).collect();
         for needed in [
-            "up", "down", "left", "right", "ok", "back", "home", "menu", "playpause", "pageUp",
-            "pageDown", "voice", "volumeUp", "volumeDown", "mute", "power", "pointer", "delete",
+            "up",
+            "down",
+            "left",
+            "right",
+            "ok",
+            "back",
+            "home",
+            "menu",
+            "playpause",
+            "pageUp",
+            "pageDown",
+            "voice",
+            "volumeUp",
+            "volumeDown",
+            "mute",
+            "power",
+            "pointer",
+            "delete",
         ] {
             assert!(actions.contains(&needed), "missing {needed}");
         }
@@ -358,7 +380,15 @@ mod tests {
         }
         assert!(map().device.product.contains("XING WEI"));
         assert!(map().device.aliases.iter().any(|a| a == "ATONGX"));
-        assert!(map().device.nodes.iter().any(|n| n.iface == AtongxIface::Keyboard && !n.grab));
-        assert!(map().device.nodes.iter().any(|n| n.iface == AtongxIface::Consumer && n.grab));
+        assert!(map()
+            .device
+            .nodes
+            .iter()
+            .any(|n| n.iface == AtongxIface::Keyboard && !n.grab));
+        assert!(map()
+            .device
+            .nodes
+            .iter()
+            .any(|n| n.iface == AtongxIface::Consumer && n.grab));
     }
 }
