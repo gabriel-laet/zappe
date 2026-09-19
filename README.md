@@ -229,7 +229,7 @@ Full button contract: [`src/lib/atongx-map.json`](src/lib/atongx-map.json) (sing
 | Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click. Evdev `KEY_F2` **60** / `KEY_TOUCHPAD_TOGGLE` **530** (locked). |
 | VOL +/−, Mute | Samsung TV Device Connect (`KEY_VOLUP` / `KEY_VOLDOWN` / `KEY_MUTE`). Pulse `pactl` if the TV is unreachable (one toast). |
 | Menu | Open Connect (returns to guide first if playing) |
-| Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
+| Power | Return to guide — never shuts the box down. Samsung wake is opt-in (`wakeOnPower` / `ZAPPE_SAMSUNG_WAKE_ON_POWER`); default stays guide-only. Never `KEY_SOURCE`. |
 
 Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper (local whisper.cpp, pt-BR): [`docs/voice.md`](docs/voice.md). Model: `~/.local/share/zappe/whisper/ggml-small.bin`. `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes are the login path — never on-TV typing.
 
@@ -264,6 +264,8 @@ Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsun
 | `ZAPPE_SAMSUNG_TOKEN` | Device Connect token (prefer `~/.local/share/zappe/samsung.json`) |
 | `ZAPPE_SAMSUNG_NAME` | Client name shown on the TV pair popup (default `Zappe`) |
 | `ZAPPE_SAMSUNG_DISABLE` | `1` skips Samsung and uses `pactl` only |
+| `ZAPPE_SAMSUNG_WAKE_ON_POWER` | `1` also wakes the Samsung on ATONGX Power (default off; guide return always happens) |
+| `ZAPPE_SAMSUNG_MAC` | TV MAC for Wake-on-LAN when `:8001` is down |
 | `ZAPPE_COMPANION_HOST` | public name on the QR (`zappe-tv.local`) |
 | `ZAPPE_COMPANION_PORT` | bind port (default try `80`, then `8780`) |
 | `ZAPPE_COMPANION_BIND` | bind address (default `0.0.0.0`) |

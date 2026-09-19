@@ -1,8 +1,8 @@
 //! ATONGX volume / mute: Samsung TV first, PulseAudio (`pactl`) fallback.
 //!
 //! Power and menu stay in `lib.rs` so they can talk to playback / the guide.
-//! Never power the box off from here. Never send Samsung `KEY_POWER` /
-//! `KEY_SOURCE` — those would blank HDMI instead of returning to the guide.
+//! This module never powers the box off and never sends Samsung `KEY_POWER` /
+//! `KEY_SOURCE`. Opt-in TV wake lives in `samsung.rs` (wake-only, not a toggle).
 
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -254,11 +254,7 @@ mod tests {
     fn test_cfg() -> SamsungConfig {
         SamsungConfig {
             host: "127.0.0.1".into(),
-            port: 8001,
-            secure_port: 8002,
-            token: None,
-            name: "Zappe".into(),
-            disabled: false,
+            ..SamsungConfig::appliance_default()
         }
     }
 

@@ -352,18 +352,23 @@ pub(crate) async fn remote_power_inner(app: &AppHandle) -> Result<String, String
         let playback = state.playback.lock().unwrap();
         playback.surface.clone()
     };
-    if surface == PlaybackSurface::Idle {
+    let result = if surface == PlaybackSurface::Idle {
         log::info!("ATONGX power on guide (not shutting down)");
-        return Ok("power:idle".into());
-    }
-    log::info!("ATONGX power — stop playback, return to guide");
-    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
-    let mut playback = state.playback.lock().unwrap();
-    playback::finish_return_to_guide(app, &mut *playback);
-    Ok("power:home".into())
+        "power:idle".to_string()
+    } else {
+        log::info!("ATONGX power — stop playback, return to guide");
+        playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
+        let mut playback = state.playback.lock().unwrap();
+        playback::finish_return_to_guide(app, &mut *playback);
+        "power:home".to_string()
+    };
+    // Opt-in Samsung wake; never blocks or fails guide return.
+    crate::samsung::spawn_wake_on_power();
+    Ok(result)
 }
 
 /// Power never shuts the box down. If something is playing, return to the guide.
+/// Samsung wake is opt-in (`wakeOnPower` / `ZAPPE_SAMSUNG_WAKE_ON_POWER`) and wake-only.
 #[tauri::command]
 async fn remote_power(app: AppHandle) -> Result<String, String> {
     remote_power_inner(&app).await
