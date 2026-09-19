@@ -44,7 +44,11 @@ pub const KEY_CONTEXT_MENU: u16 = 0x1b6;
 pub const KEY_RED: u16 = 0x18e;
 pub const KEY_TOUCHPAD_TOGGLE: u16 = 0x212;
 pub const KEY_VOICECOMMAND: u16 = 0x246;
+/// Living-room alias: Linux has no `KEY_MIC`. ATONGX dumps often label the red
+/// button Voice / `KEY_VOICECOMMAND`. Rematch with `ZAPPE_HID_VOICE_CODE`.
+pub const KEY_MIC: u16 = KEY_VOICECOMMAND;
 pub const KEY_ASSISTANT: u16 = 0x247;
+pub const KEY_DICTATE: u16 = 0x24a;
 
 const DEBOUNCE: Duration = Duration::from_millis(280);
 const RESCAN: Duration = Duration::from_secs(2);
@@ -65,9 +69,28 @@ pub enum HidAction {
     Mute,
 }
 
+/// Parse `ZAPPE_HID_VOICE_CODE` (comma / space / semicolon separated).
+pub fn parse_voice_codes(raw: &str) -> Vec<u16> {
+    raw.split([',', ' ', ';'])
+        .filter_map(|p| p.trim().parse::<u16>().ok())
+        .collect()
+}
+
+/// Extra Voice evdev codes from `ZAPPE_HID_VOICE_CODE`.
+/// Use this when a live `evtest` dump disagrees with the built-in map.
+pub fn extra_voice_codes() -> Vec<u16> {
+    std::env::var("ZAPPE_HID_VOICE_CODE")
+        .ok()
+        .map(|s| parse_voice_codes(&s))
+        .unwrap_or_default()
+}
+
 /// Global / nest-control actions from the shared JSON map.
 /// D-pad / OK / PAGE stay `None` so they are never swallowed by evdev.
 pub fn action_for_keycode(code: u16) -> Option<HidAction> {
+    if extra_voice_codes().contains(&code) {
+        return Some(HidAction::Voice);
+    }
     use crate::atongx_map::AtongxAction;
     Some(match crate::atongx_map::action_for_evkey(code)? {
         AtongxAction::Back | AtongxAction::Delete => HidAction::Back,
@@ -341,7 +364,7 @@ mod linux {
                 }
             };
             for event in events {
-                let EventSummary::Key(_, key, 1) = event.destructure() else {
+                let EventSummary::Key(_, key, value) = event.destructure() else {
                     continue;
                 };
                 let code = key.0;
@@ -353,6 +376,19 @@ mod linux {
                 let Some(action) = action else {
                     continue;
                 };
+                if value == 0 {
+                    if action == HidAction::Voice {
+                        log::info!(
+                            "ATONGX evdev Voice release code={code} from {}",
+                            path.display()
+                        );
+                        let _ = app.emit("voice-release", ());
+                    }
+                    continue;
+                }
+                if value != 1 {
+                    continue;
+                }
                 if !should_dispatch(action, Instant::now()) {
                     continue;
                 }
@@ -450,6 +486,15 @@ mod tests {
         assert_eq!(KEY_POWER, 116);
         assert_eq!(KEY_ESC, 1);
         assert_eq!(KEY_HOME, 102);
+        assert_eq!(action_for_keycode(KEY_F8), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_F9), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_RECORD), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_VOICECOMMAND), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_MIC), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_ASSISTANT), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_DICTATE), Some(HidAction::Voice));
+        assert_eq!(KEY_MIC, KEY_VOICECOMMAND);
+        assert_eq!(KEY_VOICECOMMAND, 0x246);
     }
 
     #[test]
@@ -461,6 +506,7 @@ mod tests {
         assert_eq!(action_for_keycode(KEY_F8), Some(HidAction::Voice));
         assert_eq!(action_for_keycode(KEY_F9), Some(HidAction::Voice));
         assert_eq!(action_for_keycode(KEY_RED), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_DICTATE), Some(HidAction::Voice));
         assert_eq!(action_for_keycode(KEY_F2), Some(HidAction::Pointer));
         assert_eq!(
             action_for_keycode(KEY_TOUCHPAD_TOGGLE),
@@ -497,6 +543,10 @@ mod tests {
             Some(HidAction::Voice)
         );
         assert_eq!(
+            action_for_keyboard_passthrough(KEY_MIC),
+            Some(HidAction::Voice)
+        );
+        assert_eq!(
             action_for_keyboard_passthrough(KEY_F2),
             Some(HidAction::Pointer)
         );
@@ -504,6 +554,13 @@ mod tests {
         assert_eq!(action_for_keyboard_passthrough(KEY_PLAYPAUSE), None);
         assert_eq!(action_for_keyboard_passthrough(30), None); // KEY_A
         assert_eq!(action_for_keyboard_passthrough(103), None); // KEY_UP
+    }
+
+    #[test]
+    fn voice_code_env_rematch() {
+        assert_eq!(parse_voice_codes("404, 511"), vec![404, 511]);
+        assert_eq!(parse_voice_codes("582"), vec![582]);
+        assert!(parse_voice_codes("").is_empty());
     }
 
     #[test]

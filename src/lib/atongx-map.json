@@ -271,7 +271,7 @@
       "button": "Mic (red)",
       "action": "voice",
       "dispatch": "global",
-      "note": "Locked best-effort for the living-room ATONGX / XING WEI. G10S-class boards emit HID Consumer AC Search (KEY_SEARCH 217) or Voice Command 0x0CF → KEY_VOICECOMMAND (582). F8/F9/RECORD/RED/ASSISTANT/MICMUTE are aliases so an unmapped consumer press is not swallowed as Unknown. Confirm on zappe-tv with packaging/appliance/zappe-atongx-capture --mic-pointer and paste the EV_KEY + MSC_SCAN line back if it differs.",
+      "note": "Locked best-effort for the living-room ATONGX / XING WEI. G10S-class boards emit HID Consumer AC Search (KEY_SEARCH 217) or Voice Command 0x0CF → KEY_VOICECOMMAND (582). F8/F9/RECORD/RED/ASSISTANT/MICMUTE/DICTATE are aliases so an unmapped consumer press is not swallowed as Unknown. Linux has no KEY_MIC (alias of KEY_VOICECOMMAND). Rematch with ZAPPE_HID_VOICE_CODE. Confirm on zappe-tv with packaging/appliance/zappe-atongx-capture --mic-pointer and paste the EV_KEY + MSC_SCAN line back if it differs.",
       "keys": [
         {
           "name": "KEY_SEARCH",
@@ -285,11 +285,18 @@
           "code": 582,
           "iface": "consumer",
           "confidence": "locked",
-          "webCodes": []
+          "webCodes": ["Voice", "Microphone"]
         },
         {
           "name": "KEY_ASSISTANT",
           "code": 583,
+          "iface": "consumer",
+          "confidence": "alias",
+          "webCodes": ["LaunchAssistant"]
+        },
+        {
+          "name": "KEY_DICTATE",
+          "code": 586,
           "iface": "consumer",
           "confidence": "alias",
           "webCodes": []
@@ -299,7 +306,7 @@
           "code": 167,
           "iface": "consumer",
           "confidence": "alias",
-          "webCodes": []
+          "webCodes": ["MediaRecord"]
         },
         {
           "name": "KEY_MICMUTE",
