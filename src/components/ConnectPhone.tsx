@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -109,8 +109,17 @@ export function ConnectPhone({
     };
   }, [source]);
 
+  const harvestedForStatus = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!isCompanionConnected(session.status)) return;
+    if (!isCompanionConnected(session.status)) {
+      harvestedForStatus.current = null;
+      return;
+    }
+    // catalog-changed used to recreate onClose and re-enter this effect,
+    // stacking harvest_now + Chrome. One attempt per connected session.
+    if (harvestedForStatus.current === session.status) return;
+    harvestedForStatus.current = session.status;
     let timer = 0;
     const run = async () => {
       onConnected?.();

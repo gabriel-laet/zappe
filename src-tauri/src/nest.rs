@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
@@ -41,11 +42,24 @@ struct NestInner {
     /// PID of the nest gamescope we spawned (never the outer kiosk).
     nest_pid: Option<u32>,
     launched_by_zappe: bool,
+    mode: Option<NestMode>,
+}
+
+/// Held while harvest or login owns the hidden Chrome nest.
+pub struct BackgroundNestLease {
+    jobs: Arc<AtomicU32>,
+}
+
+impl Drop for BackgroundNestLease {
+    fn drop(&mut self) {
+        self.jobs.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 #[derive(Clone)]
 pub struct NestManager {
     inner: Arc<Mutex<NestInner>>,
+    background_jobs: Arc<AtomicU32>,
 }
 
 #[allow(dead_code)]
@@ -56,8 +70,24 @@ impl NestManager {
                 child: None,
                 nest_pid: None,
                 launched_by_zappe: false,
+                mode: None,
             })),
+            background_jobs: Arc::new(AtomicU32::new(0)),
         }
+    }
+
+    /// Cap hidden Chrome to one nest: harvest and login share this slot.
+    pub fn try_begin_background(&self) -> Option<BackgroundNestLease> {
+        self.background_jobs
+            .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| BackgroundNestLease {
+                jobs: self.background_jobs.clone(),
+            })
+    }
+
+    pub fn background_nest_active(&self) -> bool {
+        self.background_jobs.load(Ordering::SeqCst) > 0
     }
 
     pub async fn is_ready(&self) -> bool {
@@ -135,6 +165,7 @@ impl NestManager {
         }
         inner.nest_pid = None;
         inner.launched_by_zappe = false;
+        inner.mode = None;
     }
 
     async fn play_window_pids(&self) -> Vec<u32> {
@@ -162,9 +193,11 @@ impl NestManager {
             kill_child_and_profile_chrome(&mut child).await;
             inner.nest_pid = None;
             inner.launched_by_zappe = false;
+            inner.mode = None;
             return;
         }
         inner.nest_pid = None;
+        inner.mode = None;
         drop(inner);
 
         let mut signaled = false;
@@ -202,16 +235,12 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     std::fs::create_dir_all(&profile)
         .with_context(|| format!("create profile dir {}", profile.display()))?;
 
-    let already_running = !chrome_pids_for_profile(&profile).is_empty();
-    if already_running {
-        // Existing Chrome singleton: open the URL in that session (no second nest).
-        navigate_existing(&chrome, &profile, url, mode)?;
-        apply_mode(mode);
-        return Ok(());
-    }
-
+    // Hold the mutex across the spawn decision so two harvests cannot both
+    // see "no Chrome" and launch a second hidden Netflix window.
     let mut guard = inner.lock().await;
-    if guard.child.is_some() {
+    let already_running = guard.child.is_some() || !chrome_pids_for_profile(&profile).is_empty();
+    if already_running {
+        guard.mode = Some(mode);
         drop(guard);
         navigate_existing(&chrome, &profile, url, mode)?;
         apply_mode(mode);
@@ -222,6 +251,7 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     guard.nest_pid = child.id();
     guard.child = Some(child);
     guard.launched_by_zappe = true;
+    guard.mode = Some(mode);
     drop(guard);
 
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
@@ -900,5 +930,19 @@ mod tests {
     async fn exit_play_without_child_does_not_panic() {
         let nest = NestManager::start();
         nest.exit_play().await;
+    }
+
+    #[test]
+    fn background_nest_is_single_flight() {
+        let nest = NestManager::start();
+        let first = nest.try_begin_background().expect("first background nest");
+        assert!(nest.background_nest_active());
+        assert!(
+            nest.try_begin_background().is_none(),
+            "harvest must not spawn while login/harvest already owns the nest"
+        );
+        drop(first);
+        assert!(!nest.background_nest_active());
+        assert!(nest.try_begin_background().is_some());
     }
 }
