@@ -59,3 +59,5 @@ systemctl --user restart zappe.service
 ```
 
 Never commit a live `token`. `ZAPPE_SAMSUNG_HOST` / `ZAPPE_SAMSUNG_TOKEN` override the file. `ZAPPE_SAMSUNG_DISABLE=1` forces PulseAudio.
+
+ATONGX Power stays **return to the guide** unless you set `"wakeOnPower": true` (or `ZAPPE_SAMSUNG_WAKE_ON_POWER=1`). Optional `"mac"` / `ZAPPE_SAMSUNG_MAC` enables Wake-on-LAN when the TV is fully off. See [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).

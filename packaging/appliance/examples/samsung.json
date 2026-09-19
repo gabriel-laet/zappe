@@ -1,7 +1,8 @@
 {
-  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/samsung.json. Token is written on Device Connect pair; never commit a live token.",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/samsung.json. Token is written on Device Connect pair; never commit a live token. wakeOnPower is off by default (Power returns to the guide only). Set true and optional mac (AA:BB:CC:DD:EE:FF) to wake the Samsung; see docs/samsung-tv.md.",
   "host": "192.168.3.6",
   "port": 8001,
   "securePort": 8002,
-  "name": "Zappe"
+  "name": "Zappe",
+  "wakeOnPower": false
 }

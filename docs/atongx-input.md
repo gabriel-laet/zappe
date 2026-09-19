@@ -6,13 +6,13 @@ Source of truth: [`src/lib/atongx-map.json`](../src/lib/atongx-map.json) (physic
 
 When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough for Back / Home: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
 
-The appliance path for leaving the nest is an **evdev watcher** (`src-tauri/src/hid.rs`) on the XING WEI nodes. It calls the same `return_to_guide` / `remote_back_inner` / `remote_power_inner` logic. Back, Home, and Power **always** exit the nest / OTA and show the guide. Power never shuts the box down.
+The appliance path for leaving the nest is an **evdev watcher** (`src-tauri/src/hid.rs`) on the XING WEI nodes. It calls the same `return_to_guide` / `remote_back_inner` / `remote_power_inner` logic. Back, Home, and Power **always** exit the nest / OTA and show the guide. Power never shuts the box down. Samsung wake on Power is opt-in — see [`samsung-tv.md`](samsung-tv.md).
 
 While the Chrome nest is playing, D-pad + OK + Space are grabbed as compositor shortcuts and **injected into the nest** — see [`nest-input.md`](nest-input.md). They are released when the guide returns so shelves keep focus. The evdev keyboard node is **not** grabbed, so those keys can still reach Chrome after injection.
 
 | Button on device | Action | This PR |
 | --- | --- | --- |
-| Power | `power` | Stop playback and return to the guide. Never shuts the box down. |
+| Power | `power` | Stop playback and return to the guide. Never shuts the box down. Opt-in Samsung wake (`wakeOnPower` / `ZAPPE_SAMSUNG_WAKE_ON_POWER`) — default is guide-only. |
 | Play / Pause | `playpause` | Space into the Chrome nest (`wtype -k` / xdotool on nest `DISPLAY`), or Space into mpv for OTA |
 | Mouse-cursor toggle | `pointer` | Guide: `tv-pointer-on` CSS. Nest: focus gamescope so ATONGX event4 is a real cursor; OK clicks |
 | D-pad ↑ ↓ ← → | `up` `down` `left` `right` | Guide focus; arrows into Chrome while the nest is up |
@@ -42,7 +42,7 @@ Match is by name / by-id (`XING WEI`, `XING_WEI`, `ATONGX`, `2.4G USB`), overrid
 | --- | --- | --- | --- |
 | Back | `KEY_BACK`, also `KEY_ESC` / `KEY_EXIT` / `KEY_DELETE` / `KEY_BACKSPACE` | **158** (1 / 174 / 111 / 14) | Consumer `KEY_BACK` is the usual ATONGX “BrowserBack”. Keyboard Escape is a fallback (not grabbed). |
 | Home | `KEY_HOMEPAGE`, also `KEY_HOME` | **172** (102) | Consumer `KEY_HOMEPAGE` is “BrowserHome”. |
-| Power | `KEY_POWER`, also `KEY_POWER2` / `KEY_SLEEP` | **116** (226 / 142) | Return to guide only — never ACPI shutdown. |
+| Power | `KEY_POWER`, also `KEY_POWER2` / `KEY_SLEEP` | **116** (226 / 142) | Return to guide — never ACPI shutdown. Samsung `KEY_POWER` / WoL only if wake-on-power is enabled. |
 | Mic (red) | `KEY_SEARCH`, `KEY_VOICECOMMAND` (**locked**, alias `KEY_MIC`); aliases F8 / F9 / RECORD / RED / ASSISTANT / MICMUTE / DICTATE | **217** / **582** | Consumer Search / Voice Command (`0x0CF`). Linux has no `KEY_MIC`. Rematch with `ZAPPE_HID_VOICE_CODE` if `evtest` prints another code. |
 | Pointer | `KEY_F2`, `KEY_TOUCHPAD_TOGGLE` (**locked**); aliases F6 / F7 / F10 | **60** / **530** | Keyboard F2 is the living-room contract. Some boards toggle gyro in firmware and send no EV_KEY. |
 
