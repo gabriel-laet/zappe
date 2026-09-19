@@ -1,14 +1,22 @@
 mod a11y;
+mod atongx;
+mod branding;
 mod catalog;
+mod companion;
 mod harvest;
+mod hid;
 mod nest;
+mod nest_input;
 mod ota;
 mod paths;
-mod playback;
+pub(crate) mod playback;
+pub(crate) mod remote;
+mod samsung;
 mod setup;
 mod skill;
 mod skills;
 mod teach;
+mod voice;
 mod wm;
 
 use std::sync::Mutex;
@@ -16,25 +24,30 @@ use std::sync::Mutex;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
+use branding::BrandingView;
 use catalog::{CatalogStore, CatalogView};
+use companion::{Hub as CompanionHub, SessionView as CompanionSession};
 use nest::{NestManager, NestStatus};
+use remote::{remote_mute, remote_volume};
+use voice::VoiceOutcome;
 
 pub use catalog::ShelfStatus;
 pub use harvest::{HarvestOutcome, HarvestRequest};
-use ota::{ota_available, OtaChannel};
+use ota::{ota_available, OtaChannel, OtaStatus};
 use playback::{GuideFocus, PlaybackController, PlaybackStatus, PlaybackSurface};
 use setup::{load_setup, save_setup, SetupState};
 use skill::NETFLIX_CONTINUE_WATCHING_V1;
 use skills::Service;
 use teach::{TeachMode, TeachState};
 
-struct AppState {
+pub(crate) struct AppState {
     nest: NestManager,
     ota: ota::OtaSession,
     playback: Mutex<PlaybackController>,
     setup: Mutex<SetupState>,
     catalog: CatalogStore,
     teach: TeachMode,
+    companion: CompanionHub,
 }
 
 #[derive(Serialize)]
@@ -91,6 +104,24 @@ async fn chrome_status(state: State<'_, AppState>) -> Result<ChromeStatus, Strin
 }
 
 #[tauri::command]
+async fn companion_session(state: State<'_, AppState>) -> Result<CompanionSession, String> {
+    Ok(state.companion.view().await)
+}
+
+#[tauri::command]
+async fn companion_begin(state: State<'_, AppState>) -> Result<CompanionSession, String> {
+    Ok(state.companion.begin().await)
+}
+
+#[tauri::command]
+async fn companion_select_source(
+    state: State<'_, AppState>,
+    source: String,
+) -> Result<CompanionSession, String> {
+    Ok(state.companion.select_source(&source).await)
+}
+
+#[tauri::command]
 fn ota_enabled() -> bool {
     ota_available()
 }
@@ -101,8 +132,23 @@ fn list_ota_channels() -> Result<Vec<OtaChannel>, String> {
 }
 
 #[tauri::command]
+fn ota_status() -> OtaStatus {
+    ota::ota_status()
+}
+
+#[tauri::command]
 fn get_catalog(state: State<AppState>) -> CatalogView {
     state.catalog.view(state.teach.view())
+}
+
+#[tauri::command]
+fn get_branding() -> BrandingView {
+    branding::load_branding()
+}
+
+#[tauri::command]
+fn voice_listen() -> VoiceOutcome {
+    voice::listen()
 }
 
 #[tauri::command]
@@ -118,6 +164,13 @@ async fn harvest_now(
 ) -> Result<HarvestOutcome, String> {
     let id = skill_id.unwrap_or_else(|| NETFLIX_CONTINUE_WATCHING_V1.to_string());
     let surface = state.playback.lock().unwrap().surface.clone();
+    if let Err(err) = state
+        .catalog
+        .mark_harvesting("continue", &id, "Continue watching")
+    {
+        log::warn!("catalog harvesting mark failed: {err:#}");
+    }
+    let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
     let outcome = harvest::run_harvest(
         &state.nest,
         &state.catalog,
@@ -126,6 +179,7 @@ async fn harvest_now(
         HarvestRequest::for_skill(id),
     )
     .await;
+    // Always emit after harvest (ok / empty / error / teach) so Home shelves refresh.
     let _ = app.emit("catalog-changed", state.catalog.view(state.teach.view()));
     Ok(outcome)
 }
@@ -182,23 +236,16 @@ async fn play_ota(
     conf: String,
     focus: GuideFocus,
 ) -> Result<(), String> {
-    {
-        let mut playback = state.playback.lock().unwrap();
-        playback.focus_snapshot = Some(focus);
-        if let Some(win) = app.get_webview_window("main") {
-            let _ = win.hide();
-        }
-    }
-    let conf_path = std::path::PathBuf::from(conf);
-    if let Err(err) = state.ota.play(&channel, &conf_path).await {
-        playback::restore_guide_fullscreen(&app);
-        return Err(err.to_string());
-    }
-    wm::nudge_mpv_fullscreen(state.ota.latest_mpv_pid());
-    let mut playback = state.playback.lock().unwrap();
-    playback.surface = PlaybackSurface::Ota;
-    let _ = app.emit("playback-changed", playback.status());
-    Ok(())
+    playback::begin_ota(
+        &app,
+        &state.nest,
+        &state.ota,
+        &state.playback,
+        channel,
+        std::path::PathBuf::from(conf),
+        focus,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -206,8 +253,8 @@ fn playback_status(state: State<AppState>) -> PlaybackStatus {
     state.playback.lock().unwrap().status()
 }
 
-#[tauri::command]
-async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+pub(crate) async fn remote_back_inner(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
     let surface = {
         let playback = state.playback.lock().unwrap();
         playback.surface.clone()
@@ -217,15 +264,42 @@ async fn remote_back(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     }
     playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
     let mut playback = state.playback.lock().unwrap();
-    playback::finish_return_to_guide(&app, &mut *playback);
+    playback::finish_return_to_guide(app, &mut *playback);
     Ok(())
+}
+
+#[tauri::command]
+async fn remote_back(app: AppHandle) -> Result<(), String> {
+    remote_back_inner(&app).await
 }
 
 #[tauri::command]
 fn remote_play_pause(state: State<'_, AppState>) -> Result<(), String> {
     let playback = state.playback.lock().unwrap();
-    playback::toggle_play_pause(&state.nest, &*playback);
+    playback::toggle_play_pause(&state.nest, &state.ota, &*playback);
     Ok(())
+}
+
+/// Air-mouse cursor mode: CSS on the guide, real pointer + click in the nest.
+pub(crate) fn remote_pointer_inner(app: &AppHandle) -> bool {
+    let Some(on) = nest_input::toggle_pointer_debounced() else {
+        return nest_input::pointer_mode();
+    };
+    let surface = {
+        let state = app.state::<AppState>();
+        let playback = state.playback.lock().unwrap();
+        playback.surface.clone()
+    };
+    if surface == PlaybackSurface::Chrome {
+        nest_input::on_pointer_toggled(on);
+    }
+    let _ = app.emit("guide-pointer", on);
+    on
+}
+
+#[tauri::command]
+fn remote_pointer(app: AppHandle) -> Result<bool, String> {
+    Ok(remote_pointer_inner(&app))
 }
 
 #[tauri::command]
@@ -243,6 +317,38 @@ async fn remote_home(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
     Ok(())
 }
 
+pub(crate) async fn remote_power_inner(app: &AppHandle) -> Result<String, String> {
+    let state = app.state::<AppState>();
+    let surface = {
+        let playback = state.playback.lock().unwrap();
+        playback.surface.clone()
+    };
+    if surface == PlaybackSurface::Idle {
+        log::info!("ATONGX power on guide (not shutting down)");
+        return Ok("power:idle".into());
+    }
+    log::info!("ATONGX power — stop playback, return to guide");
+    playback::stop_playback_surface(&state.nest, &state.ota, surface).await;
+    let mut playback = state.playback.lock().unwrap();
+    playback::finish_return_to_guide(app, &mut *playback);
+    Ok("power:home".into())
+}
+
+/// Power never shuts the box down. If something is playing, return to the guide.
+#[tauri::command]
+async fn remote_power(app: AppHandle) -> Result<String, String> {
+    remote_power_inner(&app).await
+}
+
+/// Menu opens Connect. If the nest / mpv is up, return to the guide first.
+#[tauri::command]
+async fn remote_menu(app: AppHandle) -> Result<String, String> {
+    log::info!("ATONGX menu");
+    return_to_guide(&app).await;
+    let _ = app.emit("guide-menu", ());
+    Ok("menu".into())
+}
+
 #[tauri::command]
 fn open_onepassword_extension(
     app: AppHandle,
@@ -255,7 +361,7 @@ fn open_onepassword_extension(
     Ok(())
 }
 
-async fn return_to_guide(app: &AppHandle) {
+pub(crate) async fn return_to_guide(app: &AppHandle) {
     let state = app.state::<AppState>();
     let surface = {
         let playback = state.playback.lock().unwrap();
@@ -282,28 +388,24 @@ pub fn run() {
     let nest = NestManager::start();
     let catalog = CatalogStore::load();
     let teach = TeachMode::new();
+    let companion = CompanionHub::new(nest.clone());
+    let companion_boot = companion.clone();
+    tauri::async_runtime::spawn(async move {
+        companion::boot(companion_boot).await;
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    use tauri_plugin_global_shortcut::ShortcutState;
-                    if event.state == ShortcutState::Pressed {
-                        let handle = app.clone();
-                        tauri::async_runtime::spawn(async move {
-                            return_to_guide(&handle).await;
-                        });
-                    }
-                })
-                .build(),
-        )
+        .plugin(atongx::plugin())
         .setup(|app| {
-            use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Shortcut};
-            let esc = Shortcut::new(None, Code::Escape);
-            let back = Shortcut::new(None, Code::BrowserBack);
-            let _ = app.global_shortcut().register(esc);
-            let _ = app.global_shortcut().register(back);
+            atongx::register(app.handle());
+            hid::start(app.handle().clone());
+            tauri::async_runtime::spawn(async {
+                crate::samsung::startup_probe().await;
+            });
+            if let Err(err) = skill::install_bundled_skills() {
+                log::warn!("could not plant bundled harvest skills: {err:#}");
+            }
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_decorations(false);
@@ -319,15 +421,22 @@ pub fn run() {
             setup: Mutex::new(setup),
             catalog,
             teach,
+            companion,
         })
         .invoke_handler(tauri::generate_handler![
             get_setup_state,
             update_setup,
             complete_setup,
             chrome_status,
+            companion_session,
+            companion_begin,
+            companion_select_source,
             ota_enabled,
             list_ota_channels,
+            ota_status,
             get_catalog,
+            get_branding,
+            voice_listen,
             auto_harvest_enabled,
             harvest_now,
             begin_teach,
@@ -338,7 +447,12 @@ pub fn run() {
             playback_status,
             remote_back,
             remote_play_pause,
+            remote_pointer,
             remote_home,
+            remote_volume,
+            remote_mute,
+            remote_power,
+            remote_menu,
             open_onepassword_extension,
         ])
         .build(tauri::generate_context!())
@@ -356,4 +470,9 @@ pub fn run() {
 /// CLI / tests: harvest without starting the Tauri shell.
 pub async fn harvest_cli(req: HarvestRequest) -> anyhow::Result<HarvestOutcome> {
     harvest::run_cli(req).await
+}
+
+/// Standalone phone companion (`zappe-companion`).
+pub async fn run_companion() -> anyhow::Result<()> {
+    companion::run_standalone().await
 }

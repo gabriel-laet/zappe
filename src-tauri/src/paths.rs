@@ -19,8 +19,51 @@ pub fn catalog_path() -> PathBuf {
     data_dir().join("catalog.json")
 }
 
+/// User branding config. Not shipped in the repo — drop this on the appliance.
+pub fn branding_path() -> PathBuf {
+    data_dir().join("branding.json")
+}
+
 pub fn skills_override_dir() -> PathBuf {
     data_dir().join("skills")
+}
+
+/// Directories that may contain harvest skill YAML/JSON on the appliance.
+///
+/// The binary embeds `netflix.continue_watching.v1`; these paths are the
+/// install / override fallbacks when someone drops sibling skills or when
+/// the updater copies `skills/` into the data dir.
+pub fn skill_search_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Ok(explicit) = std::env::var("ZAPPE_SKILLS_DIR") {
+        if !explicit.trim().is_empty() {
+            dirs.push(PathBuf::from(explicit));
+        }
+    }
+    dirs.push(skills_override_dir());
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            dirs.push(dir.join("skills"));
+            if let Some(parent) = dir.parent() {
+                dirs.push(parent.join("share/zappe/skills"));
+            }
+        }
+    }
+    if let Ok(src) = std::env::var("ZAPPE_SRC") {
+        dirs.push(PathBuf::from(src).join("skills"));
+    }
+    dirs.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../skills"));
+    dirs
+}
+
+/// Live device-code session (no passwords). Written by the companion.
+pub fn companion_session_path() -> PathBuf {
+    data_dir().join("companion-session.json")
+}
+
+/// Per-source auth flags (Netflix / Prime / Disney+ / YouTube).
+pub fn auth_sources_path() -> PathBuf {
+    data_dir().join("auth-sources.json")
 }
 
 pub fn ensure_data_dir() -> std::io::Result<PathBuf> {
@@ -42,6 +85,25 @@ mod tests {
         assert_eq!(
             profile_dir(),
             PathBuf::from("/tmp/zappe-test-paths/chrome-profile")
+        );
+        assert_eq!(
+            branding_path(),
+            PathBuf::from("/tmp/zappe-test-paths/branding.json")
+        );
+        assert_eq!(
+            skills_override_dir(),
+            PathBuf::from("/tmp/zappe-test-paths/skills")
+        );
+        let search = skill_search_dirs();
+        assert!(search.iter().any(|p| p == &skills_override_dir()));
+        assert!(search.iter().any(|p| p.ends_with("skills")));
+        assert_eq!(
+            companion_session_path(),
+            PathBuf::from("/tmp/zappe-test-paths/companion-session.json")
+        );
+        assert_eq!(
+            auth_sources_path(),
+            PathBuf::from("/tmp/zappe-test-paths/auth-sources.json")
         );
         match prev {
             Some(v) => std::env::set_var("ZAPPE_DATA_DIR", v),

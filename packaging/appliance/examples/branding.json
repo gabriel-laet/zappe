@@ -1,0 +1,19 @@
+{
+  "_example": true,
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/branding.json. Put your own logo.png next to it. Do not commit personal brand assets to this repo.",
+  "name": "My TV",
+  "accent": "#E85A1B",
+  "logo": "logo.png",
+  "splash": "logo.png",
+  "idle": {
+    "mode": "screensaver",
+    "asset": "logo.png",
+    "timeoutSeconds": 120,
+    "animation": "soft-breathe"
+  },
+  "theme": {
+    "style": "apple-tv",
+    "background": "#000000",
+    "focusRing": "subtle-scale"
+  }
+}

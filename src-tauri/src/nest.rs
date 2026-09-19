@@ -20,6 +20,8 @@ pub enum NestMode {
     Harvest,
     /// Fullscreen nest for watching.
     Play,
+    /// Couch login: never `-f`, hide immediately, keep the guide on HDMI.
+    Login,
 }
 
 #[derive(Clone, Debug, serde::Serialize)]
@@ -36,6 +38,8 @@ pub struct NestStatus {
 
 struct NestInner {
     child: Option<Child>,
+    /// PID of the nest gamescope we spawned (never the outer kiosk).
+    nest_pid: Option<u32>,
     launched_by_zappe: bool,
 }
 
@@ -50,6 +54,7 @@ impl NestManager {
         Self {
             inner: Arc::new(Mutex::new(NestInner {
                 child: None,
+                nest_pid: None,
                 launched_by_zappe: false,
             })),
         }
@@ -100,20 +105,24 @@ impl NestManager {
     }
 
     pub async fn hide(&self) {
-        let pids = nest_window_pids();
+        let pids = self.play_window_pids().await;
         wm::nudge_nest_hide(pids.first().copied());
     }
 
     pub async fn show_fullscreen(&self) {
-        let pids = nest_window_pids();
+        let pids = self.play_window_pids().await;
         wm::nudge_nest_show(pids.first().copied());
+        crate::nest_input::focus_nest_on_host();
     }
 
-    /// Best-effort HID into the nest (Space / Escape). Teach-mode will record this later.
+    /// Best-effort HID into the nest (arrows / OK / Space / Escape).
+    /// Targets Chrome's gamescope DISPLAY — see `nest_input`.
     pub async fn send_key(&self, key: &str) {
-        let pids = nest_window_pids();
-        wm::nudge_nest_show(pids.first().copied());
-        send_key_best_effort(key);
+        crate::nest_input::inject_key(key);
+    }
+
+    pub async fn send_click(&self) {
+        crate::nest_input::inject_click();
     }
 
     pub async fn shutdown_if_owned(&self) {
@@ -122,10 +131,63 @@ impl NestManager {
             return;
         }
         if let Some(mut child) = inner.child.take() {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
+            kill_child_and_profile_chrome(&mut child).await;
         }
+        inner.nest_pid = None;
         inner.launched_by_zappe = false;
+    }
+
+    async fn play_window_pids(&self) -> Vec<u32> {
+        let inner = self.inner.lock().await;
+        if let Some(pid) = inner
+            .nest_pid
+            .filter(|p| pid_alive(*p) && is_safe_nest_pid(*p))
+        {
+            return vec![pid];
+        }
+        drop(inner);
+        nest_window_pids()
+    }
+
+    /// Hide, then kill the nest gamescope (and leftover profile Chrome).
+    /// Never signals the outer kiosk gamescope (`gamescope -- zappe`).
+    pub async fn exit_play(&self) {
+        let mut inner = self.inner.lock().await;
+        let owned_pid = inner.nest_pid;
+        if let Some(pid) = owned_pid.filter(|p| is_safe_nest_pid(*p)) {
+            log::info!("ATONGX nest exit — hide/kill child gamescope pid={pid}");
+            wm::nudge_nest_hide(Some(pid));
+        }
+        if let Some(mut child) = inner.child.take() {
+            kill_child_and_profile_chrome(&mut child).await;
+            inner.nest_pid = None;
+            inner.launched_by_zappe = false;
+            return;
+        }
+        inner.nest_pid = None;
+        drop(inner);
+
+        let mut signaled = false;
+        for pid in nest_gamescope_pids() {
+            if !is_safe_nest_pid(pid) {
+                log::warn!("refusing to signal gamescope pid {pid} (self/kiosk/ancestor)");
+                continue;
+            }
+            log::info!("ATONGX nest exit — hide/kill nest gamescope pid={pid}");
+            wm::nudge_nest_hide(Some(pid));
+            signal_term(pid);
+            signaled = true;
+        }
+        if !signaled {
+            self.hide().await;
+        }
+        let ancestors = ancestor_pids();
+        let self_pid = std::process::id();
+        for pid in chrome_pids_for_profile(&profile_dir()) {
+            if is_safe_pid(pid, self_pid, &ancestors) {
+                signal_term(pid);
+            }
+        }
     }
 }
 
@@ -143,7 +205,7 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     let already_running = !chrome_pids_for_profile(&profile).is_empty();
     if already_running {
         // Existing Chrome singleton: open the URL in that session (no second nest).
-        navigate_existing(&chrome, &profile, url)?;
+        navigate_existing(&chrome, &profile, url, mode)?;
         apply_mode(mode);
         return Ok(());
     }
@@ -151,12 +213,13 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
     let mut guard = inner.lock().await;
     if guard.child.is_some() {
         drop(guard);
-        navigate_existing(&chrome, &profile, url)?;
+        navigate_existing(&chrome, &profile, url, mode)?;
         apply_mode(mode);
         return Ok(());
     }
 
     let child = spawn_nest(&chrome, &profile, url, mode)?;
+    guard.nest_pid = child.id();
     guard.child = Some(child);
     guard.launched_by_zappe = true;
     drop(guard);
@@ -169,8 +232,14 @@ async fn open_url_inner(inner: &Arc<Mutex<NestInner>>, url: &str, mode: NestMode
 fn apply_mode(mode: NestMode) {
     let pids = nest_window_pids();
     match mode {
-        NestMode::Harvest => wm::nudge_nest_hide(pids.first().copied()),
-        NestMode::Play => wm::nudge_nest_show(pids.first().copied()),
+        NestMode::Harvest | NestMode::Login => {
+            wm::nudge_nest_hide(pids.first().copied());
+            wm::nudge_guide_fullscreen(None);
+        }
+        NestMode::Play => {
+            wm::nudge_nest_show(pids.first().copied());
+            crate::nest_input::focus_nest_on_host();
+        }
     }
 }
 
@@ -206,12 +275,17 @@ fn spawn_nest(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Resul
         .env("ACCESSIBILITY_ENABLED", "1")
         .env("GTK_A11Y", "atspi");
 
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
+
     cmd.spawn()
         .with_context(|| format!("spawn nest {}", argv[0]))
 }
 
-fn navigate_existing(chrome: &Path, profile: &Path, url: &str) -> Result<()> {
-    let args = chrome_args(profile, Some(url));
+fn navigate_existing(chrome: &Path, profile: &Path, url: &str, mode: NestMode) -> Result<()> {
+    let args = chrome_args_for_mode(profile, Some(url), mode);
     if !has_no_cdp_flags(&args) {
         return Err(anyhow!(
             "refusing to launch Chrome with automation/CDP flags"
@@ -245,12 +319,15 @@ pub struct NestLaunch {
 impl NestLaunch {
     pub fn new(chrome: PathBuf, profile: PathBuf, url: Option<String>, mode: NestMode) -> Self {
         let (width, height) = nest_size();
+        // Harvest / login must not spawn a second gamescope: on the appliance
+        // kiosk that steals HDMI/DRM. Play still wraps Chrome when available.
+        let gamescope = match mode {
+            NestMode::Harvest | NestMode::Login => None,
+            NestMode::Play if prefer_gamescope() => find_gamescope(),
+            NestMode::Play => None,
+        };
         Self {
-            gamescope: if prefer_gamescope() {
-                find_gamescope()
-            } else {
-                None
-            },
+            gamescope,
             chrome,
             profile,
             url,
@@ -262,30 +339,37 @@ impl NestLaunch {
 
     pub fn argv(&self) -> Vec<String> {
         let mut chrome_cmd = vec![self.chrome.display().to_string()];
-        chrome_cmd.extend(chrome_args(&self.profile, self.url.as_deref()));
+        chrome_cmd.extend(chrome_args_for_mode(
+            &self.profile,
+            self.url.as_deref(),
+            self.mode,
+        ));
 
-        if let Some(gs) = &self.gamescope {
-            let mut args = vec![
-                gs.display().to_string(),
-                "-W".into(),
-                self.width.to_string(),
-                "-H".into(),
-                self.height.to_string(),
-            ];
-            if self.mode == NestMode::Play {
-                args.push("-f".into());
+        // Safety net: never wrap harvest/login in gamescope even if the
+        // struct was built by hand with a gamescope path (tests / callers).
+        if !self.mode.is_background() {
+            if let Some(gs) = &self.gamescope {
+                let mut args = vec![
+                    gs.display().to_string(),
+                    "-W".into(),
+                    self.width.to_string(),
+                    "-H".into(),
+                    self.height.to_string(),
+                ];
+                if self.mode == NestMode::Play {
+                    args.push("-f".into());
+                }
+                args.push("--".into());
+                args.extend(chrome_cmd);
+                return args;
             }
-            args.push("--".into());
-            args.extend(chrome_cmd);
-            args
-        } else {
             if prefer_gamescope() {
                 log::warn!(
                     "gamescope not found; launching Chrome directly. Install gamescope for the living-room nest."
                 );
             }
-            chrome_cmd
         }
+        chrome_cmd
     }
 
     pub fn has_no_cdp_flags(&self) -> bool {
@@ -293,7 +377,17 @@ impl NestLaunch {
     }
 }
 
+impl NestMode {
+    pub fn is_background(self) -> bool {
+        matches!(self, Self::Harvest | Self::Login)
+    }
+}
+
 pub fn chrome_args(profile: &Path, url: Option<&str>) -> Vec<String> {
+    chrome_args_for_mode(profile, url, NestMode::Play)
+}
+
+pub fn chrome_args_for_mode(profile: &Path, url: Option<&str>, mode: NestMode) -> Vec<String> {
     let mut args = vec![
         format!("--user-data-dir={}", profile.display()),
         "--no-first-run".into(),
@@ -301,6 +395,13 @@ pub fn chrome_args(profile: &Path, url: Option<&str>) -> Vec<String> {
         "--disable-session-crashed-bubble".into(),
         "--force-renderer-accessibility".into(),
     ];
+    if mode.is_background() {
+        // Stay off the HDMI kiosk: no --kiosk / --start-fullscreen. Chrome
+        // starts minimized and parked off-screen when the compositor honors it.
+        args.push("--start-minimized".into());
+        args.push("--window-size=1280,720".into());
+        args.push("--window-position=-32000,-32000".into());
+    }
     if let Some(url) = url {
         args.push(url.to_string());
     }
@@ -401,6 +502,16 @@ pub fn find_gamescope() -> Option<PathBuf> {
     which("gamescope")
 }
 
+pub fn env_flag(name: &str) -> bool {
+    match std::env::var(name)
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Ok("1") | Ok("true") | Ok("yes") | Ok("on") => true,
+        _ => false,
+    }
+}
+
 pub fn prefer_gamescope() -> bool {
     match std::env::var("ZAPPE_NEST")
         .map(|s| s.to_ascii_lowercase())
@@ -416,15 +527,168 @@ pub fn chrome_pids_for_profile(profile: &Path) -> Vec<u32> {
     pgrep_f(&format!("user-data-dir={needle}"))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GamescopeRole {
+    Nest,
+    Kiosk,
+    Other,
+}
+
+/// Distinguish the Chrome nest from the outer kiosk (`gamescope -- zappe`).
+/// Nest cmdlines contain Chrome / user-data-dir; check those first because the
+/// profile path also includes the word "zappe".
+pub fn classify_gamescope_cmdline(cmdline: &str) -> GamescopeRole {
+    let joined = cmdline.replace(['\0', '\n'], " ");
+    let lower = joined.to_ascii_lowercase();
+    if !lower.contains("gamescope") {
+        return GamescopeRole::Other;
+    }
+    if lower.contains("google-chrome")
+        || lower.contains("chromium")
+        || lower.contains("user-data-dir")
+    {
+        return GamescopeRole::Nest;
+    }
+    if looks_like_kiosk_payload(&lower) {
+        return GamescopeRole::Kiosk;
+    }
+    GamescopeRole::Other
+}
+
+fn looks_like_kiosk_payload(cmd: &str) -> bool {
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    if let Some(last) = tokens.last() {
+        let base = last.rsplit('/').next().unwrap_or(last);
+        if base == "zappe" {
+            return true;
+        }
+    }
+    cmd.contains("-- zappe")
+}
+
 pub fn nest_window_pids() -> Vec<u32> {
-    let mut pids = pgrep_f("gamescope");
+    // Never return the outer kiosk `gamescope -- zappe` — focusing that PID
+    // is a no-op and is why D-pad never reached Netflix. Kill paths also use
+    // this filter so Back/Home never signal the kiosk.
+    let mut pids: Vec<u32> = nest_gamescope_pids()
+        .into_iter()
+        .filter(|p| is_safe_nest_pid(*p))
+        .collect();
     if pids.is_empty() {
-        pids = chrome_pids_for_profile(&profile_dir());
+        let ancestors = ancestor_pids();
+        let self_pid = std::process::id();
+        pids = chrome_pids_for_profile(&profile_dir())
+            .into_iter()
+            .filter(|p| is_safe_pid(*p, self_pid, &ancestors))
+            .collect();
     }
     pids
 }
 
-fn nest_size() -> (u32, u32) {
+fn nest_gamescope_pids() -> Vec<u32> {
+    pids_matching_cmdline(|cmd| classify_gamescope_cmdline(cmd) == GamescopeRole::Nest)
+}
+
+fn pids_matching_cmdline(pred: impl Fn(&str) -> bool) -> Vec<u32> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let pid: u32 = match entry.file_name().to_str().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        let cmdline = match std::fs::read(entry.path().join("cmdline")) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => continue,
+        };
+        if pred(&cmdline) {
+            out.push(pid);
+        }
+    }
+    out
+}
+
+pub fn ancestor_pids() -> Vec<u32> {
+    ancestor_pids_from(std::process::id(), ppid_of)
+}
+
+pub fn ancestor_pids_from(start: u32, mut ppid_of: impl FnMut(u32) -> Option<u32>) -> Vec<u32> {
+    let mut pids = Vec::new();
+    let mut current = start;
+    for _ in 0..16 {
+        let Some(ppid) = ppid_of(current) else {
+            break;
+        };
+        if ppid == 0 || ppid == 1 || ppid == current || pids.contains(&ppid) {
+            break;
+        }
+        pids.push(ppid);
+        current = ppid;
+    }
+    pids
+}
+
+fn ppid_of(pid: u32) -> Option<u32> {
+    let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("PPid:") {
+            return rest.trim().parse().ok();
+        }
+    }
+    None
+}
+
+pub fn is_safe_pid(pid: u32, self_pid: u32, ancestors: &[u32]) -> bool {
+    pid != 0 && pid != 1 && pid != self_pid && !ancestors.contains(&pid)
+}
+
+pub fn is_safe_nest_pid(pid: u32) -> bool {
+    is_safe_pid(pid, std::process::id(), &ancestor_pids())
+}
+
+fn pid_alive(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{pid}")).exists()
+}
+
+fn signal_term(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status();
+}
+
+fn signal_term_group(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-TERM", &format!("-{pid}")])
+        .status();
+}
+
+async fn kill_child_and_profile_chrome(child: &mut Child) {
+    let nest_pid = child.id();
+    let chrome = chrome_pids_for_profile(&profile_dir());
+    if let Some(pid) = nest_pid.filter(|p| is_safe_nest_pid(*p)) {
+        signal_term_group(pid);
+        signal_term(pid);
+    }
+    let _ = child.start_kill();
+    match tokio::time::timeout(std::time::Duration::from_millis(1200), child.wait()).await {
+        Ok(_) => {}
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+        }
+    }
+    let ancestors = ancestor_pids();
+    let self_pid = std::process::id();
+    for pid in chrome {
+        if is_safe_pid(pid, self_pid, &ancestors) && pid_alive(pid) {
+            signal_term(pid);
+        }
+    }
+}
+
+pub(crate) fn nest_size() -> (u32, u32) {
     let width = std::env::var("ZAPPE_NEST_WIDTH")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -436,30 +700,8 @@ fn nest_size() -> (u32, u32) {
     (width, height)
 }
 
-fn send_key_best_effort(key: &str) {
-    let key = key.trim().to_ascii_lowercase();
-    let mapped = match key.as_str() {
-        "space" | "playpause" | "play-pause" => "space",
-        "escape" | "esc" | "back" => "Escape",
-        other => other,
-    };
-    for (bin, args) in [
-        ("wtype", vec![mapped.to_string()]),
-        (
-            "ydotool",
-            vec!["key".into(), format!("{mapped}:1"), format!("{mapped}:0")],
-        ),
-        ("xdotool", vec!["key".into(), mapped.to_string()]),
-    ] {
-        if which(bin).is_some() {
-            match std::process::Command::new(bin).args(&args).status() {
-                Ok(status) if status.success() => return,
-                Ok(status) => log::warn!("{bin} key send exited {status}"),
-                Err(err) => log::warn!("{bin} key send failed: {err}"),
-            }
-        }
-    }
-    log::info!("no wtype/ydotool/xdotool; nest key '{mapped}' not sent");
+pub fn send_media_key(key: &str) {
+    crate::nest_input::inject_key(key);
 }
 
 pub fn which(name: &str) -> Option<PathBuf> {
@@ -487,7 +729,7 @@ fn lookup_on_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn pgrep_f(needle: &str) -> Vec<u32> {
+pub(crate) fn pgrep_f(needle: &str) -> Vec<u32> {
     let output = std::process::Command::new("pgrep")
         .args(["-f", needle])
         .output();
@@ -572,18 +814,91 @@ mod tests {
     }
 
     #[test]
-    fn harvest_mode_is_not_fullscreen() {
-        let launch = NestLaunch {
-            gamescope: Some(PathBuf::from("/usr/bin/gamescope")),
-            chrome: PathBuf::from("/usr/bin/google-chrome-stable"),
-            profile: PathBuf::from("/tmp/zappe/chrome-profile"),
-            url: Some("https://www.netflix.com/browse".into()),
-            mode: NestMode::Harvest,
-            width: 1280,
-            height: 720,
-        };
+    fn login_and_harvest_share_invisible_chrome_path() {
+        for mode in [NestMode::Login, NestMode::Harvest] {
+            let launch = NestLaunch {
+                gamescope: Some(PathBuf::from("/usr/bin/gamescope")),
+                chrome: PathBuf::from("/usr/bin/google-chrome-stable"),
+                profile: PathBuf::from("/tmp/zappe/chrome-profile"),
+                url: Some("https://www.netflix.com/login".into()),
+                mode,
+                width: 1280,
+                height: 720,
+            };
+            let argv = launch.argv();
+            assert!(!argv.contains(&"-f".into()), "{mode:?} {argv:?}");
+            assert!(
+                !argv.iter().any(|a| a.contains("gamescope")),
+                "{mode:?} must not wrap a second gamescope: {argv:?}"
+            );
+            assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
+            assert!(argv.iter().any(|a| a == "--start-minimized"));
+            assert!(argv.iter().any(|a| a.contains("window-position=-32000")));
+            assert!(!argv
+                .iter()
+                .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
+            assert!(launch.has_no_cdp_flags());
+        }
+    }
+
+    #[test]
+    fn harvest_new_skips_gamescope() {
+        let launch = NestLaunch::new(
+            PathBuf::from("/usr/bin/google-chrome-stable"),
+            PathBuf::from("/tmp/zappe/chrome-profile"),
+            Some("https://www.netflix.com/browse".into()),
+            NestMode::Harvest,
+        );
+        assert!(launch.gamescope.is_none());
         let argv = launch.argv();
         assert!(!argv.contains(&"-f".into()));
+        assert!(!argv.iter().any(|a| a.contains("gamescope")));
+        assert_eq!(argv[0], "/usr/bin/google-chrome-stable");
+        assert!(argv.iter().any(|a| a == "--start-minimized"));
+        assert!(argv.iter().any(|a| a.contains("user-data-dir=")));
+        assert!(!argv
+            .iter()
+            .any(|a| a.contains("--kiosk") || a.contains("start-fullscreen")));
         assert!(launch.has_no_cdp_flags());
+    }
+
+    #[test]
+    fn nest_cmdline_is_not_the_kiosk() {
+        assert_eq!(
+            classify_gamescope_cmdline("gamescope -e -f -- zappe"),
+            GamescopeRole::Kiosk
+        );
+        assert_eq!(
+            classify_gamescope_cmdline("gamescope\0-e\0-f\0--\0/home/glaet/bin/zappe"),
+            GamescopeRole::Kiosk
+        );
+        assert_eq!(
+            classify_gamescope_cmdline(
+                "gamescope -W 1920 -H 1080 -f -- /usr/bin/google-chrome-stable --user-data-dir=/home/glaet/.local/share/zappe/chrome-profile"
+            ),
+            GamescopeRole::Nest
+        );
+        assert_eq!(classify_gamescope_cmdline("Hyprland"), GamescopeRole::Other);
+    }
+
+    #[test]
+    fn never_signal_self_or_kiosk_ancestors() {
+        let self_pid = 400;
+        let ancestors = ancestor_pids_from(400, |pid| match pid {
+            400 => Some(300), // outer gamescope
+            300 => Some(1),
+            _ => None,
+        });
+        assert_eq!(ancestors, vec![300]);
+        assert!(!is_safe_pid(300, self_pid, &ancestors));
+        assert!(!is_safe_pid(400, self_pid, &ancestors));
+        assert!(!is_safe_pid(1, self_pid, &ancestors));
+        assert!(is_safe_pid(501, self_pid, &ancestors));
+    }
+
+    #[tokio::test]
+    async fn exit_play_without_child_does_not_panic() {
+        let nest = NestManager::start();
+        nest.exit_play().await;
     }
 }

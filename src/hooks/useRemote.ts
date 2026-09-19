@@ -1,33 +1,97 @@
 import { useEffect } from "react";
-import { api } from "@/lib/tauri";
+import { toast } from "sonner";
+import { api, onGuidePointer, onTvControl } from "@/lib/tauri";
+import { classifyAtongx } from "@/lib/remoteMap";
+import { tvControlToast } from "@/lib/tvControl";
+
+function applyPointer(on?: boolean) {
+  if (typeof on === "boolean") {
+    document.documentElement.classList.toggle("tv-pointer-on", on);
+  } else {
+    document.documentElement.classList.toggle("tv-pointer-on");
+  }
+  const shown = document.documentElement.classList.contains("tv-pointer-on");
+  toast.message(shown ? "Ponteiro" : "Controle");
+}
 
 export function useRemote(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
     const onKey = (e: KeyboardEvent) => {
-      const code = e.code;
+      const action = classifyAtongx(e);
+      if (!action || action === "voice") return;
       if (
-        code === "Escape" ||
-        code === "BrowserBack" ||
-        code === "Backspace"
+        action === "up" ||
+        action === "down" ||
+        action === "left" ||
+        action === "right" ||
+        action === "ok" ||
+        action === "pageUp" ||
+        action === "pageDown"
       ) {
-        e.preventDefault();
+        return;
+      }
+
+      e.preventDefault();
+      if (action === "back" || action === "delete") {
         void api.remoteBack();
         return;
       }
-      if (code === "Home" || code === "BrowserHome") {
-        e.preventDefault();
+      if (action === "home") {
         void api.remoteHome();
         return;
       }
-      if (code === "Space" || code === "MediaPlayPause") {
-        e.preventDefault();
+      if (action === "playpause") {
         void api.remotePlayPause();
+        return;
+      }
+      if (action === "pointer") {
+        void api.remotePointer().catch(() => applyPointer());
+        return;
+      }
+      if (action === "volumeUp") {
+        void api.remoteVolume(1).catch(() => toast.message("Volume +"));
+        return;
+      }
+      if (action === "volumeDown") {
+        void api.remoteVolume(-1).catch(() => toast.message("Volume −"));
+        return;
+      }
+      if (action === "mute") {
+        void api.remoteMute().catch(() => toast.message("Mudo"));
+        return;
+      }
+      if (action === "menu") {
+        window.dispatchEvent(new Event("zappe-menu"));
+        void api.remoteMenu().catch(() => undefined);
+        return;
+      }
+      if (action === "power") {
+        void api
+          .remotePower()
+          .then((out) => {
+            toast.message(out === "power:home" ? "Início" : "Power — o aparelho continua ligado");
+          })
+          .catch(() => toast.message("Power — o aparelho continua ligado"));
       }
     };
 
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    let unlistenPointer: (() => void) | undefined;
+    let unlistenTv: (() => void) | undefined;
+    void onGuidePointer((on) => applyPointer(on)).then((fn) => {
+      unlistenPointer = fn;
+    });
+    void onTvControl((event) => {
+      toast.message(tvControlToast(event));
+    }).then((fn) => {
+      unlistenTv = fn;
+    });
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      unlistenPointer?.();
+      unlistenTv?.();
+    };
   }, [enabled]);
 }

@@ -1,3 +1,5 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -79,17 +81,64 @@ pub fn begin_nest(
     }
     playback.focus_snapshot = Some(focus);
     playback.surface = PlaybackSurface::Chrome;
+    crate::atongx::set_playback_grabs(app, &playback.surface);
     hide_guide(app);
     nest.open_url_detached(url, NestMode::Play);
     let _ = app.emit("playback-changed", playback.status());
     Ok(())
 }
 
+/// Tune OTA. Marks the surface first so Back/Home can cancel a slow lock,
+/// keeps the guide up until the pipeline is actually running, and always
+/// stops the previous zap/mpv group inside `OtaSession::play`.
+pub async fn begin_ota(
+    app: &AppHandle,
+    nest: &NestManager,
+    ota: &OtaSession,
+    playback: &Mutex<PlaybackController>,
+    channel: String,
+    conf: std::path::PathBuf,
+    focus: GuideFocus,
+) -> Result<(), String> {
+    let previous = {
+        let mut playback = playback.lock().unwrap();
+        playback.focus_snapshot = Some(focus);
+        let previous = playback.surface.clone();
+        playback.surface = PlaybackSurface::Ota;
+        crate::atongx::set_playback_grabs(app, &playback.surface);
+        previous
+    };
+    if previous == PlaybackSurface::Chrome {
+        nest.exit_play().await;
+    }
+
+    if let Err(err) = ota.play(&channel, &conf).await {
+        let mut playback = playback.lock().unwrap();
+        if playback.surface == PlaybackSurface::Ota {
+            playback.surface = PlaybackSurface::Idle;
+            crate::atongx::set_playback_grabs(app, &playback.surface);
+        }
+        restore_guide_fullscreen(app);
+        return Err(err.to_string());
+    }
+
+    {
+        let playback = playback.lock().unwrap();
+        if playback.surface != PlaybackSurface::Ota {
+            return Ok(());
+        }
+        let status = playback.status();
+        let _ = app.emit("playback-changed", status);
+    }
+    hide_guide(app);
+    wm::nudge_mpv_fullscreen(ota.latest_mpv_pid());
+    Ok(())
+}
+
 pub async fn stop_playback_surface(nest: &NestManager, ota: &OtaSession, surface: PlaybackSurface) {
     match surface {
         PlaybackSurface::Chrome => {
-            nest.send_key("escape").await;
-            nest.hide().await;
+            nest.exit_play().await;
         }
         PlaybackSurface::Ota => {
             let pid = ota.latest_mpv_pid();
@@ -102,6 +151,7 @@ pub async fn stop_playback_surface(nest: &NestManager, ota: &OtaSession, surface
 
 pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController) {
     playback.surface = PlaybackSurface::Idle;
+    crate::atongx::set_playback_grabs(app, &playback.surface);
     restore_guide_fullscreen(app);
     let status = playback.status();
     let _ = app.emit("playback-changed", &status);
@@ -110,11 +160,19 @@ pub fn finish_return_to_guide(app: &AppHandle, playback: &mut PlaybackController
     }
 }
 
-pub fn toggle_play_pause(nest: &NestManager, playback: &PlaybackController) {
-    if playback.surface == PlaybackSurface::Chrome {
-        let nest = nest.clone();
-        tauri::async_runtime::spawn(async move {
-            nest.send_key("space").await;
-        });
+pub fn toggle_play_pause(nest: &NestManager, ota: &OtaSession, playback: &PlaybackController) {
+    match playback.surface {
+        PlaybackSurface::Chrome => {
+            let nest = nest.clone();
+            tauri::async_runtime::spawn(async move {
+                nest.send_key("space").await;
+            });
+        }
+        PlaybackSurface::Ota => {
+            let pid = ota.latest_mpv_pid();
+            wm::nudge_mpv_fullscreen(pid);
+            crate::nest::send_media_key("space");
+        }
+        PlaybackSurface::Idle => {}
     }
 }

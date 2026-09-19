@@ -1,20 +1,49 @@
 @import "tailwindcss";
 
+:root {
+  --tv-space-1: 1rem;
+  --tv-space-2: 1.75rem;
+  --tv-space-3: 2.75rem;
+  --tv-space-4: 4.25rem;
+  --tv-space-5: 6.25rem;
+  --tv-type-kicker: 1rem;
+  --tv-type-caption: 1.15rem;
+  --tv-type-body: 1.45rem;
+  --tv-type-title: 1.85rem;
+  --tv-type-display: 2.85rem;
+  --tv-type-hero: 4.25rem;
+  --tv-tile-w: 23.5rem;
+  --tv-tile-h: 13.75rem;
+  --tv-tile-wide-w: 29.5rem;
+  --tv-tile-wide-h: 16.5rem;
+  --tv-logo: 7.25rem;
+  --tv-logo-lg: 9.5rem;
+  --tv-radius: 1.15rem;
+  --tv-gutter-x: var(--tv-space-5);
+  --tv-focus-room: 2rem;
+  --brand-accent: #c4a574;
+  --ease-out-tv: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @theme {
-  --color-background: oklch(0.12 0.02 265);
-  --color-foreground: oklch(0.95 0.01 265);
-  --color-card: oklch(0.16 0.02 265);
-  --color-card-foreground: oklch(0.95 0.01 265);
-  --color-primary: oklch(0.72 0.14 45);
-  --color-primary-foreground: oklch(0.15 0.02 265);
-  --color-muted: oklch(0.22 0.02 265);
-  --color-muted-foreground: oklch(0.7 0.02 265);
-  --color-ring: oklch(0.78 0.16 55);
-  --radius-lg: 0.75rem;
+  --color-background: #000000;
+  --color-foreground: #f5f5f7;
+  --color-card: #141414;
+  --color-card-foreground: #f5f5f7;
+  --color-primary: #c4a574;
+  --color-primary-foreground: #1a140c;
+  --color-muted: #1c1c1e;
+  --color-muted-foreground: #8e8e93;
+  --color-ring: #c4a574;
+  --radius-lg: 1.15rem;
 }
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  font-size: clamp(18px, 1.75vmin, 34px);
 }
 
 html,
@@ -26,32 +55,618 @@ body,
 
 body {
   font-family:
+    "SF Pro Display",
+    "SF Pro Text",
     system-ui,
     -apple-system,
-    "Segoe UI",
-    Roboto,
+    "Helvetica Neue",
     sans-serif;
+  overflow: hidden;
+  background: #000;
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Living-room chrome: true black with a faint Apple TV wash (never a light theme). */
+.tv-page,
+.splash-screen,
+.screensaver {
+  background-color: #000;
+  background-image:
+    radial-gradient(ellipse 90% 48% at 50% -12%, rgba(255, 255, 255, 0.055), transparent 58%),
+    radial-gradient(
+      ellipse 55% 42% at 92% 8%,
+      color-mix(in oklab, var(--brand-accent) 14%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(ellipse 50% 38% at 6% 88%, rgba(52, 68, 118, 0.14), transparent 64%),
+    linear-gradient(180deg, #141418 0%, #0a0a0c 36%, #000 78%);
+}
+
+/* Appliance: hide the OS cursor until air-mouse pointer mode (F2). Dev keeps a cursor. */
+html.tv-living-room:not(.tv-pointer-on),
+html.tv-living-room:not(.tv-pointer-on) * {
+  cursor: none !important;
+}
+
+body.tv-handoff {
+  animation: tv-handoff 0.28s var(--ease-out-tv) both;
+}
+
+.tv-page {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  padding: var(--tv-space-4) var(--tv-space-5);
+}
+
+/*
+  Home guide: keep the Apple TV side gutters on the header + shelves, not
+  on the page box. Page padding was clipping scale(1.08) tiles because the
+  scrollports sat inside the margin instead of using it as overflow room.
+*/
+.tv-guide {
+  padding-inline: 0;
+}
+
+.tv-guide > header {
+  padding-inline: var(--tv-gutter-x);
+}
+
+.tv-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: var(--tv-space-5);
+  scroll-padding-block: calc(
+    var(--tv-type-caption) * 1.5 + var(--tv-space-2) + var(--tv-focus-room)
+  );
+  scrollbar-width: none;
+}
+
+.tv-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tv-display {
+  font-size: var(--tv-type-display);
+  font-weight: 600;
+  letter-spacing: -0.028em;
+  line-height: 1.1;
+}
+
+.tv-title {
+  font-size: var(--tv-type-title);
+  font-weight: 500;
+  letter-spacing: -0.018em;
+  line-height: 1.22;
+}
+
+.tv-body {
+  font-size: var(--tv-type-body);
+  line-height: 1.45;
+  font-weight: 400;
+}
+
+.tv-caption {
+  font-size: var(--tv-type-caption);
+  color: var(--color-muted-foreground);
+  line-height: 1.4;
+  font-weight: 400;
+}
+
+.tv-shelf {
+  animation: shelf-enter 0.55s var(--ease-out-tv) both;
+}
+
+.tv-shelf + .tv-shelf {
+  margin-top: var(--tv-space-4);
+}
+
+.tv-shelf-title {
+  margin: 0 0 var(--tv-space-2);
+  font-size: var(--tv-type-caption);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: #6e6e73;
+}
+
+.tv-guide .tv-shelf-title {
+  margin-inline: var(--tv-gutter-x);
+}
+
+.tv-guide .tv-shelf > .tv-progress {
+  margin-inline-start: var(--tv-gutter-x);
+}
+
+.tv-tile {
+  width: var(--tv-tile-w);
+  height: var(--tv-tile-h);
+  padding: var(--tv-space-2) var(--tv-space-2) 1.35rem;
+  border: 0;
+  border-radius: var(--tv-radius);
+  background-color: #141416;
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.075) 0%, rgba(255, 255, 255, 0.02) 34%, transparent 58%),
+    linear-gradient(165deg, #1c1c20 0%, #141416 52%, #101012 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  will-change: transform;
+  scroll-margin-inline: var(--tv-gutter-x);
+  scroll-margin-block-end: var(--tv-focus-room);
+  scroll-margin-block-start: calc(
+    var(--tv-type-caption) * 1.5 + var(--tv-space-2) + var(--tv-focus-room)
+  );
+}
+
+.tv-tile-wide {
+  width: var(--tv-tile-wide-w);
+  height: var(--tv-tile-wide-h);
+}
+
+.tv-tile-title {
+  font-size: var(--tv-type-title);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  text-wrap: balance;
+}
+
+.tv-tile-sub {
+  margin-top: 0.25rem;
+  font-size: var(--tv-type-caption);
+  font-weight: 400;
+  color: #8e8e93;
+}
+
+.tv-brand-art,
+.tv-logo,
+.tv-logo-lg {
+  display: block;
+  object-fit: contain;
+  object-position: center;
+  background: transparent;
+}
+
+/*
+  Clip a user-supplied logo.png to a round Apple TV–style mark so an
+  opaque square plate never shows on the black chrome. Prefer a
+  transparent PNG when adding an appliance logo.
+*/
+.tv-logo-frame,
+.tv-logo-frame-lg {
+  display: block;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: transparent;
+  -webkit-mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+}
+
+.tv-logo-frame {
+  width: var(--tv-logo);
+  height: var(--tv-logo);
+}
+
+.tv-logo-frame-lg {
+  width: var(--tv-logo-lg);
+  height: var(--tv-logo-lg);
+}
+
+.tv-logo-frame .tv-logo,
+.tv-logo-frame-lg .tv-logo {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  background: transparent;
+  transform: scale(1.08);
+}
+
+.tv-logo,
+.tv-logo-mark {
+  width: var(--tv-logo);
+  height: var(--tv-logo);
+  flex-shrink: 0;
+}
+
+.tv-logo-lg,
+.tv-logo-mark-lg {
+  width: var(--tv-logo-lg);
+  height: var(--tv-logo-lg);
+}
+
+.tv-logo-mark,
+.tv-logo-mark-lg,
+.splash-mark,
+.screensaver-mark {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #141414;
+  color: var(--brand-accent);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.tv-logo-mark {
+  font-size: calc(var(--tv-logo) * 0.42);
+  margin-right: var(--tv-space-2);
+}
+
+.tv-logo-mark-lg {
+  font-size: calc(var(--tv-logo-lg) * 0.42);
+  margin-right: var(--tv-space-3);
+}
+
+.tv-wordmark {
+  font-size: var(--tv-type-display);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+}
+
+.tv-wordmark-lg {
+  font-size: var(--tv-type-hero);
+}
+
+.tv-host {
+  margin: var(--tv-space-1) 0 var(--tv-space-3);
+  font-size: var(--tv-type-hero);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--color-foreground);
+}
+
+.tv-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+  margin: var(--tv-space-2) 0 0;
+}
+
+.tv-source-chip {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.45rem 1.05rem;
+  background: #1c1c1e;
+  color: var(--color-muted-foreground);
+  font-size: var(--tv-type-caption);
+  letter-spacing: 0.02em;
+}
+
+.tv-source-chip-on {
+  background: var(--brand-accent);
+  color: #1a140c;
+}
+
+.tv-device-code {
+  margin: var(--tv-space-2) 0 var(--tv-space-2);
+  font-size: var(--tv-type-hero);
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  line-height: 1;
+}
+
+.tv-kicker {
+  margin: var(--tv-space-1) 0;
+  font-size: var(--tv-type-kicker);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+
+.tv-qr-stub,
+.tv-qr {
+  display: grid;
+  place-items: center;
+  width: 9.5rem;
+  height: 9.5rem;
+  margin: 0 auto var(--tv-space-2);
+  border: 0;
+  border-radius: 1.1rem;
+  background: #ffffff;
+  color: #111;
+  font-size: var(--tv-type-caption);
+  font-weight: 500;
+  letter-spacing: 0.16em;
   overflow: hidden;
 }
 
-.focus-tile {
-  outline: 4px solid var(--color-ring);
-  outline-offset: 4px;
-  transform: scale(1.04);
+.tv-qr svg {
+  width: 9.5rem;
+  height: 9.5rem;
+}
+
+.tv-qr-stub {
+  background: #141414;
+  color: var(--color-muted-foreground);
+}
+
+.tv-tile,
+button.tv-tile {
   transition:
-    transform 0.15s ease,
-    outline 0.15s ease;
+    transform 0.38s var(--ease-out-tv),
+    box-shadow 0.38s var(--ease-out-tv);
+}
+
+.focus-tile {
+  outline: none;
+  transform: scale(1.08);
+  box-shadow:
+    0 1.8rem 4rem rgba(0, 0, 0, 0.52),
+    0 0 3.2rem color-mix(in oklab, var(--brand-accent) 34%, transparent);
+  z-index: 2;
+}
+
+.tv-tile.focus-tile {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.11) 0%, rgba(255, 255, 255, 0.03) 36%, transparent 60%),
+    linear-gradient(165deg, #26262b 0%, #18181c 52%, #121214 100%);
 }
 
 .shelf-scroll {
   display: flex;
-  gap: 1.25rem;
+  gap: var(--tv-space-3);
   overflow-x: auto;
-  padding: 0.5rem 0.25rem 1rem;
+  overflow-y: hidden;
+  padding: var(--tv-focus-room) var(--tv-gutter-x);
+  scroll-padding-inline: var(--tv-gutter-x);
+  scroll-padding-block: var(--tv-focus-room);
   scroll-behavior: smooth;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
 }
 
 .shelf-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.tv-progress {
+  height: 0.16rem;
+  width: 6.5rem;
+  margin-bottom: var(--tv-space-2);
+  overflow: hidden;
+  border-radius: 999px;
+  background: #1c1c1e;
+}
+
+.tv-progress::after {
+  content: "";
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-accent);
+  animation: tv-progress-slide 1.8s var(--ease-out-tv) infinite;
+}
+
+.tv-skeleton-tile {
+  width: var(--tv-tile-w);
+  height: var(--tv-tile-h);
+  flex-shrink: 0;
+  border-radius: var(--tv-radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 48%),
+    #141416;
+  animation: splash-breathe 3.4s ease-in-out infinite;
+}
+
+.splash-screen,
+.screensaver {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.splash-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: splash-enter 0.8s var(--ease-out-tv) both;
+}
+
+.splash-art-frame,
+.screensaver-badge-frame {
+  display: block;
+  width: min(22rem, 38vw);
+  height: min(22rem, 38vw);
+  overflow: hidden;
+  border-radius: 50%;
+  background: transparent;
+  -webkit-mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+  mask-image: radial-gradient(circle closest-side at center, #000 93%, transparent 100%);
+}
+
+.splash-art-frame .splash-art,
+.screensaver-badge-frame .screensaver-badge {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: transparent;
+  transform: scale(1.08);
+}
+
+.splash-art-frame {
+  animation: splash-logo-breathe 3.8s ease-in-out infinite;
+}
+
+.splash-mark {
+  width: min(11rem, 20vw);
+  height: min(11rem, 20vw);
+  margin-bottom: var(--tv-space-2);
+  font-size: 4.5rem;
+}
+
+.splash-name {
+  font-size: var(--tv-type-hero);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+.screensaver {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.screensaver-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 48%, #050505 12%, #000 78%);
+  pointer-events: none;
+}
+
+.screensaver-drift {
+  animation: screensaver-float 22s ease-in-out infinite;
+}
+
+.screensaver-badge-frame,
+.screensaver-mark {
+  animation: screensaver-breathe 6.5s ease-in-out infinite;
+}
+
+.screensaver-mark {
+  width: min(16rem, 28vw);
+  height: min(16rem, 28vw);
+  font-size: 5.5rem;
+}
+
+.voice-listen {
+  position: fixed;
+  left: 50%;
+  bottom: var(--tv-space-4);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--tv-space-2);
+  transform: translateX(-50%);
+  padding: 0.85rem 1.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20, 20, 20, 0.92);
+  animation: splash-enter 0.28s var(--ease-out-tv) both;
+}
+
+.voice-dot {
+  width: 0.75rem;
+  height: 0.75rem;
+  border-radius: 50%;
+  background: #ff3b30;
+  animation: splash-breathe 1.6s ease-in-out infinite;
+}
+
+@keyframes splash-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes splash-breathe {
+  0%,
+  100% {
+    opacity: 0.42;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes splash-logo-breathe {
+  0%,
+  100% {
+    opacity: 0.88;
+    transform: scale(0.985);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes shelf-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes tv-progress-slide {
+  0% {
+    transform: translateX(-40%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@keyframes tv-handoff {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+@keyframes screensaver-breathe {
+  0%,
+  100% {
+    transform: scale(0.97);
+    opacity: 0.88;
+  }
+  50% {
+    transform: scale(1.02);
+    opacity: 1;
+  }
+}
+
+@keyframes screensaver-float {
+  0%,
+  100% {
+    transform: translate3d(-0.7rem, 0.35rem, 0);
+  }
+  50% {
+    transform: translate3d(0.8rem, -0.45rem, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .focus-tile,
+  .tv-tile,
+  .shelf-scroll,
+  .splash-inner,
+  .splash-art-frame,
+  .tv-progress::after,
+  .tv-skeleton-tile,
+  .tv-shelf,
+  .screensaver-drift,
+  .screensaver-badge-frame,
+  .screensaver-mark,
+  .voice-dot,
+  body.tv-handoff {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .splash-inner,
+  .tv-shelf,
+  .splash-art-frame {
+    opacity: 1;
+    transform: none;
+  }
 }

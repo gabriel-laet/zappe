@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { Branding } from "@/lib/branding";
+import type { TvControlEvent } from "@/lib/tvControl";
 
 export type GuideFocus = { shelf_id: string; index: number };
 
@@ -22,6 +24,13 @@ export type ChromeStatus = {
 };
 
 export type OtaChannel = { name: string; source: string };
+
+export type OtaStatus = {
+  enabled: boolean;
+  adapter: boolean;
+  channels: OtaChannel[];
+  error: string | null;
+};
 
 export type PlaybackStatus = {
   surface: "idle" | "chrome" | "ota";
@@ -64,6 +73,12 @@ export type CatalogView = {
   teach: TeachView;
 };
 
+export type VoiceOutcome = {
+  armed: boolean;
+  transcript: string | null;
+  message: string;
+};
+
 export type HarvestOutcome = {
   skill_id: string;
   status: ShelfStatus;
@@ -72,14 +87,28 @@ export type HarvestOutcome = {
   teach: boolean;
 };
 
+import type { CompanionSession } from "@/lib/companion";
+export type {
+  CompanionSession,
+  CompanionSource,
+  CompanionStatus,
+} from "@/lib/companion";
+
 export const api = {
   getSetupState: () => invoke<SetupState>("get_setup_state"),
   updateSetup: (patch: SetupState) => invoke<void>("update_setup", { patch }),
   completeSetup: () => invoke<void>("complete_setup"),
   chromeStatus: () => invoke<ChromeStatus>("chrome_status"),
+  companionSession: () => invoke<CompanionSession>("companion_session"),
+  companionBegin: () => invoke<CompanionSession>("companion_begin"),
+  companionSelectSource: (source: string) =>
+    invoke<CompanionSession>("companion_select_source", { source }),
   otaEnabled: () => invoke<boolean>("ota_enabled"),
   listOtaChannels: () => invoke<OtaChannel[]>("list_ota_channels"),
+  otaStatus: () => invoke<OtaStatus>("ota_status"),
   getCatalog: () => invoke<CatalogView>("get_catalog"),
+  getBranding: () => invoke<Branding>("get_branding"),
+  voiceListen: () => invoke<VoiceOutcome>("voice_listen"),
   autoHarvestEnabled: () => invoke<boolean>("auto_harvest_enabled"),
   harvestNow: (skillId?: string) =>
     invoke<HarvestOutcome>("harvest_now", { skillId: skillId ?? null }),
@@ -98,7 +127,12 @@ export const api = {
   playbackStatus: () => invoke<PlaybackStatus>("playback_status"),
   remoteBack: () => invoke<void>("remote_back"),
   remotePlayPause: () => invoke<void>("remote_play_pause"),
+  remotePointer: () => invoke<boolean>("remote_pointer"),
   remoteHome: () => invoke<void>("remote_home"),
+  remoteVolume: (delta: number) => invoke<string>("remote_volume", { delta }),
+  remoteMute: () => invoke<string>("remote_mute"),
+  remotePower: () => invoke<string>("remote_power"),
+  remoteMenu: () => invoke<string>("remote_menu"),
   open1Password: (focus: GuideFocus) =>
     invoke<void>("open_onepassword_extension", { focus }),
 };
@@ -113,4 +147,20 @@ export function onPlaybackChanged(cb: (status: PlaybackStatus) => void) {
 
 export function onCatalogChanged(cb: (catalog: CatalogView) => void) {
   return listen<CatalogView>("catalog-changed", (e) => cb(e.payload));
+}
+
+export function onGuideMenu(cb: () => void) {
+  return listen("guide-menu", () => cb());
+}
+
+export function onVoiceArm(cb: () => void) {
+  return listen("voice-arm", () => cb());
+}
+
+export function onGuidePointer(cb: (on?: boolean) => void) {
+  return listen<boolean>("guide-pointer", (e) => cb(e.payload));
+}
+
+export function onTvControl(cb: (event: TvControlEvent) => void) {
+  return listen<TvControlEvent>("tv-control", (e) => cb(e.payload));
 }

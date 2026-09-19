@@ -27,7 +27,7 @@ gamescope  ──wraps──►  google-chrome-stable
 | **Teach-mode** | Stub: waiting state + `TeachRecorder` trait. HID recording is a follow-up. |
 | **OTA** | Unchanged: `dvbv5-zap \| mpv` when `channels.conf` is present. |
 
-Playback is a URL into the nest (deep link when harvest found one). Play/pause is a best-effort HID key (`wtype` / `ydotool` / `xdotool`). Hyprland `hl.dsp.*` nudges apply to the **gamescope** window (or the guide / mpv). They are not used to drive Chrome inside the nest.
+Playback is a URL into the nest (deep link when harvest found one). Play/pause, D-pad, and OK are injected into the **nest** compositor (`xdotool` on Chrome’s gamescope `DISPLAY`, then `wtype -k`, then `ydotool`). Hyprland `hl.dsp.*` nudges only raise the gamescope *window* on a desktop session — they are not how keys reach Netflix. Design: [`docs/nest-input.md`](docs/nest-input.md).
 
 ## Dependencies (Omarchy / Arch)
 
@@ -51,9 +51,10 @@ Playback is a URL into the nest (deep link when harvest found one). Play/pause i
 
 **Optional**
 
-- `wtype` or `ydotool` — nest play/pause / Escape
+- `xdotool` (preferred) plus `wtype` or `ydotool` — nest D-pad / OK / play/pause / Escape. `wtype` must use `-k` (keysym), not text.
 - `dvbv5-tools` + `mpv` — OTA / TV aberta
-- Channel list: `~/tv/channels.conf` or `~/.config/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
+- Channel list: `~/tv/channels.conf`, `~/.config/zappe/channels.conf`, or `~/.local/share/zappe/channels.conf` (`ZAPPE_OTA_CHANNELS` overrides)
+- `xorg-server-xvfb` — optional invisible login backend (`ZAPPE_LOGIN_BACKEND=xvfb`). Default login uses the same hidden Chrome path as harvest (no second gamescope).
 
 ### Chrome accessibility (harvest)
 
@@ -72,7 +73,7 @@ npm install
 npm run tauri dev
 ```
 
-Production build: `npm run tauri build`.
+Production build: `npm run tauri -- build --no-bundle` on the appliance (see updater). Full installer: `npm run tauri build`. Frontend-only preview (no nest / harvest): `npm run dev:web` then open `http://localhost:1420/`. Vite helpers: `?guide=1` Home, `?brand=example` name/theme + data-dir logo, `?splash=1` hold splash, `?idle=3` screensaver in 3s. Appliance artwork is served from `~/.local/share/zappe/` (never git).
 
 ### Harvest Continue Watching (Linux)
 
@@ -97,14 +98,82 @@ Dump the tree while debugging:
 cargo run --bin zappe-harvest -- --skill netflix.continue_watching.v1 --dump /tmp/zappe-a11y.json
 ```
 
+### First Sync on the appliance
+
+Home never harvests on mount (that stole the HDMI nest). Use the **Sync Netflix** tile only.
+
+1. Netflix must already be signed in on the shared profile: `~/.local/share/zappe/chrome-profile`.
+2. AT-SPI: `busctl --user get-property org.a11y.Bus /org/a11y/bus org.a11y.Status IsEnabled`. Sync sets this `true` when it is `false`; if it stays off you get a guide toast naming `IsEnabled`.
+3. Skill file: `ls ~/.local/share/zappe/skills/netflix.continue_watching.v1.yaml` (updater + first launch plant it; the binary also embeds the YAML).
+4. On Home, focus **Sync Netflix** (or **Retry sync**) and press OK. Stay on the guide — harvest launches Chrome minimized / without gamescope `-f`, then hides the nest.
+5. **Success:** toast `harvested N titles`; `~/.local/share/zappe/catalog.json` has a `continue` shelf with `status: ok` and `rows`; Home tiles refresh via `catalog-changed`.
+6. **Failure:** error toast (a11y still disabled, skill missing, or empty Continue Watching). `catalog.json` still updates with `status` + `message` so you can read it on the box.
+
+```bash
+# After Sync
+test -s ~/.local/share/zappe/catalog.json && python - <<'PY'
+import json, pathlib
+p = pathlib.Path.home() / ".local/share/zappe/catalog.json"
+data = json.loads(p.read_text())
+shelf = next((s for s in data.get("shelves", []) if s.get("id") == "continue"), None)
+print("status", shelf and shelf.get("status"), "rows", shelf and len(shelf.get("rows") or []))
+print((shelf or {}).get("message") or "")
+for row in (shelf or {}).get("rows") or []:
+    print("-", row.get("title"))
+PY
+```
+
 ## First-run setup
 
-1. **Browser required** — Chrome on `PATH` (or `CHROME_PATH`).
-2. **1Password optional** — opens the Web Store in the nest (never reads vault/cookies).
-3. **Accounts** — sign in inside the nest so harvest can see Continue Watching.
-4. **Home** — harvested shelves + OTA when configured.
+The living-room box has **no physical keyboard**. Couch input is the TV remote plus a phone.
+
+1. **Browser on this TV** — Chrome already on `PATH` (or `CHROME_PATH`). That is an appliance install, not a couch typing step.
+2. **Connect account (phone)** — TV shows a live **device code + QR** and a source picker (Netflix, Prime, Disney+, YouTube). Open `http://zappe-tv.local` (or scan). Sign in on the phone. Setup never asks for a password on the TV and never fullscreens Chrome for typing.
+3. **Home** — harvested shelves + OTA when configured. An empty Continue Watching row shows a **Connect account (phone)** shelf. ATONGX **Menu** opens Connect; **Back** dismisses it.
 
 Setup state: `~/.config/zappe/setup.json`.
+
+### Phone companion
+
+LAN HTTP server on the appliance (`zappe-companion`, also started by the guide if the port is free). Couch steps and how Chrome stays off HDMI: [`docs/companion.md`](docs/companion.md).
+
+```bash
+# appliance (port 80 via systemd capabilities)
+cp packaging/appliance/zappe-companion.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now zappe-companion.service
+```
+
+The TV only displays the code / QR / “Connected”. Email and password stay on the phone. Each Apps source writes its session into `~/.local/share/zappe/chrome-profile` via the **same hidden Chrome path as harvest** (no second gamescope, `--start-minimized`). Netflix is the wired adapter (then Sync Continue Watching). Prime / Disney+ / YouTube use the same UX with stub cookie checks. Do not add on-TV password fields.
+
+## Custom branding (appliance, not git)
+
+The guide ships only in-code defaults (`Zappe` + Apple TV–black chrome). Put your own `logo.png` + `branding.json` in the **user data dir** so artwork is never committed.
+
+Preferred path (Linux XDG):
+
+```
+~/.local/share/zappe/{branding.json,logo.png,splash.png}
+```
+
+`$ZAPPE_DATA_DIR` overrides that directory. Put your PNG next to `branding.json` (**not in git**). The Rust loader emits a data URL (8 MiB cap). Vite preview serves the same files over `/__zappe_branding__/` so the browser path does not base64 the PNG.
+
+```bash
+mkdir -p ~/.local/share/zappe
+cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
+cp /path/to/your-logo.png ~/.local/share/zappe/logo.png
+systemctl --user restart zappe.service
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | Product name on the appliance. Default in code is `Zappe`. |
+| `accent` | CSS color. Default `#E85A1B`. |
+| `logo` / `splash` | Image (`png` / `jpg` / `webp` / `gif`). Header clips it to a circle so an opaque white plate still reads as a badge on black — prefer a transparent PNG. |
+| `idle` | `{ mode, asset, timeoutSeconds, animation }` — screensaver after ~2 min |
+| `theme` | `{ style: "apple-tv", background: "#000000", focusRing: "subtle-scale" }` |
+
+Missing file → defaults. Invalid JSON → log and fall back. See [`packaging/appliance/examples/README.md`](packaging/appliance/examples/README.md).
 
 ## Chrome profile / nest
 
@@ -120,7 +189,7 @@ Setup state: `~/.config/zappe/setup.json`.
     https://www.netflix.com/watch/…
   ```
 
-Harvest uses the same profile **without** `-f`, then hides the nest (best-effort: Hyprland special workspace). Netflix chrome may flash; hiding after harvest is enough for v1.
+Harvest **and** phone login share one invisible nest: the same Chrome profile, **no gamescope** (a second DRM nest would steal HDMI), **no `-f`**, `--start-minimized` + off-screen window, then hide and raise the guide. Play still wraps gamescope fullscreen. Netflix chrome may flash briefly on some sessions. See [`docs/companion.md`](docs/companion.md).
 
 `ZAPPE_NEST=chrome` skips gamescope (dev fallback). `ZAPPE_HARVEST_FIXTURE` / `zappe-harvest --fixture` skip the live dump.
 
@@ -137,23 +206,31 @@ A skill is: **open URL → wait → a11y find anchors → extract rows**. If anc
 | Phase | Behavior |
 | --- | --- |
 | Guide | Tauri visible, D-pad on shelves |
-| Harvest | Nest starts windowed, dump, hide nest; guide stays up |
+| Harvest / login | Chrome (no gamescope) minimized / off-screen, dump or sign-in, hide nest; guide stays up |
 | Stream tile | Guide hides → gamescope fullscreen |
 | OTA | Guide hides → mpv fullscreen |
-| Back / Escape | Hide nest or stop mpv → guide fullscreen + focus |
+| Back / Home / Power | Kill nest child gamescope (never the kiosk) or stop mpv → guide fullscreen + focus. Evdev on the XING WEI dongle; Power never shuts the box down. |
 | Quit | Stop OTA; kill a Zappe-launched nest |
 
 Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispatch` / `dispatch exec` (rejected on Lua sessions). Gamescope, Chrome, zap, and mpv are spawned from Rust. Failures are logged and ignored.
 
-## Remote (ALTONEX-style keyboard)
+## Remote (ATONGX air mouse — no keyboard)
 
-| Key | Action |
+Full button contract: [`docs/atongx-input.md`](docs/atongx-input.md) and `classifyAtongx` in [`src/lib/remoteMap.ts`](src/lib/remoteMap.ts).
+
+| Button | This PR |
 | --- | --- |
-| Arrows | move focus |
-| Enter | activate tile |
-| Escape / Backspace / BrowserBack | back to guide |
-| Home | end playback |
-| Space / MediaPlayPause | play/pause in the nest (HID) |
+| D-pad + OK (orange ring) | Guide focus / activate. While Netflix is up: arrows + Return into the nest |
+| Home, Back, DEL | Return to guide / end playback. Evdev on XING WEI (`KEY_BACK` 158 / `KEY_HOMEPAGE` 172) so nest Chrome cannot eat them. |
+| Play / Pause | Space into Chrome nest or mpv |
+| PAGE up / down | Jump a shelf |
+| Mic (red) | Whisper pt-BR — `abrir Netflix`, `voltar`, `volume mais`, `mudo`, `ir para Globo` |
+| Air-mouse cursor toggle | Guide CSS (`tv-pointer-on`). Nest: real pointer + click |
+| VOL +/−, Mute | Samsung TV Device Connect (`KEY_VOLUP` / `KEY_VOLDOWN` / `KEY_MUTE`). Pulse `pactl` if the TV is unreachable (one toast). |
+| Menu | Open Connect (returns to guide first if playing) |
+| Power | Return to guide — never shuts the box down, never sends `KEY_POWER` to the TV |
+
+Nest nav is Zappe HID. Volume / mute are the Samsung websocket — [`docs/samsung-tv.md`](docs/samsung-tv.md). Whisper: `ZAPPE_WHISPER_BIN` (`-l pt`). `ZAPPE_VOICE_FAKE=abrir netflix` for tests. Phone companion + device codes are the login path — never on-TV typing.
 
 ## Environment
 
@@ -163,23 +240,41 @@ Hyprland 0.56 nudges use `hyprctl eval` + `hl.dsp.*` only. Never `hyprctl dispat
 | `GAMESCOPE_PATH` | gamescope binary |
 | `ZAPPE_NEST` | `gamescope` (default) or `chrome` |
 | `ZAPPE_NEST_WIDTH` / `ZAPPE_NEST_HEIGHT` | nest size (default 1920×1080) |
-| `ZAPPE_DATA_DIR` | override `~/.local/share/zappe` |
+| `ZAPPE_DATA_DIR` | override `~/.local/share/zappe` (catalog, Chrome profile, `branding.json`) |
 | `ZAPPE_HARVEST_FIXTURE` | a11y JSON dump (skip live AT-SPI) |
 | `ZAPPE_A11Y_DUMP` | write the live tree to this path |
 | `ZAPPE_OTA_CHANNELS` | colon-separated `channels.conf` paths |
 | `ZAPPE_AUTO_HARVEST` | `1` to harvest on Home mount (debug only; default off) |
 | `ZAPPE_SRC` | appliance updater checkout (default `~/src/zappe`) |
+| `ZAPPE_WHISPER_BIN` | whisper.cpp binary for the red-mic button (pt-BR) |
+| `ZAPPE_VOICE_FAKE` | fake transcript for voice tests (no mic) |
+| `ZAPPE_HID_DISABLE` | `1` skips the ATONGX evdev watcher |
+| `ZAPPE_HID_NAME` | extra substring to match `/dev/input` names |
+| `ZAPPE_SAMSUNG_HOST` | Samsung TV IP (default `192.168.3.6`) |
+| `ZAPPE_SAMSUNG_PORT` | Device Connect `ws://` port (default `8001`) |
+| `ZAPPE_SAMSUNG_SECURE_PORT` | `wss://` fallback (default `8002`) |
+| `ZAPPE_SAMSUNG_TOKEN` | Device Connect token (prefer `~/.local/share/zappe/samsung.json`) |
+| `ZAPPE_SAMSUNG_NAME` | Client name shown on the TV pair popup (default `Zappe`) |
+| `ZAPPE_SAMSUNG_DISABLE` | `1` skips Samsung and uses `pactl` only |
+| `ZAPPE_COMPANION_HOST` | public name on the QR (`zappe-tv.local`) |
+| `ZAPPE_COMPANION_PORT` | bind port (default try `80`, then `8780`) |
+| `ZAPPE_COMPANION_BIND` | bind address (default `0.0.0.0`) |
+| `ZAPPE_COMPANION` | `0` / `remote` — only poll an existing companion |
+| `ZAPPE_LOGIN_BACKEND` | `xvfb` to force a virtual display; default is harvest-style minimized Chrome |
+| `ZAPPE_LOGIN_FAKE` | `1` — mark the selected source connected (tests) |
 
 ## OTA
 
-Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`. HD preferred; 1Seg filtered.
+Defaults (when `ZAPPE_OTA_CHANNELS` is unset): `$HOME/tv/channels.conf`, then `~/.config/zappe/channels.conf`, then `~/.local/share/zappe/channels.conf`. HD preferred; 1Seg filtered. `Globo` / `Record` / `SBT` resolve onto the HD section name in the conf.
+
+Selecting another Canais tile **always stops the previous process group** (`dvbv5-zap` + `mpv`) before starting the next. The guide stays up until the new pipeline is alive, then hides. Missing conf or `/dev/dvb/adapter0` is a toast / Canais error tile — not a silent fail.
 
 ```bash
 dvbv5-zap -a 0 -c … -p "Channel Name" -r -o - | mpv --hwdec=no --vo=gpu \
   --demuxer-lavf-format=mpegts --demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal -
 ```
 
-Play fails fast (guide stays / is restored) if `/dev/dvb/adapter0` is missing or zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
+Play fails with a restore if the adapter or conf is missing, or if zap/mpv exits immediately. stderr lands in `~/.local/share/zappe/ota-pipeline.log`.
 
 ## Appliance auto-update
 
@@ -201,6 +296,7 @@ Repo is expected at `~/src/zappe` (`ZAPPE_SRC` overrides). If the checkout is el
 mkdir -p ~/.config/systemd/user
 cp packaging/appliance/zappe-update.service \
    packaging/appliance/zappe-update.timer \
+   packaging/appliance/zappe-companion.service \
    ~/.config/systemd/user/
 # optional — only if you do not already have a kiosk unit
 cp packaging/appliance/zappe.service ~/.config/systemd/user/
@@ -209,6 +305,7 @@ chmod +x packaging/appliance/zappe-update.sh packaging/appliance/zappe-kiosk.sh
 loginctl enable-linger "$USER"
 systemctl --user daemon-reload
 systemctl --user enable --now zappe-update.timer
+systemctl --user enable --now zappe-companion.service
 systemctl --user enable --now zappe.service   # kiosk, if using the example unit
 ```
 
@@ -228,21 +325,20 @@ Expected kiosk unit name is **`zappe.service`**. Passwordless `sudo -n` is optio
 
 `npm run tauri build` (and `bundle.targets = "all"` in `src-tauri/tauri.conf.json`) packages AppImage/deb via linuxdeploy. That step can fail after the executable is already linked.
 
-Appliance updates **do not** run the bundler. They run:
+Appliance updates **do not** run the bundler. They **must** go through the Tauri CLI so `cfg(dev)` is off and the binary embeds `frontendDist` instead of `http://localhost:1420`:
 
 ```bash
-npm run build                                          # tsc + vite → dist/
-cargo build --release --manifest-path src-tauri/Cargo.toml
+npm run tauri -- build --no-bundle
 # binary: src-tauri/target/release/zappe
 ```
 
-Equivalent and also safe: `npm run tauri build -- --no-bundle` (Tauri 2 skips bundling even when `bundle.active` is true).
+Never `cargo build --release` alone for the appliance — that leaves `cfg(dev)` on and the kiosk on `http://localhost:1420`. `npm run check:updater` guards the script.
 
 ## Out of scope (v1)
 
 - Jev / UI-TARS / RL mutation loops
 - Prime / Disney harvest (skill files can plug in later)
-- Perfect “never flash Netflix chrome”
+- Perfect harvest “never flash Netflix chrome” (login uses Xvfb / hidden nest)
 - Full HID teach-mode recording
 
 ## Legacy HUD

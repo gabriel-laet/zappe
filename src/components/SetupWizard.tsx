@@ -1,11 +1,18 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { BrandMark } from "@/components/BrandMark";
+import { useBrand } from "@/components/BrandingProvider";
+import { ConnectVisual } from "@/components/ConnectPhone";
 import { Button } from "@/components/ui/button";
-import { api, type GuideFocus, type SetupState } from "@/lib/tauri";
+import { useTvChoice } from "@/hooks/useTvChoice";
+import {
+  EMPTY_SESSION,
+  isCompanionConnected,
+} from "@/lib/companion";
+import { cn } from "@/lib/utils";
+import { api, type CompanionSession, type SetupState } from "@/lib/tauri";
 
-type Step = "browser" | "onepassword" | "accounts";
-
-const noopFocus: GuideFocus = { shelf_id: "apps", index: 0 };
+type Step = "browser" | "phone";
 
 const emptySetup: SetupState = {
   completed: false,
@@ -15,141 +22,146 @@ const emptySetup: SetupState = {
 };
 
 export function SetupWizard({ onComplete }: { onComplete: () => void }) {
+  const brand = useBrand();
   const [step, setStep] = useState<Step>("browser");
   const [setup, setSetup] = useState<SetupState>(emptySetup);
   const [chromeOk, setChromeOk] = useState(false);
+  const [session, setSession] = useState<CompanionSession>(EMPTY_SESSION);
 
   useEffect(() => {
     void api.getSetupState().then(setSetup);
     void api.chromeStatus().then((s) => setChromeOk(s.available));
   }, []);
 
+  useEffect(() => {
+    if (step !== "phone") return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = await api.companionSession();
+        if (!cancelled) setSession(next);
+      } catch {
+        if (!cancelled) setSession(EMPTY_SESSION);
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [step]);
+
   const persist = async (patch: SetupState) => {
     setSetup(patch);
     await api.updateSetup(patch);
   };
 
-  const goHome = async (opts?: { accountsDone?: boolean }) => {
+  const goHome = useCallback(async () => {
     const patch = {
       ...setup,
       browser_ack: true,
-      accounts_done: opts?.accountsDone ?? setup.accounts_done,
+      onepassword_skipped: true,
+      accounts_done: setup.accounts_done || isCompanionConnected(session.status),
       completed: true,
     };
     await persist(patch);
     await api.completeSetup();
     onComplete();
-  };
+  }, [onComplete, session.status, setup]);
 
-  const nextFromBrowser = async () => {
+  const nextFromBrowser = useCallback(async () => {
     const status = await api.chromeStatus();
     if (!status.available) {
-      toast.error("Install Google Chrome or Chromium", {
+      toast.error("Chrome is not on this TV yet", {
         description:
-          "Arch / Omarchy: sudo pacman -S google-chrome or chromium. Or set CHROME_PATH.",
+          "Install on the appliance (not from the couch): sudo pacman -S google-chrome — or set CHROME_PATH.",
       });
       return;
     }
     await persist({ ...setup, browser_ack: true });
-    setStep("onepassword");
-  };
+    setStep("phone");
+  }, [setup]);
 
-  const skip1Password = async () => {
-    await persist({ ...setup, onepassword_skipped: true });
-    setStep("accounts");
-  };
-
-  const open1Password = async () => {
-    try {
-      await api.open1Password(noopFocus);
-      toast.message("Install 1Password in the Chrome nest, then press Back to return.");
-    } catch (e) {
-      toast.error(String(e));
+  const browserActions = useMemo(() => {
+    const actions = [{ id: "continue", label: "Continue", run: () => void nextFromBrowser() }];
+    if (chromeOk) {
+      actions.push({ id: "skip", label: "Skip to Home", run: () => void goHome() });
     }
-  };
+    return actions;
+  }, [chromeOk, goHome, nextFromBrowser]);
 
-  const openAccounts = async () => {
-    try {
-      await api.openApp("netflix", noopFocus);
-      toast.message("Sign in inside the Chrome nest. Back returns here — then Continue to Home.");
-    } catch (e) {
-      toast.error(String(e));
-    }
-  };
+  const phoneActions = useMemo(
+    () => [{ id: "home", label: "Continue to Home", run: () => void goHome() }],
+    [goHome],
+  );
+
+  const actions = step === "browser" ? browserActions : phoneActions;
+  const onActivate = useCallback(
+    (index: number) => {
+      actions[index]?.run();
+    },
+    [actions],
+  );
+  const focus = useTvChoice(actions.length, onActivate);
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-10 bg-background px-12 text-center">
-      <div className="max-w-2xl space-y-4">
-        <h1 className="text-4xl font-semibold tracking-tight">Welcome to Zappe</h1>
-        <p className="text-xl text-muted-foreground">
-          Streaming plays in a gamescope nest wrapping Google Chrome (your Zappe
-          profile). Live TV appears on Home when{" "}
-          <code className="text-base">channels.conf</code> is found — no extra setup step.
+    <div className="tv-page tv-scroll items-center text-center">
+      <div className="max-w-4xl space-y-[var(--tv-space-2)]">
+        <BrandMark className="justify-center" />
+        <h1 className="tv-display">Welcome to {brand.name}</h1>
+        <p className="tv-body text-muted-foreground">
+          This TV is remote- and phone-only — no keyboard. Streaming plays in a
+          gamescope nest wrapping Chrome. Live TV appears on Home when{" "}
+          <code className="tv-caption">channels.conf</code> is found.
         </p>
       </div>
 
       {step === "browser" && (
-        <div className="space-y-6">
-          <h2 className="text-2xl">Browser required</h2>
-          <p className="max-w-lg text-muted-foreground">
-            Zappe launches a dedicated Chrome profile inside gamescope — no CDP,
-            no automation flags. Netflix Continue Watching is harvested through
-            the accessibility tree into this guide.
+        <div className="mt-[var(--tv-space-3)] space-y-[var(--tv-space-2)]">
+          <h2 className="tv-title">Browser on this TV</h2>
+          <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
+            Chrome must already be installed on the appliance. You will not type
+            passwords here. Accounts are connected from your phone.
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="tv-caption">
             {chromeOk ? "Chrome detected — you can continue." : "Chrome not detected yet."}
           </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Button size="lg" onClick={() => void nextFromBrowser()}>
-              Continue
-            </Button>
-            {chromeOk && (
-              <Button size="lg" variant="secondary" onClick={() => void goHome()}>
-                Skip to Home
-              </Button>
-            )}
-          </div>
         </div>
       )}
 
-      {step === "onepassword" && (
-        <div className="space-y-6">
-          <h2 className="text-2xl">1Password (optional)</h2>
-          <p className="max-w-lg text-muted-foreground">
-            Open the extension store in Zappe Chrome. Zappe never reads your vault or cookies.
+      {step === "phone" && (
+        <div className="mt-[var(--tv-space-3)] space-y-[var(--tv-space-2)]">
+          <h2 className="tv-title">Connect account (phone)</h2>
+          <p className="tv-body mx-auto max-w-3xl text-muted-foreground">
+            On the couch, open your phone — not a password field on the TV.
+            Chrome stays hidden while you sign in.
           </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Button size="lg" onClick={() => void open1Password()}>
-              Open extension store
-            </Button>
-            <Button size="lg" variant="secondary" onClick={() => void skip1Password()}>
-              Skip
-            </Button>
-            <Button size="lg" variant="ghost" onClick={() => void goHome()}>
-              Continue to Home
-            </Button>
-          </div>
+          <ConnectVisual
+            session={session}
+            onSelectSource={(id) => {
+              void api.companionSelectSource(id).then(setSession);
+            }}
+          />
+          {isCompanionConnected(session.status) && (
+            <p className="tv-caption">Connected. Continue to Home when you are ready.</p>
+          )}
         </div>
       )}
 
-      {step === "accounts" && (
-        <div className="space-y-6">
-          <h2 className="text-2xl">Sign in to your accounts (optional)</h2>
-          <p className="max-w-lg text-muted-foreground">
-            Sign in inside the Chrome nest once per service so harvest can see
-            Continue Watching. Or go straight to Home — TV aberta and Canais
-            stay on the guide when your channel list is present.
-          </p>
-          <div className="flex flex-wrap justify-center gap-4">
-            <Button size="lg" onClick={() => void goHome({ accountsDone: true })}>
-              Continue to Home
-            </Button>
-            <Button size="lg" variant="secondary" onClick={() => void openAccounts()}>
-              Open Netflix in the nest
-            </Button>
-          </div>
-        </div>
-      )}
+      <div className="mt-[var(--tv-space-3)] flex flex-wrap justify-center gap-[var(--tv-space-2)]">
+        {actions.map((action, i) => (
+          <Button
+            key={action.id}
+            size="lg"
+            variant={i === 0 ? "default" : "secondary"}
+            className={cn(focus === i && "focus-tile")}
+            onClick={action.run}
+          >
+            {action.label}
+          </Button>
+        ))}
+      </div>
     </div>
   );
 }

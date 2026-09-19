@@ -15,9 +15,15 @@ use zbus::Connection;
 const ACCESSIBLE: &str = "org.a11y.atspi.Accessible";
 const ROOT_PATH: &str = "/org/a11y/atspi/accessible/root";
 const REGISTRY: &str = "org.a11y.atspi.Registry";
+const A11Y_BUS: &str = "org.a11y.Bus";
+const A11Y_BUS_PATH: &str = "/org/a11y/bus";
+const A11Y_STATUS: &str = "org.a11y.Status";
 const DEFAULT_MAX_DEPTH: usize = 18;
 const DEFAULT_MAX_NODES: usize = 2500;
 const DEFAULT_MAX_CHILDREN: i32 = 64;
+
+/// Guide toast when AT-SPI stays off after we try to enable it.
+pub const A11Y_DISABLED_MSG: &str = "Accessibility is off on this TV. Sync could not turn on AT-SPI (org.a11y.Status.IsEnabled). Enable a11y, then Retry sync.";
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct A11yNode {
@@ -87,8 +93,93 @@ pub async fn dump_chrome_tree() -> Result<A11yNode> {
 }
 
 async fn dump_chrome_tree_inner() -> Result<A11yNode> {
+    ensure_a11y_enabled().await?;
     let conn = connect_a11y_bus().await?;
     dump_from_connection(&conn).await
+}
+
+/// Read `org.a11y.Status.IsEnabled` and set it `true` when it is off.
+///
+/// A disabled AT-SPI bus is why the appliance harvest produced no
+/// `catalog.json` even with a logged-in Chrome profile.
+pub async fn ensure_a11y_enabled() -> Result<()> {
+    let session = Connection::session()
+        .await
+        .context("connect to D-Bus session bus")?;
+
+    if let Err(err) = a11y_bus_address(&session).await {
+        log::warn!("org.a11y.Bus.GetAddress failed ({err:#}); continuing to Status.IsEnabled");
+    }
+
+    let current = match read_is_enabled(&session).await {
+        Ok(v) => Some(v),
+        Err(err) => {
+            log::warn!("read org.a11y.Status.IsEnabled failed ({err:#}); attempting to set true");
+            None
+        }
+    };
+    if !a11y_enable_plan(current) {
+        return Ok(());
+    }
+    if current == Some(false) {
+        return enable_or_fail(&session).await;
+    }
+    match write_is_enabled(&session, true).await {
+        Ok(()) => {
+            log::info!("set org.a11y.Status.IsEnabled=true (property was unreadable)");
+            Ok(())
+        }
+        Err(set_err) => {
+            log::warn!("set org.a11y.Status.IsEnabled failed: {set_err:#}");
+            // Bus may still work; dump_chrome_tree reports a clear miss later.
+            Ok(())
+        }
+    }
+}
+
+async fn enable_or_fail(session: &Connection) -> Result<()> {
+    if let Err(err) = write_is_enabled(session, true).await {
+        log::warn!("set org.a11y.Status.IsEnabled=true failed: {err:#}");
+        return Err(anyhow!(A11Y_DISABLED_MSG));
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    match read_is_enabled(session).await {
+        Ok(true) => {
+            log::info!("enabled org.a11y.Status.IsEnabled for harvest");
+            Ok(())
+        }
+        Ok(false) => Err(anyhow!(A11Y_DISABLED_MSG)),
+        Err(err) => {
+            log::warn!("re-read IsEnabled failed after set: {err:#}");
+            Ok(())
+        }
+    }
+}
+
+pub(crate) fn a11y_enable_plan(is_enabled: Option<bool>) -> bool {
+    !matches!(is_enabled, Some(true))
+}
+
+async fn read_is_enabled(session: &Connection) -> Result<bool> {
+    let proxy = zbus::Proxy::new(session, A11Y_BUS, A11Y_BUS_PATH, A11Y_STATUS)
+        .await
+        .context("proxy org.a11y.Status")?;
+    let enabled: bool = proxy
+        .get_property("IsEnabled")
+        .await
+        .context("read org.a11y.Status.IsEnabled")?;
+    Ok(enabled)
+}
+
+async fn write_is_enabled(session: &Connection, enabled: bool) -> Result<()> {
+    let proxy = zbus::Proxy::new(session, A11Y_BUS, A11Y_BUS_PATH, A11Y_STATUS)
+        .await
+        .context("proxy org.a11y.Status")?;
+    proxy
+        .set_property("IsEnabled", enabled)
+        .await
+        .context("set org.a11y.Status.IsEnabled")?;
+    Ok(())
 }
 
 async fn dump_from_connection(conn: &Connection) -> Result<A11yNode> {
@@ -105,8 +196,8 @@ async fn dump_from_connection(conn: &Connection) -> Result<A11yNode> {
 
     if children.is_empty() {
         return Err(anyhow!(
-            "AT-SPI registry has no applications. Start Chrome with --force-renderer-accessibility \
-             and install at-spi2-core. See README (Chrome a11y)."
+            "AT-SPI has no applications. Accessibility may be off (org.a11y.Status.IsEnabled). \
+             Enable a11y and Retry sync. Chrome must use --force-renderer-accessibility; install at-spi2-core."
         ));
     }
 
@@ -159,9 +250,9 @@ async fn connect_a11y_bus() -> Result<Connection> {
 async fn a11y_bus_address(session: &Connection) -> Result<String> {
     let reply = session
         .call_method(
-            Some("org.a11y.Bus"),
-            "/org/a11y/bus",
-            Some("org.a11y.Bus"),
+            Some(A11Y_BUS),
+            A11Y_BUS_PATH,
+            Some(A11Y_BUS),
             "GetAddress",
             &(),
         )
@@ -320,5 +411,14 @@ mod tests {
         write_dump(&path, &tree).unwrap();
         let loaded = load_dump(&path).unwrap();
         assert_eq!(loaded.name, "Google Chrome");
+    }
+
+    #[test]
+    fn enable_plan_tries_when_off_or_unknown() {
+        assert!(!a11y_enable_plan(Some(true)));
+        assert!(a11y_enable_plan(Some(false)));
+        assert!(a11y_enable_plan(None));
+        assert!(A11Y_DISABLED_MSG.contains("IsEnabled"));
+        assert!(A11Y_DISABLED_MSG.contains("Retry sync"));
     }
 }
