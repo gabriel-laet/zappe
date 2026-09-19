@@ -4,6 +4,9 @@
 //! that always returns to the guide.
 //!
 //! Always-on: Home / Back / Play-Pause / Menu / Mic / VOL / Mute / pointer.
+//! Mic (`KEY_SEARCH` / `KEY_VOICECOMMAND`) and Pointer (`KEY_F2` /
+//! `KEY_TOUCHPAD_TOGGLE`) are locked in `src/lib/atongx-map.json`; evdev in
+//! `hid.rs` is the path that does not fail with "Unknown scancode".
 //! While Chrome is playing: D-pad + OK + Space are grabbed and injected into
 //! the nest (see `nest_input`). They are unregistered on return-to-guide so
 //! the Home shelves keep spatial focus. Volume / mute are Samsung Device

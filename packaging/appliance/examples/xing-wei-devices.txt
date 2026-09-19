@@ -1,0 +1,50 @@
+# Synthetic /proc/bus/input/devices dump for capture-atongx.py parser tests.
+# Not a live zappe-tv capture — KEY bits are the contract in atongx-map.json
+# encoded as 64-bit longs (high word first), matching a G10S-class XING WEI
+# composite (VID 2320 / PID 0912). Replace with a real dump after --list.
+
+I: Bus=0003 Vendor=2320 Product=0912 Version=0110
+N: Name="XING WEI 2.4G USB USB Composite Device"
+P: Phys=usb-0000:00:14.0-1/input2
+S: Sysfs=/devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1:1.2/0003:2320:0912.0003/input/input3
+U: Uniq=
+H: Handlers=sysrq kbd event3 
+B: PROP=0
+B: EV=120013
+B: KEY=0 0 0 0 0 0 b7c00000001f 1a00000010004002
+B: MSC=10
+B: LED=1f
+
+I: Bus=0003 Vendor=2320 Product=0912 Version=0110
+N: Name="XING WEI 2.4G USB USB Composite Device"
+P: Phys=usb-0000:00:14.0-1/input3
+S: Sysfs=/devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1:1.3/0003:2320:0912.0004/input/input4
+U: Uniq=
+H: Handlers=mouse0 event4 
+B: PROP=0
+B: EV=17
+B: KEY=0 0 0 70000 0 0 0 0
+B: REL=3
+B: MSC=10
+
+I: Bus=0003 Vendor=2320 Product=0912 Version=0110
+N: Name="XING WEI 2.4G USB USB Composite Device Consumer Control"
+P: Phys=usb-0000:00:14.0-1/input3
+S: Sysfs=/devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1:1.3/0003:2320:0912.0004/input/input5
+U: Uniq=
+H: Handlers=kbd event5 
+B: PROP=0
+B: EV=1f
+B: KEY=0 0 40 0 0 40000000004000 300000000 0 2008000 101040000800 800e000000000000 0
+B: MSC=10
+
+I: Bus=0003 Vendor=2320 Product=0912 Version=0110
+N: Name="XING WEI 2.4G USB USB Composite Device System Control"
+P: Phys=usb-0000:00:14.0-1/input3
+S: Sysfs=/devices/pci0000:00/0000:00:14.0/usb1/1-1/1-1:1.3/0003:2320:0912.0004/input/input6
+U: Uniq=
+H: Handlers=kbd event6 
+B: PROP=0
+B: EV=13
+B: KEY=0 0 4000 10000000000000 0
+B: MSC=10

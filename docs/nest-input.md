@@ -75,7 +75,7 @@ Preferred order for a key named `space` / `up` / `ok`:
 
 ## Pointer mode
 
-`remote_pointer` (F2 / global shortcut) toggles a Rust flag + `guide-pointer` for CSS.
+`remote_pointer` (locked `KEY_F2` / `KEY_TOUCHPAD_TOGGLE` from `atongx-map.json`, plus the F2 global shortcut) toggles a Rust flag + `guide-pointer` for CSS.
 
 When the nest is up and the flag is on:
 

@@ -2,6 +2,10 @@
 
 Files here are **samples**. They are not loaded by Zappe at runtime.
 
+Remote capture (KEY bitfields + Mic/Pointer press) lives next to this folder: [`../zappe-atongx-capture`](../zappe-atongx-capture). See [`docs/atongx-input.md`](../../../docs/atongx-input.md).
+
+[`xing-wei-devices.txt`](xing-wei-devices.txt) is a **synthetic** `/proc/bus/input/devices` dump for the parser (KEY bits encoded from `atongx-map.json`). It is not a live zappe-tv capture.
+
 ## Custom branding (not in git)
 
 Zappe reads branding from the **user data dir**, never from this repository:

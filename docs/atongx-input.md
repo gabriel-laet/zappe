@@ -2,7 +2,7 @@
 
 Living-room box: **no physical keyboard**. Couch input is this remote plus a phone at `zappe-tv.local` (device code + QR — see [`docs/companion.md`](companion.md)).
 
-Source of truth: [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts) (`classifyAtongx`). Nest nav is Zappe HID. Volume / mute are Samsung Device Connect keys — see [`samsung-tv.md`](samsung-tv.md).
+Source of truth: [`src/lib/atongx-map.json`](../src/lib/atongx-map.json) (physical button → linux `KEY_*` → action). TypeScript reads it via `classifyAtongx` in [`src/lib/remoteMap.ts`](../src/lib/remoteMap.ts). Rust evdev (`src-tauri/src/hid.rs`) loads the same JSON. Nest nav is Zappe HID. Volume / mute are Samsung Device Connect keys — see [`samsung-tv.md`](samsung-tv.md).
 
 When the guide is hidden (nest / mpv), compositor **global shortcuts** (`src-tauri/src/atongx.rs`) are not enough for Back / Home: nested gamescope+Chrome eats Escape/Home, and BrowserBack / BrowserHome / MediaPlayPause / ContextMenu fail to register (`Unknown scancode`).
 
@@ -43,17 +43,36 @@ Match is by name / by-id (`XING WEI`, `XING_WEI`, `ATONGX`, `2.4G USB`), overrid
 | Back | `KEY_BACK`, also `KEY_ESC` / `KEY_EXIT` / `KEY_DELETE` / `KEY_BACKSPACE` | **158** (1 / 174 / 111 / 14) | Consumer `KEY_BACK` is the usual ATONGX “BrowserBack”. Keyboard Escape is a fallback (not grabbed). |
 | Home | `KEY_HOMEPAGE`, also `KEY_HOME` | **172** (102) | Consumer `KEY_HOMEPAGE` is “BrowserHome”. |
 | Power | `KEY_POWER`, also `KEY_POWER2` / `KEY_SLEEP` | **116** (226 / 142) | Return to guide only — never ACPI shutdown. |
+| Mic (red) | `KEY_SEARCH`, `KEY_VOICECOMMAND` (**locked**); aliases F8 / F9 / RECORD / RED / ASSISTANT / MICMUTE | **217** / **582** | Consumer Search / Voice Command (`0x0CF`). Not swallowed as Unknown. |
+| Pointer | `KEY_F2`, `KEY_TOUCHPAD_TOGGLE` (**locked**); aliases F6 / F7 / F10 | **60** / **530** | Keyboard F2 is the living-room contract. Some boards toggle gyro in firmware and send no EV_KEY. |
 
-Confirm on the box (do this once if a new dongle maps differently):
+D-pad / OK / PAGE stay `dispatch: focus` on the **ungrabbed** keyboard node so nest Chrome injection is unchanged.
+
+## 60-second capture on zappe-tv
+
+This cloud environment does not have the physical remote. Lock the Mic / Pointer lines by running the helper on the box and pasting anything that prints `(unmapped)`:
 
 ```bash
-# pick the XING WEI consumer + kbd nodes
-cat /proc/bus/input/devices | less
-sudo evtest /dev/input/event5   # press Back / Home / Power; note KEY_* and (code)
-sudo evtest /dev/input/event3
+cd ~/src/zappe   # or $ZAPPE_SRC
+sudo usermod -aG input "$USER"   # once; re-login
+./packaging/appliance/zappe-atongx-capture --mic-pointer
+# Press Mic (red), then the pointer-mode button.
+# Expected: KEY_SEARCH (217) or KEY_VOICECOMMAND (582) → voice (locked)
+#           KEY_F2 (60) or KEY_TOUCHPAD_TOGGLE (530) → pointer (locked)
+# If Pointer is silent, wave the remote — REL_* means firmware-local gyro.
 ```
 
-Zappe logs `ATONGX evdev watching … grab=true` and `ATONGX evdev Back code=158` on press. The user running the kiosk must be in the `input` group (`sudo usermod -aG input glaet` and re-login) so `/dev/input/event*` is readable.
+`evtest` fallback (no Python):
+
+```bash
+cat /proc/bus/input/devices | less
+sudo evtest /dev/input/event5   # consumer — Mic / Back / Home
+sudo evtest /dev/input/event3   # keyboard — Pointer / D-pad
+```
+
+Paste a line like `event5 consumer KEY_SEARCH (217) press → voice (locked)  MSC_SCAN 0x…` back into the map if the code is new.
+
+Zappe logs `ATONGX evdev watching … grab=true` and `ATONGX evdev Voice code=217` on press. The user running the kiosk must be in the `input` group so `/dev/input/event*` is readable. Optional udev: `sudo cp packaging/appliance/99-atongx.rules /etc/udev/rules.d/`.
 
 ## Nest teardown
 
@@ -80,4 +99,7 @@ Build with `npm run tauri -- build --no-bundle` (never plain `cargo build --rele
 3. `pgrep -a gamescope` while the nest is up shows two processes (kiosk `-- zappe` and nest Chrome). After Back, only the kiosk remains.
 4. VOL / Mute move the **Samsung TV** volume (OSD). Log: `ATONGX volume+ via samsung`. Pulse (`pactl get-sink-volume`) stays put unless Device Connect failed — then one toast and pactl. See [`samsung-tv.md`](samsung-tv.md).
 5. D-pad moves Netflix focus; OK activates. See [`nest-input.md`](nest-input.md).
-6. Optional: `sudo evtest` as above if Back / Home is ignored — add the printed `KEY_*` to `action_for_keycode` in `src-tauri/src/hid.rs`.
+6. **Mic (red)** — Whisper toast (`Ouvindo…`) on the guide **and** while Netflix is up. Log: `ATONGX evdev Voice code=217` (or 582). Not Unknown, not swallowed.
+7. **Pointer** — Guide: `Ponteiro` toast + CSS cursor. Nest: real cursor; OK clicks. Log: `ATONGX evdev Pointer code=60` (or 530). If the button is silent, motion itself is the mode change.
+8. Back / Home still exit the nest. D-pad still moves Netflix focus.
+9. Optional: `./packaging/appliance/zappe-atongx-capture --mic-pointer` if Mic / Pointer is ignored — add the printed `KEY_*` to `src/lib/atongx-map.json` (not a third table).

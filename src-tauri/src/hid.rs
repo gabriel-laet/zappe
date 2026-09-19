@@ -2,9 +2,11 @@
 //!
 //! Nested gamescope+Chrome eats compositor shortcuts, and
 //! `tauri-plugin-global-shortcut` fails to register BrowserBack / BrowserHome
-//! ("Unknown scancode"). This listener reads `/dev/input/event*` directly so
-//! Back, Home, and Power still return to the guide.
+//! / Mic / some pointer keys ("Unknown scancode"). This listener reads
+//! `/dev/input/event*` directly so Back, Home, Power, Mic, and Pointer still
+//! reach Zappe.
 //!
+//! Keycodes come from [`crate::atongx_map`] (`src/lib/atongx-map.json`).
 //! Consumer-control nodes are grabbed so the nest cannot consume those keys.
 //! The keyboard node is watched without grab so D-pad / OK stay with Chrome.
 
@@ -37,8 +39,12 @@ pub const KEY_RECORD: u16 = 167;
 pub const KEY_HOMEPAGE: u16 = 172;
 pub const KEY_EXIT: u16 = 174;
 pub const KEY_POWER2: u16 = 226;
+pub const KEY_SEARCH: u16 = 217;
 pub const KEY_CONTEXT_MENU: u16 = 0x1b6;
+pub const KEY_RED: u16 = 0x18e;
+pub const KEY_TOUCHPAD_TOGGLE: u16 = 0x212;
 pub const KEY_VOICECOMMAND: u16 = 0x246;
+pub const KEY_ASSISTANT: u16 = 0x247;
 
 const DEBOUNCE: Duration = Duration::from_millis(280);
 const RESCAN: Duration = Duration::from_secs(2);
@@ -59,28 +65,42 @@ pub enum HidAction {
     Mute,
 }
 
-/// Full consumer-control map (grabbed node — nest never sees these).
+/// Global / nest-control actions from the shared JSON map.
+/// D-pad / OK / PAGE stay `None` so they are never swallowed by evdev.
 pub fn action_for_keycode(code: u16) -> Option<HidAction> {
-    Some(match code {
-        KEY_ESC | KEY_BACKSPACE | KEY_DELETE | KEY_BACK | KEY_EXIT => HidAction::Back,
-        KEY_HOME | KEY_HOMEPAGE => HidAction::Home,
-        KEY_POWER | KEY_POWER2 | KEY_SLEEP => HidAction::Power,
-        KEY_F1 | KEY_COMPOSE | KEY_MENU | KEY_CONTEXT_MENU => HidAction::Menu,
-        KEY_PLAYPAUSE => HidAction::PlayPause,
-        KEY_F8 | KEY_F9 | KEY_RECORD | KEY_VOICECOMMAND => HidAction::Voice,
-        KEY_F2 => HidAction::Pointer,
-        KEY_VOLUMEUP => HidAction::VolumeUp,
-        KEY_VOLUMEDOWN => HidAction::VolumeDown,
-        KEY_MUTE => HidAction::Mute,
-        _ => return None,
+    use crate::atongx_map::AtongxAction;
+    Some(match crate::atongx_map::action_for_evkey(code)? {
+        AtongxAction::Back | AtongxAction::Delete => HidAction::Back,
+        AtongxAction::Home => HidAction::Home,
+        AtongxAction::Power => HidAction::Power,
+        AtongxAction::Menu => HidAction::Menu,
+        AtongxAction::PlayPause => HidAction::PlayPause,
+        AtongxAction::Voice => HidAction::Voice,
+        AtongxAction::Pointer => HidAction::Pointer,
+        AtongxAction::VolumeUp => HidAction::VolumeUp,
+        AtongxAction::VolumeDown => HidAction::VolumeDown,
+        AtongxAction::Mute => HidAction::Mute,
+        AtongxAction::Up
+        | AtongxAction::Down
+        | AtongxAction::Left
+        | AtongxAction::Right
+        | AtongxAction::Ok
+        | AtongxAction::PageUp
+        | AtongxAction::PageDown => return None,
     })
 }
 
-/// Keyboard node is not grabbed. Only nest-escape keys are handled here so
-/// D-pad / OK / mic / pointer keep flowing to the focused surface + JS.
+/// Keyboard node is not grabbed. Nest-escape plus Mic / Pointer so those
+/// still fire while the guide is hidden. D-pad / OK stay with Chrome.
 pub fn action_for_keyboard_passthrough(code: u16) -> Option<HidAction> {
     match action_for_keycode(code) {
-        Some(action @ (HidAction::Back | HidAction::Home | HidAction::Power)) => Some(action),
+        Some(
+            action @ (HidAction::Back
+            | HidAction::Home
+            | HidAction::Power
+            | HidAction::Voice
+            | HidAction::Pointer),
+        ) => Some(action),
         _ => None,
     }
 }
@@ -97,11 +117,7 @@ pub fn is_atongx_device(name: &str, path: &str) -> bool {
             }
         }
     }
-    let blob = format!("{name} {path}").to_ascii_lowercase();
-    blob.contains("xing wei")
-        || blob.contains("xing_wei")
-        || blob.contains("atongx")
-        || blob.contains("2.4g usb")
+    crate::atongx_map::name_matches(&format!("{name} {path}"))
 }
 
 pub fn is_mouse_only(has_rel_xy: bool, has_nest_escape_key: bool) -> bool {
@@ -117,18 +133,14 @@ pub fn has_nest_escape_key(keys: &[u16]) -> bool {
     })
 }
 
-/// Grab consumer-control (Back/Home/Power/media) so nest gamescope cannot
-/// steal them. Never grab a full QWERTY board — D-pad lives there.
+/// Grab consumer-control (Back/Home/Power/media/Mic) so nest gamescope cannot
+/// steal them. Never grab a full QWERTY board — D-pad lives there. Keyboard
+/// F-keys (pointer KEY_F2, mic F8/F9) are not grab keys.
 pub fn should_grab_device(keys: &[u16], has_letter_keys: bool) -> bool {
     if has_letter_keys {
         return false;
     }
-    keys.iter().any(|c| {
-        matches!(
-            *c,
-            KEY_BACK | KEY_HOMEPAGE | KEY_PLAYPAUSE | KEY_POWER | KEY_EXIT | KEY_MUTE
-        )
-    })
+    keys.iter().any(|c| crate::atongx_map::is_grab_keycode(*c))
 }
 
 pub fn hid_disabled() -> bool {
@@ -431,7 +443,29 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_passthrough_is_only_nest_escape() {
+    fn mic_and_pointer_are_recognized_not_unknown() {
+        assert_eq!(action_for_keycode(KEY_SEARCH), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_VOICECOMMAND), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_ASSISTANT), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_RECORD), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_F8), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_F9), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_RED), Some(HidAction::Voice));
+        assert_eq!(action_for_keycode(KEY_F2), Some(HidAction::Pointer));
+        assert_eq!(
+            action_for_keycode(KEY_TOUCHPAD_TOGGLE),
+            Some(HidAction::Pointer)
+        );
+        assert_eq!(KEY_SEARCH, 217);
+        assert_eq!(KEY_VOICECOMMAND, 0x246);
+        assert_eq!(KEY_F2, 60);
+        assert_eq!(KEY_TOUCHPAD_TOGGLE, 0x212);
+        assert_eq!(action_for_keycode(103), None); // KEY_UP — D-pad not swallowed
+        assert_eq!(action_for_keycode(28), None); // KEY_ENTER
+    }
+
+    #[test]
+    fn keyboard_passthrough_is_nest_escape_plus_mic_pointer() {
         assert_eq!(
             action_for_keyboard_passthrough(KEY_BACK),
             Some(HidAction::Back)
@@ -444,10 +478,22 @@ mod tests {
             action_for_keyboard_passthrough(KEY_POWER),
             Some(HidAction::Power)
         );
+        assert_eq!(
+            action_for_keyboard_passthrough(KEY_F9),
+            Some(HidAction::Voice)
+        );
+        assert_eq!(
+            action_for_keyboard_passthrough(KEY_SEARCH),
+            Some(HidAction::Voice)
+        );
+        assert_eq!(
+            action_for_keyboard_passthrough(KEY_F2),
+            Some(HidAction::Pointer)
+        );
         assert_eq!(action_for_keyboard_passthrough(KEY_VOLUMEUP), None);
         assert_eq!(action_for_keyboard_passthrough(KEY_PLAYPAUSE), None);
-        assert_eq!(action_for_keyboard_passthrough(KEY_F9), None);
         assert_eq!(action_for_keyboard_passthrough(30), None); // KEY_A
+        assert_eq!(action_for_keyboard_passthrough(103), None); // KEY_UP
     }
 
     #[test]
@@ -471,9 +517,13 @@ mod tests {
     fn grab_consumer_not_qwerty() {
         let consumer = [KEY_BACK, KEY_HOMEPAGE, KEY_PLAYPAUSE, KEY_VOLUMEUP];
         assert!(should_grab_device(&consumer, false));
+        assert!(should_grab_device(&[KEY_SEARCH, KEY_VOICECOMMAND], false));
+        assert!(should_grab_device(&[KEY_TOUCHPAD_TOGGLE], false));
         let keyboard = [KEY_ESC, KEY_HOME, KEY_A];
         const KEY_A: u16 = 30;
         assert!(!should_grab_device(&keyboard, true));
+        // Pointer F2 / mic F8 live on the keyboard node — grabbing would eat D-pad.
+        assert!(!should_grab_device(&[KEY_F2, KEY_F8, KEY_F9], false));
         assert!(is_mouse_only(true, false));
         assert!(!is_mouse_only(true, true));
     }

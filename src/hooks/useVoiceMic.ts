@@ -12,7 +12,11 @@ export function useVoiceMic(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
 
+    let lastArm = 0;
     const run = async () => {
+      const now = Date.now();
+      if (now - lastArm < 400) return;
+      lastArm = now;
       setMessage("Ouvindo…");
       try {
         const out = await api.voiceListen();

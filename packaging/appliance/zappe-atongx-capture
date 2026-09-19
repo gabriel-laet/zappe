@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# 60-second ATONGX / XING WEI capture on zappe-tv.
+#
+#   ./packaging/appliance/zappe-atongx-capture --mic-pointer
+#   ./packaging/appliance/zappe-atongx-capture --list
+#   ./packaging/appliance/zappe-atongx-capture --prompt
+#
+# Needs read access to /dev/input/event*:
+#   sudo usermod -aG input "$USER"
+#   sudo cp packaging/appliance/99-atongx.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+PY="$ROOT/packaging/appliance/zappe-atongx-capture.py"
+
+if [[ ! -f "$PY" ]]; then
+  echo "missing $PY" >&2
+  echo "evtest fallback:" >&2
+  echo "  cat /proc/bus/input/devices | less" >&2
+  echo "  sudo evtest /dev/input/event5   # press Mic (red)" >&2
+  echo "  sudo evtest /dev/input/event3   # press Pointer" >&2
+  exit 2
+fi
+
+exec python3 "$PY" "$@"
