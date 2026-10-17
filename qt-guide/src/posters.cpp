@@ -483,4 +483,30 @@ QString makeCircleMark(const QString &cacheDir, const QString &imagePath, int si
     return path;
 }
 
+QString makeNoiseSprite(const QString &cacheDir)
+{
+    const QString path = artFile(cacheDir, QStringLiteral("v%1-noise").arg(kArtVersion));
+    if (QFileInfo::exists(path))
+        return path;
+    constexpr int n = 96;
+    QImage image(n, n, QImage::Format_ARGB32);
+    for (int y = 0; y < n; ++y) {
+        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(y));
+        for (int x = 0; x < n; ++x) {
+            quint32 h = 2166136261u;
+            auto mix = [&h](quint32 v) {
+                h ^= v;
+                h *= 16777619u;
+            };
+            mix(static_cast<quint32>(x));
+            mix(static_cast<quint32>(y));
+            mix(static_cast<quint32>(x * 13 + y * 17));
+            const int v = 28 + static_cast<int>(h % 200);
+            line[x] = qRgba(v, v, v, 255);
+        }
+    }
+    image.save(path, "PNG");
+    return path;
+}
+
 } // namespace zappe

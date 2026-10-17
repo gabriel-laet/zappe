@@ -18,6 +18,10 @@ set(QML_FILES
   qml/DetailView.qml
   qml/SplashView.qml
   qml/FpsOverlay.qml
+  qml/SideMenu.qml
+  qml/SettingsView.qml
+  qml/VolumeHud.qml
+  qml/Toast.qml
 )
 
 foreach(qml ${QML_FILES})

@@ -1,6 +1,6 @@
 # Zappe — protótipo Qt Quick
 
-Guia de sala em **Qt 6 Quick / QML**, no visual de uma tela inicial de TV: fundo desfocado que acompanha o item focado, fileiras horizontais de capas, card em foco com escala, sombra e brilho, rolagem com mola e relógio no canto.
+Guia de sala em **Qt 6 Quick / QML**, no visual de uma tela inicial de TV: fundo desfocado que acompanha o item focado, fileiras horizontais de capas, card em foco com escala, sombra, brilho e um tilt leve, rolagem com mola e relógio no canto. A fileira **Ao vivo** desenha uma prévia (gradiente e ruído), o **Menu** abre a barra lateral, e Enter abre a ficha do título.
 
 Este diretório é um protótipo. O app Tauri continua sendo o guia do produto. Nada aqui altera `src/` nem `src-tauri/`.
 
@@ -87,15 +87,23 @@ Qualquer valor diferente de vazio, `0`, `false` ou `off` liga o contador. Ele me
 
 ## Teclas
 
-Só D-pad:
+Só D-pad, no mesmo mapa do controle da sala. A tecla Menu é `KEY_COMPOSE` (`Qt.Key_Multi_key`) ou `KEY_MENU` (`Qt.Key_Menu`). Home do controle (`Qt.Key_Home` / `Qt.Key_HomePage`) faz o mesmo que Back.
 
 | Tecla | Ação |
 | --- | --- |
-| Setas | Move o foco entre capas e fileiras. Para na ponta. |
-| Enter / Return / Select | Abre o título focado. |
-| Esc / Back / Backspace | Fecha o título e volta para as fileiras. |
+| Setas | Move o foco entre capas, fileiras, botões da ficha, episódios, itens do menu ou linhas de Ajustes. Para na ponta. |
+| Enter / Return / Select | Abre a ficha, dispara o botão focado, ou fecha o menu na seção atual. |
+| Esc / Back / Backspace / Home | Fecha o menu, depois a ficha, depois volta para Início. Na home não faz nada. |
+| Menu (`KEY_COMPOSE` ou `KEY_MENU`) | Abre ou fecha o menu lateral (Início, Ao vivo, Streaming, Ajustes). |
+| Volume Up / Down / Mute | Mostra o HUD de volume. Não altera áudio de verdade. |
 
 Esc na home não encerra o processo. Feche a janela pelo compositor.
+
+No menu, cima e baixo trocam a seção na hora (o fundo acompanha). Esquerda, direita ou Enter fecham o menu nessa seção.
+
+Na ficha, esquerda e direita movem entre **Assistir**, **Trailer** e **Minha lista**. Baixo entra na fileira de episódios. Enter mostra um toast — não há reprodução. **Minha lista** alterna um botão com mola e vale só nesta sessão.
+
+Em Ajustes, esquerda e direita (ou Enter) trocam **1080p / 4K** ou ligam a marca do aparelho. A resolução é só desenho: a janela não muda de modo.
 
 ## Catálogo
 
@@ -109,9 +117,11 @@ Ordem de leitura:
 4. `catalog.json` ao lado do binário
 5. o exemplo embutido em `qt-guide/data/catalog.json`
 
-O exemplo traz três fileiras (Continue watching, Library, Set aside) com títulos originais. Capas sem `artwork` são geradas na hora: gradientes e formas, sem logotipo de terceiros. Um `artwork` preenchido pode ser caminho absoluto, `file://` ou relativo ao JSON / ao data dir (png, jpg, webp, gif).
+O exemplo traz quatro fileiras (Ao vivo, Continue watching, Library, Set aside) com títulos originais. Capas sem `artwork` são geradas na hora: gradientes e formas, sem logotipo de terceiros. Um `artwork` preenchido pode ser caminho absoluto, `file://` ou relativo ao JSON / ao data dir (png, jpg, webp, gif).
 
-Fileiras `continue`, `live`, `apps` e `canais` usam card 16:9. As demais usam capa retrato.
+Fileiras `continue`, `live`, `ao-vivo`, `apps` e `canais` usam card 16:9. As demais usam capa retrato. A fileira `live` / `ao-vivo` / `aovivo` marca os cards como canal: a prévia é um ruído em tile mais duas manchas de cor, desenhados por cima da capa, com o selo **AO VIVO** pulsando. Não há decodificador de vídeo. O ruído se move no canal focado e nos dois vizinhos; os outros cards ficam numa textura parada. A prévia pausa com a ficha, o menu ou Ajustes abertos.
+
+O menu lateral não captura a cena. O fundo que aparece atrás dele já é a placa desfocada da capa, escurecida, enquanto o conteúdo entra à direita. O card focado fica de frente; os vizinhos da mesma fileira inclinam alguns graus em Y, e a mola zera o ângulo quando o card encosta na margem.
 
 ## Branding
 
@@ -127,4 +137,4 @@ Se o arquivo não existir, estiver inválido ou o nome vier vazio, o nome é **Z
 
 ## O que este protótipo não faz
 
-Não reproduz vídeo, não faz harvest e não fala com o nest. Enter só abre uma ficha do título. O desfoque do fundo é uma placa pré-calculada (a capa reduzida e borrada uma vez), para a iGPU não pagar um blur por frame. Sombra e brilho também são texturas únicas, recoloridas pela cor da marca.
+Não reproduz vídeo, não faz harvest e não fala com o nest. Assistir, Trailer e os episódios só mostram um toast. O volume não mexe no mixer. 1080p/4K não troca o modo DRM. O desfoque do fundo é uma placa pré-calculada (a capa reduzida e borrada uma vez), para a iGPU não pagar um blur por frame. Sombra, brilho e o ruído da prévia também são texturas únicas.

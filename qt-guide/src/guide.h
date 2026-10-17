@@ -4,6 +4,7 @@
 #include "catalog.h"
 
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 class QQuickWindow;
@@ -17,6 +18,20 @@ class Guide : public QObject {
     Q_PROPERTY(int shelf READ shelf NOTIFY focusChanged)
     Q_PROPERTY(int index READ index NOTIFY focusChanged)
     Q_PROPERTY(bool detailOpen READ detailOpen NOTIFY detailChanged)
+    Q_PROPERTY(int detailZone READ detailZone NOTIFY detailChanged)
+    Q_PROPERTY(int detailButton READ detailButton NOTIFY detailChanged)
+    Q_PROPERTY(int episode READ episode NOTIFY detailChanged)
+    Q_PROPERTY(int episodeCount READ episodeCount CONSTANT)
+    Q_PROPERTY(bool saved READ saved NOTIFY savedChanged)
+
+    Q_PROPERTY(QString page READ page NOTIFY pageChanged)
+    Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY menuChanged)
+    Q_PROPERTY(int menuIndex READ menuIndex NOTIFY menuChanged)
+    Q_PROPERTY(int settingsIndex READ settingsIndex NOTIFY settingsChanged)
+    Q_PROPERTY(QString resolution READ resolution NOTIFY settingsChanged)
+    Q_PROPERTY(bool brandingOn READ brandingOn NOTIFY brandingChanged)
+    Q_PROPERTY(bool brandCustom READ brandCustom CONSTANT)
+    Q_PROPERTY(QString loadedBrandName READ loadedBrandName CONSTANT)
 
     Q_PROPERTY(QString focusTitle READ focusTitle NOTIFY focusChanged)
     Q_PROPERTY(QString focusService READ focusService NOTIFY focusChanged)
@@ -26,19 +41,27 @@ class Guide : public QObject {
     Q_PROPERTY(QString focusColor READ focusColor NOTIFY focusChanged)
     Q_PROPERTY(QString focusHref READ focusHref NOTIFY focusChanged)
     Q_PROPERTY(qreal focusProgress READ focusProgress NOTIFY focusChanged)
+    Q_PROPERTY(bool focusLive READ focusLive NOTIFY focusChanged)
 
-    Q_PROPERTY(QString brandName READ brandName CONSTANT)
-    Q_PROPERTY(QString accent READ accent CONSTANT)
-    Q_PROPERTY(QString accentInk READ accentInk CONSTANT)
-    Q_PROPERTY(QString background READ background CONSTANT)
-    Q_PROPERTY(QString tagline READ tagline CONSTANT)
-    Q_PROPERTY(QString logoUrl READ logoUrl CONSTANT)
-    Q_PROPERTY(QString splashUrl READ splashUrl CONSTANT)
-    Q_PROPERTY(qreal focusScale READ focusScale CONSTANT)
-    Q_PROPERTY(QString shadowUrl READ shadowUrl CONSTANT)
-    Q_PROPERTY(QString glowUrl READ glowUrl CONSTANT)
+    Q_PROPERTY(QString brandName READ brandName NOTIFY brandingChanged)
+    Q_PROPERTY(QString accent READ accent NOTIFY brandingChanged)
+    Q_PROPERTY(QString accentInk READ accentInk NOTIFY brandingChanged)
+    Q_PROPERTY(QString background READ background NOTIFY brandingChanged)
+    Q_PROPERTY(QString tagline READ tagline NOTIFY brandingChanged)
+    Q_PROPERTY(QString logoUrl READ logoUrl NOTIFY brandingChanged)
+    Q_PROPERTY(QString splashUrl READ splashUrl NOTIFY brandingChanged)
+    Q_PROPERTY(qreal focusScale READ focusScale NOTIFY brandingChanged)
+    Q_PROPERTY(QString shadowUrl READ shadowUrl NOTIFY brandingChanged)
+    Q_PROPERTY(QString glowUrl READ glowUrl NOTIFY brandingChanged)
     Q_PROPERTY(QString uiFont READ uiFont CONSTANT)
     Q_PROPERTY(QString monoFont READ monoFont CONSTANT)
+    Q_PROPERTY(QString noiseUrl READ noiseUrl CONSTANT)
+
+    Q_PROPERTY(int volume READ volume NOTIFY volumeChanged)
+    Q_PROPERTY(bool muted READ muted NOTIFY volumeChanged)
+    Q_PROPERTY(bool volumeHud READ volumeHud NOTIFY hudChanged)
+    Q_PROPERTY(QString toastText READ toastText NOTIFY toastChanged)
+    Q_PROPERTY(bool toastOn READ toastOn NOTIFY toastChanged)
 
     Q_PROPERTY(bool showFps READ showFps CONSTANT)
     Q_PROPERTY(int fps READ fps NOTIFY fpsChanged)
@@ -54,6 +77,7 @@ public:
     void setCatalog(CatalogFile catalog);
     void setInitial(int shelf, int index, bool detail);
     void setChrome(bool windowed, bool frameless, bool skipSplash, bool showFps);
+    void setPreview(bool openMenu, const QString &page, bool pinVolume, const QString &toast);
     void attachWindow(QQuickWindow *window);
 
     ShelfModel *shelves() const { return m_shelves; }
@@ -61,6 +85,20 @@ public:
     int shelf() const { return m_shelf; }
     int index() const { return m_index; }
     bool detailOpen() const { return m_detailOpen; }
+    int detailZone() const { return m_detailZone; }
+    int detailButton() const { return m_detailButton; }
+    int episode() const { return m_episode; }
+    int episodeCount() const { return 6; }
+    bool saved() const { return m_saved; }
+
+    QString page() const { return m_page; }
+    bool menuOpen() const { return m_menuOpen; }
+    int menuIndex() const { return m_menuIndex; }
+    int settingsIndex() const { return m_settingsIndex; }
+    QString resolution() const { return m_resolution; }
+    bool brandingOn() const { return m_brandingOn; }
+    bool brandCustom() const { return m_loaded.source == QLatin1String("user"); }
+    QString loadedBrandName() const { return m_loaded.name; }
 
     QString focusTitle() const { return m_focusTitle; }
     QString focusService() const { return m_focusService; }
@@ -70,6 +108,7 @@ public:
     QString focusColor() const { return m_focusColor; }
     QString focusHref() const { return m_focusHref; }
     qreal focusProgress() const { return m_focusProgress; }
+    bool focusLive() const { return m_focusLive; }
 
     QString brandName() const { return m_brand.name; }
     QString accent() const { return m_brand.accent; }
@@ -83,6 +122,13 @@ public:
     QString glowUrl() const { return m_glowUrl; }
     QString uiFont() const { return m_uiFont; }
     QString monoFont() const { return m_monoFont; }
+    QString noiseUrl() const { return m_noiseUrl; }
+
+    int volume() const { return m_volume; }
+    bool muted() const { return m_muted; }
+    bool volumeHud() const { return m_volumeHud; }
+    QString toastText() const { return m_toastText; }
+    bool toastOn() const { return m_toastOn; }
 
     bool showFps() const { return m_showFps; }
     int fps() const { return m_fps; }
@@ -94,31 +140,88 @@ public:
     Q_INVOKABLE void move(int dShelf, int dIndex);
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
+    Q_INVOKABLE void toggleMenu();
+    Q_INVOKABLE void adjustVolume(int delta);
+    Q_INVOKABLE void toggleMute();
+    Q_INVOKABLE bool shelfShown(int index) const;
+    Q_INVOKABLE QString episodeTitle(int index) const;
 
 signals:
     void focusChanged();
     void detailChanged();
     void activated();
     void fpsChanged();
+    void pageChanged();
+    void menuChanged();
+    void settingsChanged();
+    void brandingChanged();
+    void savedChanged();
+    void volumeChanged();
+    void hudChanged();
+    void toastChanged();
 
 private:
     void publishFocus();
     void syncFocusFields();
+    void refreshSaved();
+    void applyBrand(const Branding &branding);
+    void setPage(const QString &page);
+    void setMenuIndex(int index);
+    void clampFocusToPage();
+    void clampIndex();
+    void moveShelves(int dShelf, int dIndex);
+    void moveDetail(int dShelf, int dIndex);
+    void moveSettings(int dShelf, int dIndex);
+    void activateDetail();
+    void toggleSaved();
+    void nudgeResolution(int direction);
+    void setBrandingEnabled(bool on);
+    void revealVolume();
+    void showToast(const QString &text);
+    QString focusKey() const;
     const RowData *currentRow() const;
+    static int menuForPage(const QString &page);
+    static QString pageForMenu(int index);
 
     ShelfModel *m_shelves = nullptr;
     Branding m_brand;
+    Branding m_loaded;
+    Branding m_plain;
+    bool m_brandingOn = true;
     QString m_logoUrl;
     QString m_splashUrl;
     QString m_shadowUrl;
     QString m_glowUrl;
     QString m_uiFont;
     QString m_monoFont;
+    QString m_noiseUrl;
     QString m_catalogPath;
 
     int m_shelf = 0;
     int m_index = 0;
     bool m_detailOpen = false;
+    int m_detailZone = 0;
+    int m_detailButton = 0;
+    int m_episode = 0;
+    QSet<QString> m_savedKeys;
+    bool m_saved = false;
+
+    QString m_page = QStringLiteral("home");
+    bool m_menuOpen = false;
+    int m_menuIndex = 0;
+    int m_settingsIndex = 0;
+    QString m_resolution = QStringLiteral("1080p");
+
+    int m_volume = 40;
+    bool m_muted = false;
+    bool m_volumeHud = false;
+    bool m_pinVolume = false;
+    int m_volumeGen = 0;
+    QString m_toastText;
+    bool m_toastOn = false;
+    bool m_pinToast = false;
+    int m_toastGen = 0;
+
     bool m_windowed = false;
     bool m_frameless = false;
     bool m_skipSplash = false;
@@ -133,6 +236,7 @@ private:
     QString m_focusColor;
     QString m_focusHref;
     qreal m_focusProgress = 0;
+    bool m_focusLive = false;
 };
 
 QString cacheDir();

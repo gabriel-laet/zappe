@@ -2,6 +2,7 @@ import QtQuick
 
 Item {
     id: home
+    visible: guide.page !== "settings"
 
     Item {
         id: hero
@@ -26,21 +27,44 @@ Item {
             font.letterSpacing: -1.15
             elide: Text.ElideRight
         }
-        Text {
+        Row {
             anchors.top: heroTitle.bottom
-            anchors.topMargin: 8
-            text: {
-                if (guide.shelfCount === 0)
-                    return "Your shelves are empty"
-                const service = guide.focusService
-                const shelf = guide.focusShelf
-                if (service.length && shelf.length && service.toLowerCase() !== shelf.toLowerCase())
-                    return service + "    ·    " + shelf
-                return shelf.length ? shelf : service
+            anchors.topMargin: 10
+            spacing: 16
+            Row {
+                visible: guide.focusLive
+                spacing: 8
+                anchors.verticalCenter: parent.verticalCenter
+                Rectangle {
+                    width: 10
+                    height: 10
+                    radius: 5
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#E23B2F"
+                }
+                Text {
+                    text: "AO VIVO"
+                    color: "#E23B2F"
+                    font.family: guide.uiFont
+                    font.pixelSize: 16
+                    font.weight: 700
+                    font.letterSpacing: 1.3
+                }
             }
-            color: "#aeaeb2"
-            font.family: guide.uiFont
-            font.pixelSize: 24
+            Text {
+                text: {
+                    if (guide.shelfCount === 0)
+                        return "Your shelves are empty"
+                    const service = guide.focusService
+                    const shelf = guide.focusShelf
+                    if (service.length && shelf.length && service.toLowerCase() !== shelf.toLowerCase())
+                        return service + "    ·    " + shelf
+                    return shelf.length ? shelf : service
+                }
+                color: "#aeaeb2"
+                font.family: guide.uiFont
+                font.pixelSize: 24
+            }
         }
     }
 
@@ -77,7 +101,7 @@ Item {
         Column {
             id: column
             width: scroller.width
-            spacing: 26
+            spacing: 0
             Repeater {
                 id: shelves
                 model: guide.shelves
@@ -102,20 +126,25 @@ Item {
         }
     }
 
+    function kick() {
+        layoutRetry.tries = 0
+        layoutRetry.running = true
+    }
+
     Connections {
         target: guide
-        function onFocusChanged() {
-            scroller.align()
-        }
+        function onFocusChanged() { home.kick() }
+        function onPageChanged() { home.kick() }
     }
     Timer {
+        id: layoutRetry
         interval: 16
         repeat: true
         running: true
         property int tries: 0
         onTriggered: {
             tries++
-            if (scroller.align() || tries > 40) {
+            if ((scroller.align() && tries > 2) || tries > 40) {
                 scroller.armed = true
                 running = false
             }

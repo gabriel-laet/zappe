@@ -88,6 +88,14 @@ int main(int argc, char **argv)
     parser.addOption(QCommandLineOption(QStringList{QStringLiteral("catalog")},
                                          QStringLiteral("Catalog JSON path. Overrides ZAPPE_CATALOG and the data dir."),
                                          QStringLiteral("file")));
+    parser.addOption(QCommandLineOption(QStringLiteral("menu"), QStringLiteral("Open the side menu.")));
+    parser.addOption(QCommandLineOption(QStringLiteral("settings"), QStringLiteral("Open Ajustes.")));
+    parser.addOption(QCommandLineOption(QStringList{QStringLiteral("page")},
+                                         QStringLiteral("Initial page: home, live, streaming, or settings."),
+                                         QStringLiteral("name")));
+    parser.addOption(QCommandLineOption(QStringLiteral("volume"), QStringLiteral("Show the volume HUD.")));
+    parser.addOption(QCommandLineOption(QStringList{QStringLiteral("toast")},
+                                         QStringLiteral("Show a toast with <text>."), QStringLiteral("text")));
     parser.process(app);
 
     if (parser.isSet(QStringLiteral("self-check")))
@@ -116,6 +124,11 @@ int main(int argc, char **argv)
     guide.setChrome(windowed, screenshot, screenshot || envOn("ZAPPE_SKIP_SPLASH"), envOn("ZAPPE_FPS"));
     guide.setInitial(parser.value(QStringLiteral("shelf")).toInt(), parser.value(QStringLiteral("index")).toInt(),
                      parser.isSet(QStringLiteral("detail")));
+    QString page = parser.value(QStringLiteral("page"));
+    if (parser.isSet(QStringLiteral("settings")))
+        page = QStringLiteral("settings");
+    guide.setPreview(parser.isSet(QStringLiteral("menu")), page, parser.isSet(QStringLiteral("volume")),
+                     parser.value(QStringLiteral("toast")));
 
     std::fprintf(stderr, "zappe-qt-guide: platform %s\n", qPrintable(QGuiApplication::platformName()));
     std::fprintf(stderr, "zappe-qt-guide: catalog %s\n", qPrintable(guide.catalogPath()));

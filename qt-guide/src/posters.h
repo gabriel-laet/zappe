@@ -19,5 +19,6 @@ ArtPaths artFromFile(const QString &cacheDir, const QString &imagePath, const QS
 QString makeShadowSprite(const QString &cacheDir);
 QString makeGlowSprite(const QString &cacheDir, const QColor &accent);
 QString makeCircleMark(const QString &cacheDir, const QString &imagePath, int size);
+QString makeNoiseSprite(const QString &cacheDir);
 
 } // namespace zappe

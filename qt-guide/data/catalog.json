@@ -2,6 +2,63 @@
   "updated_at": 1714521600,
   "shelves": [
     {
+      "id": "live",
+      "skill_id": "sample.live.v1",
+      "title": "Ao vivo",
+      "status": "ok",
+      "updated_at": 1714521600,
+      "rows": [
+        {
+          "title": "North Desk",
+          "service": "live",
+          "href": "zappe://live/north-desk",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "City Loop",
+          "service": "live",
+          "href": "zappe://live/city-loop",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Evening Wire",
+          "service": "live",
+          "href": "zappe://live/evening-wire",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Harbor Signal",
+          "service": "live",
+          "href": "zappe://live/harbor-signal",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Late Edition",
+          "service": "live",
+          "href": "zappe://live/late-edition",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Field Notes",
+          "service": "live",
+          "href": "zappe://live/field-notes",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Studio North",
+          "service": "live",
+          "href": "zappe://live/studio-north",
+          "skill_id": "sample.live.v1"
+        },
+        {
+          "title": "Open Channel",
+          "service": "live",
+          "href": "zappe://live/open-channel",
+          "skill_id": "sample.live.v1"
+        }
+      ]
+    },
+    {
       "id": "continue",
       "skill_id": "sample.continue.v1",
       "title": "Continue watching",

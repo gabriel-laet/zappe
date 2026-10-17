@@ -10,12 +10,17 @@ Item {
     required property var rows
 
     readonly property int shelfIndex: index
-    readonly property bool rowFocused: guide.shelf === shelfIndex && !guide.detailOpen
+    readonly property bool shown: guide.shelfShown(index)
+    readonly property bool rowFocused: shown && guide.shelf === shelfIndex && !guide.detailOpen
+                                       && !guide.menuOpen && guide.page !== "settings"
     readonly property int cardH: wide ? 243 : 324
     readonly property int gutter: 80
+    readonly property int body: cardRepeater.count > 0 ? flick.height + 12 : empty.height + 12
 
     width: parent ? parent.width : 0
-    height: titleBlock.height + (cardRepeater.count > 0 ? flick.height + 12 : empty.height + 12)
+    height: shown ? titleBlock.height + body + 26 : 0
+    visible: shown
+    clip: !shown
 
     Item {
         id: titleBlock
@@ -141,20 +146,27 @@ Item {
         }
     }
 
+    function kick() {
+        layoutRetry.tries = 0
+        layoutRetry.running = true
+    }
+
+    onShownChanged: kick()
+
     Connections {
         target: guide
-        function onFocusChanged() {
-            flick.align()
-        }
+        function onFocusChanged() { shelf.kick() }
+        function onPageChanged() { shelf.kick() }
     }
     Timer {
+        id: layoutRetry
         interval: 16
         repeat: true
         running: true
         property int tries: 0
         onTriggered: {
             tries++
-            if (flick.align() || tries > 40) {
+            if ((flick.align() && tries > 2) || tries > 40) {
                 flick.armed = true
                 running = false
             }

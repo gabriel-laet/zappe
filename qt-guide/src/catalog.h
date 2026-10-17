@@ -17,6 +17,7 @@ struct RowData {
     QString ambient;
     QString color;
     bool wide = false;
+    bool live = false;
     double progress = 0;
 };
 
@@ -26,6 +27,7 @@ struct ShelfData {
     QString title;
     QString status;
     QString message;
+    bool live = false;
     QVector<RowData> rows;
 };
 
@@ -48,6 +50,7 @@ public:
         AmbientRole,
         ColorRole,
         WideRole,
+        LiveRole,
         ProgressRole,
     };
 

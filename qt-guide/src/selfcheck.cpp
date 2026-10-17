@@ -2,6 +2,7 @@
 
 #include "branding.h"
 #include "catalog.h"
+#include "guide.h"
 #include "posters.h"
 
 #include <QDir>
@@ -52,16 +53,23 @@ int runSelfCheck()
     const CatalogFile catalog = loadCatalogFile(samplePath);
     if (!catalog.ok)
         return fail("sample catalog did not parse");
-    if (catalog.shelves.size() != 3)
-        return fail("expected 3 shelves");
-    if (catalog.shelves.at(0).id != QLatin1String("continue") || catalog.shelves.at(0).status != QLatin1String("ok"))
+    if (catalog.shelves.size() != 4)
+        return fail("expected 4 shelves");
+    if (catalog.shelves.at(0).id != QLatin1String("live") || catalog.shelves.at(0).title != QLatin1String("Ao vivo")
+        || !catalog.shelves.at(0).live)
+        return fail("live shelf");
+    if (catalog.shelves.at(0).rows.size() < 2 || !catalog.shelves.at(0).rows.at(0).live
+        || !catalog.shelves.at(0).rows.at(0).wide || catalog.shelves.at(0).rows.at(0).title != QLatin1String("North Desk"))
+        return fail("live row");
+    if (catalog.shelves.at(1).id != QLatin1String("continue") || catalog.shelves.at(1).status != QLatin1String("ok"))
         return fail("continue shelf");
-    if (catalog.shelves.at(0).rows.size() < 2 || catalog.shelves.at(0).rows.at(0).title != QLatin1String("Northwind"))
-        return fail("first row");
-    if (!catalog.shelves.at(0).rows.at(0).wide || catalog.shelves.at(1).rows.at(0).wide)
+    if (catalog.shelves.at(1).rows.size() < 2 || catalog.shelves.at(1).rows.at(0).title != QLatin1String("Northwind")
+        || catalog.shelves.at(1).rows.at(0).live)
+        return fail("first continue row");
+    if (!catalog.shelves.at(1).rows.at(0).wide || catalog.shelves.at(2).rows.at(0).wide)
         return fail("wide vs poster");
-    if (catalog.shelves.at(2).title != QLatin1String("Set aside"))
-        return fail("third shelf title");
+    if (catalog.shelves.at(3).title != QLatin1String("Set aside"))
+        return fail("later shelf title");
 
     const QString badPath = dir.filePath(QStringLiteral("bad.json"));
     QFile bad(badPath);
@@ -138,6 +146,43 @@ int runSelfCheck()
     const QImage shadowImage(shadow);
     if (shadowImage.isNull() || qAlpha(shadowImage.pixel(0, 0)) > 30)
         return fail("shadow sprite");
+
+    const QImage noise(makeNoiseSprite(artDir));
+    if (noise.isNull() || noise.width() < 32)
+        return fail("noise sprite");
+
+    Guide guide;
+    guide.setBranding(defaults);
+    guide.setCatalog(catalog);
+    if (guide.focusTitle() != QLatin1String("North Desk") || !guide.focusLive() || guide.shelf() != 0)
+        return fail("live focus");
+    guide.setPreview(false, QStringLiteral("streaming"), false, {});
+    if (guide.page() != QLatin1String("streaming") || guide.shelfShown(0) || !guide.shelfShown(1) || guide.shelf() != 1)
+        return fail("streaming page");
+    guide.move(-1, 0);
+    if (guide.shelf() != 1)
+        return fail("streaming skips live");
+    guide.move(1, 0);
+    if (guide.shelf() != 2)
+        return fail("streaming next shelf");
+    guide.setPreview(true, QStringLiteral("live"), false, {});
+    if (!guide.menuOpen() || guide.page() != QLatin1String("live") || guide.menuIndex() != 1 || !guide.shelfShown(0)
+        || guide.shelfShown(1))
+        return fail("live menu");
+    guide.back();
+    if (guide.menuOpen() || guide.page() != QLatin1String("live"))
+        return fail("menu back");
+    guide.back();
+    if (guide.page() != QLatin1String("home") || !guide.shelfShown(1))
+        return fail("back home");
+    guide.adjustVolume(5);
+    if (guide.volume() != 45 || !guide.volumeHud())
+        return fail("volume");
+    guide.toggleMute();
+    if (!guide.muted())
+        return fail("mute");
+    if (guide.episodeTitle(3) != QString::fromUtf8("Turno da noite"))
+        return fail("episode title");
 
     std::printf("self-check: ok (%d shelves, brand Zappe, poster %dx%d)\n", int(catalog.shelves.size()), art.width(),
                 art.height());

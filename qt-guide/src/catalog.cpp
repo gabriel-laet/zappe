@@ -29,6 +29,8 @@ QString labelize(const QString &service)
     QString text = service.trimmed();
     if (text.isEmpty())
         return QStringLiteral("Library");
+    if (text.compare(QLatin1String("live"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("Ao vivo");
     text.replace(QLatin1Char('_'), QLatin1Char(' '));
     text.replace(QLatin1Char('-'), QLatin1Char(' '));
     QStringList parts;
@@ -44,7 +46,13 @@ bool shelfIsWide(const QString &id)
 {
     const QString key = id.trimmed().toLower();
     return key == QLatin1String("continue") || key == QLatin1String("live") || key == QLatin1String("apps")
-        || key == QLatin1String("canais");
+        || key == QLatin1String("canais") || key == QLatin1String("ao-vivo") || key == QLatin1String("aovivo");
+}
+
+bool shelfIsLive(const QString &id)
+{
+    const QString key = id.trimmed().toLower();
+    return key == QLatin1String("live") || key == QLatin1String("ao-vivo") || key == QLatin1String("aovivo");
 }
 
 QString resolveArtwork(const QString &spec, const QString &catalogPath, const QString &dataDir)
@@ -104,6 +112,8 @@ QVariant RowModel::data(const QModelIndex &index, int role) const
         return row.color;
     case WideRole:
         return row.wide;
+    case LiveRole:
+        return row.live;
     case ProgressRole:
         return row.progress;
     default:
@@ -122,6 +132,7 @@ QHash<int, QByteArray> RowModel::roleNames() const
         {AmbientRole, "ambient"},
         {ColorRole, "color"},
         {WideRole, "wide"},
+        {LiveRole, "live"},
         {ProgressRole, "progress"},
     };
 }
@@ -257,6 +268,7 @@ CatalogFile loadCatalogFile(const QString &path)
         if (shelf.status.isEmpty())
             shelf.status = QStringLiteral("empty");
         shelf.message = optString(shelfObj, "message");
+        shelf.live = shelfIsLive(shelf.id);
         const bool wide = shelfIsWide(shelf.id);
         const QJsonArray rows = shelfObj.value(QStringLiteral("rows")).toArray();
         for (const QJsonValue &rowVal : rows) {
@@ -275,7 +287,8 @@ CatalogFile loadCatalogFile(const QString &path)
                 row.skillId = shelf.skillId;
             row.artworkSpec = optString(rowObj, "artwork");
             row.wide = wide;
-            if (wide) {
+            row.live = shelf.live;
+            if (wide && !row.live) {
                 const quint32 hash = fnv1a(row.title);
                 row.progress = 0.12 + (hash % 73) / 100.0;
             }
