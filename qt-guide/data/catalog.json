@@ -1,0 +1,188 @@
+{
+  "updated_at": 1714521600,
+  "shelves": [
+    {
+      "id": "continue",
+      "skill_id": "sample.continue.v1",
+      "title": "Continue watching",
+      "status": "ok",
+      "updated_at": 1714521600,
+      "rows": [
+        {
+          "title": "Northwind",
+          "service": "library",
+          "href": "zappe://play/northwind",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Glass Orchard",
+          "service": "library",
+          "href": "zappe://play/glass-orchard",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Midnight Ferry",
+          "service": "library",
+          "href": "zappe://play/midnight-ferry",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Paper Lanterns",
+          "service": "library",
+          "href": "zappe://play/paper-lanterns",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Salt Cedar",
+          "service": "library",
+          "href": "zappe://play/salt-cedar",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Low Tide Radio",
+          "service": "library",
+          "href": "zappe://play/low-tide-radio",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "The Quiet Atlas",
+          "service": "library",
+          "href": "zappe://play/the-quiet-atlas",
+          "skill_id": "sample.continue.v1"
+        },
+        {
+          "title": "Harbor Lights",
+          "service": "library",
+          "href": "zappe://play/harbor-lights",
+          "skill_id": "sample.continue.v1"
+        }
+      ]
+    },
+    {
+      "id": "library",
+      "skill_id": "sample.library.v1",
+      "title": "Library",
+      "status": "ok",
+      "updated_at": 1714521600,
+      "rows": [
+        {
+          "title": "Amber Line",
+          "service": "library",
+          "href": "zappe://play/amber-line",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Cold Kitchen",
+          "service": "library",
+          "href": "zappe://play/cold-kitchen",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "River Arithmetic",
+          "service": "library",
+          "href": "zappe://play/river-arithmetic",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Static Garden",
+          "service": "library",
+          "href": "zappe://play/static-garden",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Blue Meridian",
+          "service": "library",
+          "href": "zappe://play/blue-meridian",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Last Tram",
+          "service": "library",
+          "href": "zappe://play/last-tram",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Copper Season",
+          "service": "library",
+          "href": "zappe://play/copper-season",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Open Window",
+          "service": "library",
+          "href": "zappe://play/open-window",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "Small Constellations",
+          "service": "library",
+          "href": "zappe://play/small-constellations",
+          "skill_id": "sample.library.v1"
+        },
+        {
+          "title": "West of Thursday",
+          "service": "library",
+          "href": "zappe://play/west-of-thursday",
+          "skill_id": "sample.library.v1"
+        }
+      ]
+    },
+    {
+      "id": "later",
+      "skill_id": "sample.later.v1",
+      "title": "Set aside",
+      "status": "ok",
+      "updated_at": 1714521600,
+      "rows": [
+        {
+          "title": "Violet Hour",
+          "service": "archive",
+          "href": "zappe://play/violet-hour",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Kitchen Window",
+          "service": "archive",
+          "href": "zappe://play/kitchen-window",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Slow River",
+          "service": "archive",
+          "href": "zappe://play/slow-river",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Second Bell",
+          "service": "archive",
+          "href": "zappe://play/second-bell",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Marble Radio",
+          "service": "archive",
+          "href": "zappe://play/marble-radio",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Kindling",
+          "service": "archive",
+          "href": "zappe://play/kindling",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Night Market",
+          "service": "archive",
+          "href": "zappe://play/night-market",
+          "skill_id": "sample.later.v1"
+        },
+        {
+          "title": "Paper Boats",
+          "service": "archive",
+          "href": "zappe://play/paper-boats",
+          "skill_id": "sample.later.v1"
+        }
+      ]
+    }
+  ]
+}
