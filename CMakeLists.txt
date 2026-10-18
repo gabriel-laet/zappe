@@ -49,6 +49,7 @@ qt_add_executable(zappe
   src/cdp.cpp
   src/logins.cpp
   src/mirror.cpp
+  src/learn.cpp
   src/remote.cpp
   src/house.cpp
 )

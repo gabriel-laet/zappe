@@ -249,6 +249,36 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
     }
 }
 
+void CdpClient::enableNetwork()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingEnable = m_nextId++;
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingEnable, QStringLiteral("Network.enable"), QJsonObject())));
+}
+
+void CdpClient::getResponseBody(const QString &requestId)
+{
+    if (!m_socket || !m_connected || requestId.isEmpty())
+        return;
+    const int id = m_nextId++;
+    m_pendingBodies.insert(id, requestId);
+    QJsonObject params;
+    params.insert(QStringLiteral("requestId"), requestId);
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Network.getResponseBody"), params)));
+}
+
+void CdpClient::captureScreenshot()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingShot = m_nextId++;
+    QJsonObject params;
+    params.insert(QStringLiteral("format"), QStringLiteral("jpeg"));
+    params.insert(QStringLiteral("quality"), 40);
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingShot, QStringLiteral("Page.captureScreenshot"), params)));
+}
+
 void CdpClient::dispatchAction(const QString &action)
 {
     if (!m_socket || !m_connected)
@@ -273,9 +303,50 @@ void CdpClient::dispatchAction(const QString &action)
 void CdpClient::onMessage(const QString &message)
 {
     const QJsonObject obj = QJsonDocument::fromJson(message.toUtf8()).object();
+    const QString method = obj.value(QStringLiteral("method")).toString();
+    if (!method.isEmpty() && !obj.contains(QStringLiteral("id"))) {
+        const QJsonObject params = obj.value(QStringLiteral("params")).toObject();
+        if (method == QLatin1String("Network.responseReceived")) {
+            const QJsonObject response = params.value(QStringLiteral("response")).toObject();
+            emit networkResponse(params.value(QStringLiteral("requestId")).toString(),
+                                 response.value(QStringLiteral("url")).toString(),
+                                 response.value(QStringLiteral("mimeType")).toString());
+        } else if (method == QLatin1String("Network.loadingFinished")) {
+            emit networkFinished(params.value(QStringLiteral("requestId")).toString());
+        }
+        return;
+    }
     const int id = obj.value(QStringLiteral("id")).toInt();
     if (id == 0)
         return;
+    if (m_pendingBodies.contains(id)) {
+        const QString requestId = m_pendingBodies.take(id);
+        if (obj.contains(QStringLiteral("error"))) {
+            emit responseBody(requestId, QByteArray(), false);
+            return;
+        }
+        const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+        QByteArray body = result.value(QStringLiteral("body")).toString().toUtf8();
+        if (result.value(QStringLiteral("base64Encoded")).toBool())
+            body = QByteArray::fromBase64(body);
+        emit responseBody(requestId, body, !body.isEmpty());
+        return;
+    }
+    if (id == m_pendingShot) {
+        m_pendingShot = 0;
+        if (obj.contains(QStringLiteral("error"))) {
+            emit screenshotReady(QByteArray(), false);
+            return;
+        }
+        const QByteArray png =
+            QByteArray::fromBase64(obj.value(QStringLiteral("result")).toObject().value(QStringLiteral("data")).toString().toLatin1());
+        emit screenshotReady(png, !png.isEmpty());
+        return;
+    }
+    if (id == m_pendingEnable) {
+        m_pendingEnable = 0;
+        return;
+    }
     if (obj.contains(QStringLiteral("error"))) {
         const QString text = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
         if (id == m_pendingHistory) {

@@ -258,7 +258,7 @@ void House::playRequested(const QString &title, const QString &service, const QS
         playOta(query);
         return;
     }
-    const QVector<MirrorAdapter> adapters = loadMirrorAdapters();
+    const QVector<MirrorAdapter> adapters = loadMirrorAdapters(m_dataDir);
     const MirrorAdapter *adapter = findMirrorAdapter(adapters, service);
     if (!adapter && m_guide)
         adapter = findMirrorAdapter(adapters, m_guide->mirrorService());

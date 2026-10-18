@@ -1,17 +1,37 @@
 # Espelho dos streamings
 
-O Chrome não aparece para navegar. Ele sobe oculto, atrás do guia Qt, no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`). O guia lê o DOM por CDP e desenha fileiras, capas, continuar assistindo, perfis e busca. O Chrome só vem para a frente no Play, em tela cheia.
+O Chrome não aparece para navegar. Ele sobe oculto, atrás do guia Qt, no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`). O guia pede ao CDP as respostas JSON/GraphQL da página e desenha fileiras, capas e continuar assistindo. O DOM entra quando a rede não traz título reproduzível; perfis e busca por seletor saem dessa leitura. O Chrome só vem para a frente no Play, em tela cheia.
 
 ## Adaptadores
 
-`data/mirrors.json` descreve cada serviço: URL da home, URL de busca (`{q}`) e seletores de fileira, título, card, link, capa, progresso e perfil. Um serviço novo entra nesse JSON com `kind` `generic`. Netflix (`kind` `netflix`) e YouTube (`kind` `youtube`) também normalizam a URL de reprodução no código:
+`data/mirrors.json` descreve cada serviço: URL da home, URL de busca (`{q}`), um `feeds` de rede e os seletores de DOM. Um serviço novo entra nesse JSON com `kind` `generic`. Netflix (`kind` `netflix`) e YouTube (`kind` `youtube`) também normalizam a URL de reprodução no código:
 
 - `/title/80100172` na Netflix vira `https://www.netflix.com/watch/80100172`
 - `youtu.be/…` e `/shorts/…` viram `https://www.youtube.com/watch?v=…`
 
-Prime Video, HBO Max, Apple TV, Disney+ e Globoplay usam o extrator genérico com os seletores do JSON. Um link só é Play se o caminho tiver `/watch`, `/play`, `/player`, `/video` ou `/v/`.
+Prime Video, HBO Max, Apple TV, Disney+ e Globoplay usam o extrator genérico. Um link só é Play se o caminho tiver `/watch`, `/play`, `/player`, `/video` ou `/v/`.
 
-O script de extração devolve JSON (`profiles`, `shelves`, `needsLogin`). O app transforma isso em fileiras do guia. `needsLogin` abre o pedido de login que já existia, sem tirar o Qt da frente.
+Cada `feeds` diz quais URLs interessam (`urlContains`) e quais chaves do JSON são título, link, capa e nome da fileira. Se o link não for `http`, `hrefTemplate` monta a URL com `{href}`. O app guarda até 8 corpos JSON, com 48 KB cada. Se sair pelo menos um título reproduzível, o guia usa isso e não raspa o HTML. Senão, o script de DOM devolve `profiles`, `shelves` e `needsLogin`. `needsLogin` abre o pedido de login que já existia, sem tirar o Qt da frente, e não dispara aprendizado.
+
+## Aprendizado
+
+Em operação normal o app não chama IA. A chamada só existe depois que a rede e o DOM falham na home do serviço (fileira vazia, seletor ausente ou nenhum Play) e existe um endpoint configurado.
+
+A configuração fica fora do git, em `~/.local/share/zappe/llm.json` (ou `$ZAPPE_DATA_DIR/llm.json`). Sem arquivo, ou com `url` vazia, o aprendizado fica desligado e o guia só mostra a fileira vazia. Exemplo sem chave: `packaging/appliance/examples/llm.json`.
+
+```json
+{
+  "url": "https://api.openai.com/v1/chat/completions",
+  "model": "gpt-4o-mini",
+  "key": "coloque-a-chave-so-nesta-maquina"
+}
+```
+
+`url` é o endpoint completo, no formato de chat completions. `ZAPPE_LLM_URL`, `ZAPPE_LLM_KEY` e `ZAPPE_LLM_MODEL` substituem o arquivo. A chave vai no cabeçalho `Authorization` e não entra no JSON do pedido.
+
+Quando o adaptador falha, o app tira um retrato: DOM enxuto (tag, classe, link, rótulo), as amostras de rede e um JPEG da página. O modelo devolve um adaptador. Antes de gravar, o app roda esse adaptador nas amostras capturadas. Só salva se saírem pelo menos 4 títulos com capa `http` e link de Play. Resposta só com seletor de DOM, ou feed que não extrai essas amostras, é descartada. Há uma tentativa por serviço a cada processo.
+
+O arquivo vigente é `~/.local/share/zappe/adapters/<id>.json`. Ele substitui o serviço de mesmo `id` que veio no pacote. A versão anterior vai para `adapters/history/<id>/<versão>.json` e permanece lá. Se o arquivo aprendido falha de novo, o app restaura a versão histórica imediatamente anterior, uma vez por processo, e tenta extrair de novo. Apagar `adapters/<id>.json` volta ao adaptador do pacote. Netflix e YouTube conservam o `kind`, para a URL de Play continuar a mesma.
 
 ## O que o controle faz
 

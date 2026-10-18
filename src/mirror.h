@@ -4,8 +4,11 @@
 
 #include <QDateTime>
 #include <QHash>
+#include <QJsonObject>
 #include <QObject>
+#include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class QNetworkAccessManager;
@@ -16,6 +19,15 @@ namespace zappe {
 class ChromeSession;
 class CdpClient;
 class Guide;
+
+struct MirrorFeed {
+    QStringList urlContains;
+    QStringList titleKeys;
+    QStringList hrefKeys;
+    QStringList artworkKeys;
+    QStringList shelfKeys;
+    QString hrefTemplate;
+};
 
 struct MirrorAdapter {
     QString id;
@@ -31,8 +43,15 @@ struct MirrorAdapter {
     QString progressSelector;
     QString profileSelector;
     QStringList continueHints;
+    QVector<MirrorFeed> feeds;
     int limitRows = 12;
     int limitCards = 18;
+    int version = 0;
+};
+
+struct NetworkSample {
+    QString url;
+    QByteArray body;
 };
 
 struct MirrorPage {
@@ -42,17 +61,24 @@ struct MirrorPage {
     bool ok = false;
 };
 
+bool mirrorReadAdapter(const QJsonObject &obj, MirrorAdapter &adapter);
+QByteArray mirrorAdapterJson(const MirrorAdapter &adapter);
 QVector<MirrorAdapter> loadMirrorAdapters();
+QVector<MirrorAdapter> loadMirrorAdapters(const QString &dataDir);
 QVector<MirrorAdapter> parseMirrorAdapters(const QByteArray &json);
 const MirrorAdapter *findMirrorAdapter(const QVector<MirrorAdapter> &adapters, const QString &id);
 
 QString mirrorExtractScript(const MirrorAdapter &adapter);
+QString mirrorDomSnapshotScript();
 QString mirrorFocusPlayerScript();
 QString mirrorSearchUrl(const MirrorAdapter &adapter, const QString &query);
 QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href);
 bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href);
 
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter);
+MirrorPage parseMirrorFeeds(const QVector<NetworkSample> &samples, const MirrorAdapter &adapter);
+bool mirrorPageHasTitles(const MirrorPage &page);
+bool mirrorPageUsable(const MirrorPage &page, int minTitles);
 
 QString coverCachePath(const QString &cacheDir, const QString &url);
 bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs);
@@ -96,8 +122,18 @@ private:
     void onAttached();
     void onNavigated();
     void onEvaluated(const QString &value, bool ok);
+    void onNetworkResponse(const QString &requestId, const QString &url, const QString &mimeType);
+    void onNetworkFinished(const QString &requestId);
+    void onResponseBody(const QString &requestId, const QByteArray &body, bool ok);
+    void onScreenshot(const QByteArray &png, bool ok);
     void pump();
     void begin(const QString &serviceId, const QString &url, int job);
+    void settle(int epoch, const QString &serviceId, int job, int waited);
+    void considerExtract();
+    void acceptPage(const MirrorPage &page);
+    void beginRepair();
+    void postLearn(const QByteArray &png);
+    void finishEmpty();
     void applyPage(const MirrorPage &page);
     void downloadNext();
     void showLoading(const QString &serviceId);
@@ -112,7 +148,12 @@ private:
     QString m_current;
     QString m_pendingUrl;
     QVector<CoverJob> m_covers;
+    QVector<NetworkSample> m_samples;
+    QHash<QString, QString> m_inflight;
     QHash<QString, QVector<ShelfData>> m_pages;
+    QSet<QString> m_learned;
+    QSet<QString> m_rolled;
+    QString m_domSnap;
     QNetworkAccessManager *m_http = nullptr;
     QTimer *m_refresh = nullptr;
     int m_job = 0;
@@ -121,6 +162,8 @@ private:
     bool m_started = false;
     bool m_askedLogin = false;
     bool m_downloading = false;
+    bool m_learnPosted = false;
+    int m_epoch = 0;
 };
 
 } // namespace zappe

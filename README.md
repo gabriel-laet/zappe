@@ -188,7 +188,7 @@ Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/
 
 OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar.
 
-O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê fileiras, capas, continuar assistindo, perfis e busca. O Qt desenha isso. Só o Play abre a URL de reprodução e traz o Chrome para a frente. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
+O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê as respostas JSON do serviço; o DOM só entra se a rede não trouxer títulos. O Qt desenha fileiras, capas, continuar assistindo, perfis e busca. Só o Play abre a URL de reprodução e traz o Chrome para a frente. Se o adaptador quebra e existe `~/.local/share/zappe/llm.json` com `url`, o app pede um reparo, valida nas amostras capturadas e versiona o resultado em `adapters/`. Sem essa URL, nada chama IA. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
 
 Uma fileira antiga do harvest com `status` `error`, `teach` ou `harvesting`, ou com texto de AT-SPI (`no Chrome/Chromium application on the AT-SPI bus`), sai do catálogo e não aparece no guia. `Continue watching` com títulos de verdade continua.
 
@@ -218,6 +218,9 @@ journalctl --user -u zappe-update.service -n 50
 | `CHROME_PATH` | binário do Chrome |
 | `ZAPPE_CDP_PORT` | porta CDP (padrão 9222) |
 | `ZAPPE_MIRROR_DISABLE` | não abre o Chrome em segundo plano |
+| `ZAPPE_LLM_URL` | endpoint de chat completions; vazio desliga o aprendizado |
+| `ZAPPE_LLM_KEY` | chave só no cabeçalho; não vai para o git |
+| `ZAPPE_LLM_MODEL` | modelo do endpoint (padrão `gpt-4o-mini`) |
 | `ZAPPE_LOGIN_WEBHOOK` | URL do webhook de login |
 | `ZAPPE_HDMI_CARD` / `ZAPPE_HDMI_PROFILE` | perfil PipeWire |
 | `ZAPPE_AUDIO_DISABLE` | não chama `pactl` |

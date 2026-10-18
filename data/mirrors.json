@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Adaptadores declarativos. O Chrome fica atrás do guia. Cada serviço descreve seletores; Netflix e YouTube têm URL de reprodução própria no código. Os demais usam o extrator genérico com estes seletores.",
+  "note": "Adaptadores declarativos. A extração prefere respostas JSON/GraphQL (feeds). Os seletores de DOM são o fallback. Netflix e YouTube normalizam a URL de reprodução no código.",
   "services": [
     {
       "id": "netflix",
@@ -15,6 +15,16 @@
       "imageSelector": "img.boxart-image, img.boxart-image-in-padded-container, img",
       "progressSelector": ".progress-bar, [role='progressbar']",
       "profileSelector": ".profile-name, [data-uia='profile-name']",
+      "feeds": [
+        {
+          "urlContains": ["netflix.com/nq", "netflix.com/graphql", "/pathEvaluator"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["watchId", "videoId"],
+          "artworkKeys": ["boxart", "artwork", "storyArt", "image"],
+          "shelfKeys": ["rowTitle", "displayName", "title", "listContext"],
+          "hrefTemplate": "https://www.netflix.com/watch/{href}"
+        }
+      ],
       "continueHints": ["continueWatching", "continuar", "continue watching"]
     },
     {
@@ -30,6 +40,16 @@
       "imageSelector": "ytd-thumbnail img, img#img, img",
       "progressSelector": "#progress, ytd-thumbnail-overlay-resume-playback-renderer #progress",
       "profileSelector": "button#avatar-btn, yt-img-shadow#avatar img",
+      "feeds": [
+        {
+          "urlContains": ["youtubei/v1/browse", "youtubei/v1/search", "youtube.com/youtubei"],
+          "titleKeys": ["title", "headline"],
+          "hrefKeys": ["videoId"],
+          "artworkKeys": ["thumbnail", "thumbnails"],
+          "shelfKeys": ["title", "headline"],
+          "hrefTemplate": "https://www.youtube.com/watch?v={href}"
+        }
+      ],
       "continueHints": ["continuar assistindo", "continue watching", "history"]
     },
     {
@@ -45,6 +65,16 @@
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-automation-id='nav-profile'], #pv-nav-profile",
+      "feeds": [
+        {
+          "urlContains": ["primevideo.com", "api.amazon"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["playbackUrl", "link", "href"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
       "continueHints": ["continuar", "continue watching"]
     },
     {
@@ -60,6 +90,16 @@
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-testid='profile-button'], [data-testid='profilePicker']",
+      "feeds": [
+        {
+          "urlContains": ["play.max.com", "max.com/graphql"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["playbackUrl", "href", "id"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
       "continueHints": ["continuar", "continue watching"]
     },
     {
@@ -75,6 +115,16 @@
       "imageSelector": "img, picture source",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-testid='account-menu'], .profile-button",
+      "feeds": [
+        {
+          "urlContains": ["tv.apple.com", "amp-api.music.apple"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["url", "href"],
+          "artworkKeys": ["artwork", "image"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
       "continueHints": ["continuar", "continue watching"]
     },
     {
@@ -90,6 +140,16 @@
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-testid='profile-avatar'], [data-testid='profile-selection']",
+      "feeds": [
+        {
+          "urlContains": ["disneyplus.com", "disney.api"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["href", "playbackUrl"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
       "continueHints": ["continuar", "continue watching"]
     },
     {
@@ -105,6 +165,16 @@
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-testid='user-menu'], .user-avatar",
+      "feeds": [
+        {
+          "urlContains": ["globoplay.globo.com", "globo.com/graphql"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["href", "url"],
+          "artworkKeys": ["image", "thumb", "artwork"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
       "continueHints": ["continuar assistindo", "continuar"]
     }
   ]
