@@ -25,6 +25,8 @@
 #include <QFileDevice>
 #include <QFileInfo>
 #include <QImage>
+#include <QJSEngine>
+#include <QJSValue>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -487,6 +489,26 @@ int runLogicSelfCheck()
     if (linkedCards != 1 || !linkedChanged || linkedShelves.at(0).rows.at(0).artwork != linkedPath
         || !fileUrl(linkedShelves.at(0).rows.at(0).artwork).startsWith(QStringLiteral("file://")))
         return fail("cover links card");
+    QVector<ShelfData> distinctShelves(1);
+    RowData guerraRow;
+    guerraRow.title = QStringLiteral("Guerra");
+    guerraRow.artworkSpec = QStringLiteral("https://images.cdn.prd.api.discomax.com/2024/01/guerra11bb22cc33dd44.jpg");
+    RowData supergirlRow;
+    supergirlRow.title = QStringLiteral("Supergirl");
+    supergirlRow.artworkSpec = QStringLiteral("https://images.cdn.prd.api.discomax.com/2024/01/super99aa88bb77cc66dd.jpg");
+    distinctShelves[0].rows.append(guerraRow);
+    distinctShelves[0].rows.append(supergirlRow);
+    const QString guerraPath = dir.filePath(QStringLiteral("covers/guerra.jpg"));
+    QFile guerraFile(guerraPath);
+    if (!guerraFile.open(QIODevice::WriteOnly) || guerraFile.write(QByteArray(64, 'g')) != 64)
+        return fail("write distinct cover");
+    guerraFile.close();
+    if (coverUrlsMatch(guerraRow.artworkSpec, supergirlRow.artworkSpec))
+        return fail("different cards share a cover");
+    if (assignCoverFile(distinctShelves, guerraRow.artworkSpec, guerraPath, nullptr) != 1
+        || distinctShelves.at(0).rows.at(0).artwork != guerraPath
+        || distinctShelves.at(0).rows.at(1).artwork == guerraPath)
+        return fail("one cover painted every card");
     const QString referer = coverDownloadReferer(QStringLiteral("https://www.netflix.com/browse"));
     if (!referer.contains(QStringLiteral("netflix.com")) || referer.contains(QStringLiteral("nflxso"))
         || !coverDownloadReferer(QStringLiteral("https://www.primevideo.com/")).contains(QStringLiteral("primevideo.com"))
@@ -728,6 +750,325 @@ int runLogicSelfCheck()
                != QStringLiteral("https://i.ytimg.com/vi/bbcdefghijk/maxresdefault.jpg")
         || mirrorYoutubeArtwork(QStringLiteral("https://www.youtube.com/watch?v=ab")).contains(QStringLiteral("ytimg")))
         return fail("youtube live row art");
+    if (netflixScript.contains(QStringLiteral("artOf(card) ||")) || netflixScript.contains(QStringLiteral("querySelector('h3')"))
+        || !netflixScript.contains(QStringLiteral("artFor")) || !netflixScript.contains(QStringLiteral("wrapsCards"))
+        || !netflixScript.contains(QStringLiteral("errorTitle")) || !netflixScript.contains(QStringLiteral("tag === 'img'"))
+        || netflixScript.contains(QStringLiteral("querySelectorAll('*')")))
+        return fail("extract shares one cover");
+    const MirrorAdapter *hbo = findMirrorAdapter(mirrors, QStringLiteral("hbo"));
+    if (!hbo)
+        return fail("hbo adapter");
+    const auto runDom = [](const QString &base, const QString &tree, const QString &script, QString *error) {
+        QJSEngine engine;
+        const QString source = QStringLiteral(R"js(
+function URL(href, base) {
+  href = String(href || '');
+  base = String(base || '');
+  if (href.indexOf('http://') === 0 || href.indexOf('https://') === 0) this.href = href;
+  else if (href.indexOf('//') === 0) this.href = 'https:' + href;
+  else if (href.charAt(0) === '/') {
+    var origin = /^(https?:\/\/[^\/]+)/.exec(base);
+    this.href = (origin ? origin[1] : '') + href;
+  } else this.href = href;
+}
+function matchesSimple(node, simple) {
+  if (!node || !node.tagName) return false;
+  var i = 0;
+  var s = String(simple || '');
+  if (!s) return false;
+  if (s.charAt(0) !== '#' && s.charAt(0) !== '.' && s.charAt(0) !== '[') {
+    var tm = /^[A-Za-z0-9_-]+/.exec(s);
+    if (!tm || node.tagName.toLowerCase() !== tm[0].toLowerCase()) return false;
+    i = tm[0].length;
+  }
+  while (i < s.length) {
+    var c = s.charAt(i);
+    if (c === '#') {
+      var idm = /^#([A-Za-z0-9_-]+)/.exec(s.slice(i));
+      if (!idm || String(node.getAttribute('id') || '') !== idm[1]) return false;
+      i += idm[0].length;
+    } else if (c === '.') {
+      var cm = /^\.([A-Za-z0-9_-]+)/.exec(s.slice(i));
+      var classes = String(node.className || '').split(/\s+/);
+      if (!cm || classes.indexOf(cm[1]) < 0) return false;
+      i += cm[0].length;
+    } else if (c === '[') {
+      var am = /^\[([A-Za-z0-9_-]+)(?:(\*|\^)?=(['"])(.*?)\3)?\]/.exec(s.slice(i));
+      if (!am) return false;
+      var val = node.getAttribute(am[1]);
+      if (val === null || val === undefined) return false;
+      if (am[2] === '*' && String(val).indexOf(am[4]) < 0) return false;
+      if (am[2] === '^' && String(val).indexOf(am[4]) !== 0) return false;
+      if (!am[2] && am[4] !== undefined && String(val) !== am[4]) return false;
+      i += am[0].length;
+    } else return false;
+  }
+  return true;
+}
+function matchesCompound(node, sel) {
+  var tokens = String(sel || '').trim().split(/\s+/);
+  if (!tokens.length || !tokens[0]) return false;
+  if (!matchesSimple(node, tokens[tokens.length - 1])) return false;
+  var anc = node.parentElement;
+  for (var t = tokens.length - 2; t >= 0; t--) {
+    var found = false;
+    while (anc) {
+      if (matchesSimple(anc, tokens[t])) { found = true; anc = anc.parentElement; break; }
+      anc = anc.parentElement;
+    }
+    if (!found) return false;
+  }
+  return true;
+}
+function matchesSel(node, sel) {
+  var parts = String(sel || '').split(',');
+  for (var i = 0; i < parts.length; i++) if (matchesCompound(node, parts[i])) return true;
+  return false;
+}
+function walk(root, sel, out) {
+  var kids = root.children || [];
+  for (var i = 0; i < kids.length; i++) {
+    if (kids[i].matches && kids[i].matches(sel)) out.push(kids[i]);
+    walk(kids[i], sel, out);
+  }
+}
+function append(parent, kid) {
+  if (!kid || typeof kid !== 'object') return;
+  kid.parentElement = parent;
+  parent.children.push(kid);
+}
+function makeEl(tag, attrs, kids) {
+  var node = {tagName: String(tag || 'div').toUpperCase(), attrs: attrs || {}, children: [], parentElement: null, style: {}, shadowRoot: null, currentSrc: '', src: ''};
+  node.className = node.attrs.class || '';
+  node.textContent = node.attrs.text || '';
+  node.innerText = node.textContent;
+  if (node.attrs.src) node.src = node.attrs.src;
+  if (node.attrs.currentSrc) node.currentSrc = node.attrs.currentSrc;
+  node.getAttribute = function(name) {
+    if (!Object.prototype.hasOwnProperty.call(node.attrs, name)) return null;
+    var v = node.attrs[name];
+    return v === undefined || v === null ? null : String(v);
+  };
+  node.matches = function(sel) { return matchesSel(node, sel); };
+  node.closest = function(sel) {
+    var n = node;
+    while (n) { if (n.matches && n.matches(sel)) return n; n = n.parentElement; }
+    return null;
+  };
+  node.querySelectorAll = function(sel) { var out = []; walk(node, sel, out); return out; };
+  node.querySelector = function(sel) { var all = node.querySelectorAll(sel); return all.length ? all[0] : null; };
+  for (var i = 0; i < (kids || []).length; i++) append(node, kids[i]);
+  return node;
+}
+)js") + QStringLiteral("var location = {href: ")
+                                     + jsString(base) + QStringLiteral("};\nvar document = ") + tree
+                                     + QStringLiteral(";\ndocument.body = document;\n") + script;
+        const QJSValue result = engine.evaluate(source);
+        if (result.isError()) {
+            if (error)
+                *error = result.toString() + QStringLiteral(" line ") + result.property(QStringLiteral("lineNumber")).toString();
+            return QString();
+        }
+        return result.toString();
+    };
+    const auto rowsOf = [](const QString &json, QString *error) {
+        QJsonArray rows;
+        const QJsonDocument doc = QJsonDocument::fromJson(json.toUtf8());
+        if (!doc.isObject()) {
+            if (error)
+                *error = json.left(240);
+            return rows;
+        }
+        const QString extractError = doc.object().value(QStringLiteral("error")).toString();
+        if (!extractError.isEmpty()) {
+            if (error)
+                *error = extractError;
+            return rows;
+        }
+        for (const QJsonValue &shelf : doc.object().value(QStringLiteral("shelves")).toArray()) {
+            for (const QJsonValue &row : shelf.toObject().value(QStringLiteral("rows")).toArray())
+                rows.append(row);
+        }
+        return rows;
+    };
+    const auto distinctArt = [](const QJsonArray &rows) {
+        QStringList arts;
+        if (rows.size() < 4)
+            return false;
+        for (const QJsonValue &row : rows) {
+            const QString art = row.toObject().value(QStringLiteral("artwork")).toString();
+            const QString title = row.toObject().value(QStringLiteral("title")).toString();
+            if (art.isEmpty() || title.isEmpty() || arts.contains(art))
+                return false;
+            arts.append(art);
+        }
+        return true;
+    };
+    QString domError;
+    const QString netflixTree = QStringLiteral(R"js((function () {
+  var card = function (title, id, art, season) {
+    var kids = [makeEl('img', {class: 'boxart-image', src: art, currentSrc: art}, [])];
+    if (season) kids.push(makeEl('h3', {text: season}, []));
+    return makeEl('a', {href: '/browse?jbv=' + id, 'aria-label': title}, kids);
+  };
+  return makeEl('section', {}, [
+    makeEl('h2', {text: 'Só um erro'}, []),
+    makeEl('div', {'data-list-context': 'trending'}, [
+      makeEl('h2', {text: 'Em alta'}, []),
+      card('Dark', '111', 'https://occ.example/dark.jpg', 'Temporada 4'),
+      card('Crown', '222', 'https://occ.example/crown.jpg', 'Poder'),
+      card('Witcher', '333', 'https://occ.example/witcher.jpg', ''),
+      card('Bridgerton', '444', 'https://occ.example/bridgerton.jpg', '')
+    ])
+  ]);
+})())js");
+    const QString netflixJson = runDom(QStringLiteral("https://www.netflix.com/browse"), netflixTree, netflixScript, &domError);
+    const QJsonArray netflixRows = rowsOf(netflixJson, &domError);
+    bool netflixOk = distinctArt(netflixRows);
+    QStringList netflixTitles;
+    for (const QJsonValue &row : netflixRows) {
+        const QString title = row.toObject().value(QStringLiteral("title")).toString();
+        netflixTitles.append(title);
+        if (title == QLatin1String("Temporada 4") || title == QLatin1String("Poder") || title == QLatin1String("Só um erro"))
+            netflixOk = false;
+    }
+    if (!netflixOk || !netflixTitles.contains(QStringLiteral("Dark")) || !netflixTitles.contains(QStringLiteral("Crown"))) {
+        std::fprintf(stderr, "logic-check netflix extract: %s\n%s\n", qPrintable(domError), qPrintable(netflixJson.left(400)));
+        return fail("netflix extract regressed");
+    }
+    const QString hboTree = QStringLiteral(R"js((function () {
+  var tile = function (title, slug, art) {
+    return makeEl('div', {'data-testid': 'tile'}, [
+      makeEl('a', {href: '/show/' + slug, 'aria-label': title}, [
+        makeEl('img', {src: art, currentSrc: art}, [])
+      ])
+    ]);
+  };
+  return makeEl('section', {}, [
+    makeEl('h2', {text: 'Séries'}, []),
+    makeEl('div', {'data-testid': 'tile-rail'}, [
+      tile('Guerra', 'guerra', 'https://images.example/guerra.jpg'),
+      tile('House', 'house', 'https://images.example/house.jpg'),
+      tile('Supergirl', 'supergirl', 'https://images.example/supergirl.jpg'),
+      tile('Penguin', 'penguin', 'https://images.example/penguin.jpg')
+    ])
+  ]);
+})())js");
+    domError.clear();
+    const QString hboJson = runDom(QStringLiteral("https://play.max.com/"), hboTree, mirrorExtractScript(*hbo), &domError);
+    const QJsonArray hboRows = rowsOf(hboJson, &domError);
+    if (!distinctArt(hboRows)) {
+        std::fprintf(stderr, "logic-check hbo extract: %s\n%s\n", qPrintable(domError), qPrintable(hboJson.left(400)));
+        return fail("hbo extract regressed");
+    }
+    const QString youtubeTree = QStringLiteral(R"js((function () {
+  var item = function (title, id, art) {
+    return makeEl('ytd-rich-item-renderer', {}, [
+      makeEl('a', {id: 'video-title-link', href: '/watch?v=' + id, 'aria-label': title}, [
+        makeEl('img', {id: 'img', src: art, currentSrc: art}, [])
+      ]),
+      makeEl('yt-formatted-string', {id: 'video-title', text: title}, [])
+    ]);
+  };
+  var grid = makeEl('ytd-rich-grid-renderer', {}, []);
+  grid.shadowRoot = makeEl('div', {}, [
+    item('Video Um', 'aaa111aaa11', 'https://i.ytimg.com/vi/aaa111aaa11/hqdefault.jpg'),
+    item('Video Dois', 'bbb222bbb22', 'https://i.ytimg.com/vi/bbb222bbb22/hqdefault.jpg'),
+    item('Video Tres', 'ccc333ccc33', 'https://i.ytimg.com/vi/ccc333ccc33/hqdefault.jpg'),
+    item('Video Quatro', 'ddd444ddd44', 'https://i.ytimg.com/vi/ddd444ddd44/hqdefault.jpg')
+  ]);
+  return makeEl('ytd-item-section-renderer', {}, [
+    makeEl('h2', {id: 'title', text: 'Em alta'}, []),
+    item('MEND_Google', 'mendgoogle1', 'https://i.ytimg.com/vi/mendgoogle1/hqdefault.jpg'),
+    grid
+  ]);
+})())js");
+    domError.clear();
+    const QString youtubeJson = runDom(QStringLiteral("https://www.youtube.com/"), youtubeTree, ytScript, &domError);
+    const QJsonArray youtubeRows = rowsOf(youtubeJson, &domError);
+    QStringList youtubeTitles;
+    for (const QJsonValue &row : youtubeRows)
+        youtubeTitles.append(row.toObject().value(QStringLiteral("title")).toString());
+    if (youtubeRows.size() < 4 || !youtubeTitles.contains(QStringLiteral("Video Um"))
+        || !youtubeTitles.contains(QStringLiteral("Video Quatro")) || !distinctArt(youtubeRows)) {
+        std::fprintf(stderr, "logic-check youtube extract: %s\n%s\n", qPrintable(domError), qPrintable(youtubeJson.left(500)));
+        return fail("youtube extract regressed");
+    }
+    const QString primeTree = QStringLiteral(R"js((function () {
+  var card = function (title, id, img, source) {
+    return makeEl('div', {'data-testid': 'card'}, [
+      makeEl('a', {href: '/detail/' + id, 'aria-label': title}, [
+        makeEl('picture', {}, [
+          makeEl('source', {src: source}, []),
+          makeEl('img', {src: img, currentSrc: img}, [])
+        ])
+      ])
+    ]);
+  };
+  return makeEl('section', {}, [
+    makeEl('h2', {text: 'Filmes'}, []),
+    makeEl('div', {'data-testid': 'card-scroller'}, [
+      card('Elle', 'elle', 'https://m.media-amazon.com/images/S/pv-target-images/elle-real.jpg', 'https://m.media-amazon.com/images/S/missing/elle404.jpg'),
+      card('Dark', 'dark', 'https://m.media-amazon.com/images/S/pv-target-images/dark-real.jpg', 'https://m.media-amazon.com/images/S/missing/dark404.jpg'),
+      card('Fleabag', 'fleabag', 'https://m.media-amazon.com/images/S/pv-target-images/fleabag-real.jpg', 'https://m.media-amazon.com/images/S/missing/fleabag404.jpg'),
+      card('The Boys', 'boys', 'https://m.media-amazon.com/images/S/pv-target-images/boys-real.jpg', 'https://m.media-amazon.com/images/S/missing/boys404.jpg')
+    ])
+  ]);
+})())js");
+    domError.clear();
+    const QString primeJson = runDom(QStringLiteral("https://www.primevideo.com/"), primeTree, mirrorExtractScript(*prime), &domError);
+    const QJsonArray primeRows = rowsOf(primeJson, &domError);
+    bool primeImg = false;
+    bool prime404 = false;
+    for (const QJsonValue &row : primeRows) {
+        const QString art = row.toObject().value(QStringLiteral("artwork")).toString();
+        if (art.contains(QStringLiteral("elle-real")))
+            primeImg = true;
+        if (art.contains(QStringLiteral("404")))
+            prime404 = true;
+    }
+    if (!distinctArt(primeRows) || !primeImg || prime404) {
+        std::fprintf(stderr, "logic-check prime extract: %s\n%s\n", qPrintable(domError), qPrintable(primeJson.left(500)));
+        return fail("prime extract regressed");
+    }
+    const QString globoTree = QStringLiteral(R"js((function () {
+  var link = function (title, href, art) {
+    return makeEl('a', {href: href, 'aria-label': title}, [
+      makeEl('img', {src: art, currentSrc: art}, [])
+    ]);
+  };
+  return makeEl('section', {}, [
+    makeEl('h2', {text: 'Novelas'}, []),
+    link('Novela das nove', '/novela-x/t/12345', 'https://img.example/novela.jpg'),
+    link('Jornal Nacional', '/v/999', 'https://img.example/jornal.jpg'),
+    link('Outra novela', '/outro/t/777', 'https://img.example/outra.jpg'),
+    link('Mais uma', '/mais/t/778', 'https://img.example/mais.jpg'),
+    link('Assistir ao vivo: Copa', '/ao-vivo/copa', 'https://img.example/copa.jpg')
+  ]);
+})())js");
+    domError.clear();
+    const QString globoJson = runDom(QStringLiteral("https://globoplay.globo.com/"), globoTree, mirrorExtractScript(*globoplay), &domError);
+    const MirrorPage globoDom = parseMirrorPage(globoJson.toUtf8(), *globoplay);
+    QStringList globoDomTitles;
+    QStringList globoDomArts;
+    for (const ShelfData &shelf : globoDom.shelves) {
+        for (const RowData &row : shelf.rows) {
+            globoDomTitles.append(row.title);
+            globoDomArts.append(row.artworkSpec);
+        }
+    }
+    bool globoDistinct = globoDomArts.size() >= 4;
+    QStringList seenGloboArt;
+    for (const QString &art : globoDomArts) {
+        if (art.isEmpty() || seenGloboArt.contains(art))
+            globoDistinct = false;
+        seenGloboArt.append(art);
+    }
+    if (!globoDomTitles.contains(QStringLiteral("Novela das nove")) || !globoDomTitles.contains(QStringLiteral("Jornal Nacional"))
+        || globoDomTitles.contains(QStringLiteral("Assistir ao vivo: Copa")) || !globoDistinct) {
+        std::fprintf(stderr, "logic-check globo extract: %s\n%s\n", qPrintable(domError), qPrintable(globoJson.left(500)));
+        return fail("globoplay extract regressed");
+    }
     if (!coverHttpNeedsPage(403) || !coverHttpNeedsPage(401) || coverHttpNeedsPage(404) || coverHttpNeedsPage(200)
         || !mirrorCoverFetchScript({QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc.jpg")})
                 .contains(QStringLiteral("credentials: 'include'"))
@@ -763,9 +1104,6 @@ int runLogicSelfCheck()
     }
     if (youtubeProfiles || !mirrorPageHasTitles(youtubeAccount))
         return fail("youtube account menu is not a profile shelf");
-    const MirrorAdapter *hbo = findMirrorAdapter(mirrors, QStringLiteral("hbo"));
-    if (!hbo)
-        return fail("hbo adapter");
     NetworkSample hboSample;
     hboSample.url = QStringLiteral("https://api.hbomax.com/cms/routes/home");
     hboSample.body = QByteArray(R"json({
