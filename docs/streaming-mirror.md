@@ -1,8 +1,10 @@
 # Espelho dos streamings
 
-O Chrome não aparece para navegar. Fora do Play ele sobe sem janela (`--headless=new`), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`), com `--window-size=1920,1080` e `--ozone-override-screen-size=1920,1080`. Sem o segundo argumento o headless põe a tela virtual em 800×600 e ela briga com a janela. O guia pede ao CDP as respostas JSON/GraphQL da página e desenha fileiras, capas e continuar assistindo. O DOM entra quando a rede não traz título reproduzível; perfis e busca por seletor saem dessa leitura. O Chrome só vem para a frente no Play, em tela cheia.
+O Chrome não aparece para navegar. Fora do Play ele é uma janela real fora da tela (`--window-position=-3000,-3000`, áudio mudo), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`), com `--window-size=1920,1080` e `--ozone-override-screen-size=1920,1080`. Não usa `--headless=new`: esse modo anuncia `HeadlessChrome`, a Netflix logada fica sem card depois de mais de 10 segundos, e o YouTube não dispara `youtubei/v1/browse`. O user-agent é o de um Chrome de janela, com `--disable-blink-features=AutomationControlled`. O guia pede o foco de volta; o gamescope mostra a janela focada. O Chrome só vem para a frente no Play, em `--kiosk`.
 
-O processo do Chrome fica pronto antes da porta de depuração. O app espera `/json/version`, escolhe a primeira aba `page` em `/json/list` (ou cria uma com `/json/new` se não houver) e só então manda `Page.enable`, `Network.enable` e `Page.navigate` para a home. Cada passo sai no stderr (`zappe: cdp …`, `zappe: espelho …`). Se a home não abre em 20 segundos, a fileira deixa o “Atualizando…” e mostra um card de erro. OK nesse card é “Tentar de novo”.
+Cada streaming tem a própria aba. A fila é serial: o próximo serviço só começa depois que o atual contou os títulos do feed e, se o feed veio vazio, do DOM. `PUT /json/new?about:blank` cria o target, o websocket dessa aba recebe `Page.enable` e `Network.enable`, e só então `Page.navigate` abre a home. O histórico do YouTube reusa a aba do YouTube. Login e uma URL aberta na hora ganham outra aba e não navegam a do catálogo. A espera de cada home chega a 8 segundos enquanto ainda há resposta de feed em voo.
+
+O processo do Chrome fica pronto antes da porta de depuração. O app espera `/json/version` antes da primeira aba. Cada passo sai no stderr (`zappe: cdp nova aba`, `zappe: espelho …`). Se a home não abre em 20 segundos, a fileira deixa o “Atualizando…” e mostra um card de erro. OK nesse card é “Tentar de novo”.
 
 ## Adaptadores
 
@@ -19,13 +21,22 @@ Seletores vistos na TV: Netflix usa `h2` e `[class*=card]` com `a[href*='/title/
 
 Endpoints: `www.netflix.com/graphql`; `youtubei/v1/browse`, `/guide` e `/search`; `primevideo.com/api/enrichItemMetadata`; `api.hbomax.com/cms/routes` e `/cms/collections`; `disney.api.edge.bamgrid.com/explore`; `multicloud-jarvis.globo.com/graphql` e `multicloud-mystique.globo.com`. O catálogo da Apple TV veio no HTML, não num JSON estável.
 
-Cada `feeds` diz quais URLs interessam (`urlContains`) e quais chaves do JSON são título, link, capa e nome da fileira. Se o link não for `http`, `hrefTemplate` monta a URL com `{href}`. O app guarda até 8 corpos JSON, com 48 KB cada. Se sair pelo menos um título reproduzível, o guia usa isso e não raspa o HTML. Senão, o script de DOM devolve `profiles`, `shelves` e `needsLogin`. `needsLogin` abre o pedido de login que já existia, sem tirar o Qt da frente, e não dispara aprendizado.
+Cada `feeds` diz quais URLs interessam (`urlContains`) e quais chaves do JSON são título, link, capa e nome da fileira. Se o link não for `http`, `hrefTemplate` monta a URL com `{href}`. O app guarda até 8 corpos JSON, com 48 KB cada. Os extratores de `data/mirrors.json` rodam sempre, com ou sem `llm.json`. O stderr conta os títulos:
+
+```text
+zappe: espelho netflix feed 12 títulos em 2 corpos
+zappe: espelho netflix feed 12 títulos em https://www.netflix.com/graphql
+zappe: espelho netflix extrator DOM de mirrors.json
+zappe: espelho netflix dom 0 títulos login=0
+```
+
+Se o feed já trouxe título reproduzível, o guia usa isso e não raspa o HTML. Senão, o script de DOM devolve `profiles`, `shelves` e `needsLogin`. `needsLogin` abre o pedido de login que já existia, sem tirar o Qt da frente, e não dispara aprendizado. Feed e DOM vazios é que chegam no aprendizado.
 
 ## Aprendizado
 
 Em operação normal o app não chama IA. A chamada só existe depois que a rede e o DOM falham na home do serviço (fileira vazia, seletor ausente ou nenhum Play) e existe um endpoint configurado.
 
-A configuração fica fora do git, em `~/.local/share/zappe/llm.json` (ou `$ZAPPE_DATA_DIR/llm.json`). Sem arquivo, ou com `url` vazia, o aprendizado fica desligado e o guia só mostra a fileira vazia. Exemplo sem chave: `packaging/appliance/examples/llm.json`.
+A configuração fica fora do git, em `~/.local/share/zappe/llm.json` (ou `$ZAPPE_DATA_DIR/llm.json`). Sem arquivo, ou com `url` vazia, o aprendizado fica desligado. Os extratores estáticos já rodaram; o log deixa isso explícito (`extrator estático sem catálogo (feed N, dom N); aprendizado desligado`) e o guia mostra a fileira vazia. Exemplo sem chave: `packaging/appliance/examples/llm.json`.
 
 ```json
 {
@@ -51,7 +62,14 @@ O arquivo vigente é `~/.local/share/zappe/adapters/<id>.json`. Ele substitui o 
 
 No player o nó do teclado fica exclusivo. Setas, OK e play/pause saem como `Input.dispatchKeyEvent` (`rawKeyDown`, `keyDown`, `keyUp`). OK e play/pause são Espaço (32): Enter pausa em uns serviços e não faz nada em outros. A seta esquerda é `ArrowLeft` (37), dez segundos para trás na maior parte. Na Disney+ as setas são irregulares, então ←/→ mudam `video.currentTime` em 10s. No Globoplay ao vivo as teclas não chegam sem foco: o app clica no `<video>` e controla play/pause e o tempo por script. O vídeo escolhido é o que tem DRM (`mediaKeys`); no Prime o trailer mudo fica de fora.
 
-Voltar não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Em seguida o Chrome sobe de novo sem janela (`--headless=new`) para continuar lendo os catálogos. A janela kiosk existe só enquanto o vídeo está aberto: no gamescope, minimizar não tira a tela branca de `about:blank`.
+Voltar no player não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Em seguida o Chrome sobe de novo fora da tela para continuar lendo os catálogos. A janela kiosk existe só enquanto o vídeo está aberto: no gamescope, minimizar não tira a tela branca de `about:blank`.
+
+Numa view de streaming (as fileiras no Qt, antes do Play), Voltar do controle é `KEY_BACK` (evdev 158), keysym `XF86Back`. Escape não é essa tecla. `xdotool key Escape` cai na janela que estiver focada; se for o Chrome, o site consome a tecla e o guia não fecha. O alvo é a janela do app, cujo título é o nome da marca (o padrão é Zappe):
+
+```bash
+WID=$(xdotool search --name Zappe | head -1)
+xdotool key --window "$WID" XF86Back
+```
 
 ## Capas e atualização
 

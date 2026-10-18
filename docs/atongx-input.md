@@ -20,6 +20,23 @@ Power não desliga o mini-PC: o nó da tecla 116 fica com `EVIOCGRAB`, o logind 
 
 Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player, o app segura o teclado e manda as teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK como Espaço, play/pause). Voltar fecha o Chrome (`Browser.close`) e devolve o guia; não usa Escape. Com a TV aberta, para o mpv e volta ao guia. A tecla não pode encerrar o processo: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
 
+## Voltar pelo xdotool
+
+O botão Home do controle é `KEY_BACK`, código evdev **158**. O Del é evdev 14 e faz a mesma ação. Escape é evdev 1 e não é o Voltar do controle.
+
+No X11, evdev 158 vira o keycode **166** e o keysym **`XF86Back`**. O Qt lê isso como `Qt.Key_Back`. O guia trata essa tecla como `goBack()`: numa view de streaming, fecha o serviço e volta para a lista de apps.
+
+`xdotool key Escape` não faz isso quando a tecla cai no Chrome. A view de streaming continua aberta, porque o site é que recebe o Escape. Mande `XF86Back` para a janela do app. O título dela é o nome da marca; o padrão é Zappe:
+
+```bash
+WID=$(xdotool search --name Zappe | head -1)
+xdotool key --window "$WID" XF86Back
+```
+
+Se o keysym não existir nessa máquina, o keycode é o mesmo: `xdotool key --window "$WID" 166`.
+
+No player, Voltar não é tecla injetada. O app manda `Browser.close` pelo CDP e o guia volta para a frente. Escape no player só chega no site.
+
 ## Air mouse
 
 `event4` é o air mouse. O app abre esse nó (ou o único nó `mouse*` do dongle, se o número mudar) e faz `EVIOCGRAB`. Eventos de cursor são lidos e descartados.

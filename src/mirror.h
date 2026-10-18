@@ -86,6 +86,7 @@ bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href);
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter);
 MirrorPage parseMirrorFeeds(const QVector<NetworkSample> &samples, const MirrorAdapter &adapter);
 bool mirrorPageHasTitles(const MirrorPage &page);
+int mirrorTitleCount(const MirrorPage &page);
 bool mirrorPageUsable(const MirrorPage &page, int minTitles);
 
 QString coverCachePath(const QString &cacheDir, const QString &url);
@@ -151,6 +152,7 @@ private:
     void showError(const QString &serviceId, const QString &detail);
     void armWatch(const QString &serviceId);
     void scheduleAttach();
+    void schedulePump();
 
     Guide *m_guide = nullptr;
     ChromeSession *m_chrome = nullptr;
@@ -174,6 +176,10 @@ private:
     QNetworkAccessManager *m_http = nullptr;
     QTimer *m_refresh = nullptr;
     QHash<QString, int> m_loadToken;
+    QString m_tabService;
+    QString m_openUrl;
+    int m_lastFeedTitles = -1;
+    int m_lastDomTitles = -1;
     int m_job = 0;
     int m_attachTries = 0;
     qint64 m_busySince = 0;
@@ -184,6 +190,7 @@ private:
     bool m_downloading = false;
     bool m_learnPosted = false;
     bool m_mergePage = false;
+    bool m_holdNav = false;
     int m_epoch = 0;
 };
 

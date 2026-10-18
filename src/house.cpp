@@ -37,7 +37,7 @@ House::House(QObject *parent)
     connect(m_chrome, &ChromeSession::ready, this, [this] {
         if (!m_pendingUrl.isEmpty() && m_directPending) {
             m_directPending = false;
-            m_direct->attach(m_chrome->port());
+            m_direct->openPage(m_chrome->port(), QStringLiteral("about:blank"));
         }
     });
     connect(m_direct, &CdpClient::attached, this, [this] {
