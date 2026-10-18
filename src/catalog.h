@@ -101,4 +101,9 @@ QString resolveCatalogPath(const QString &explicitPath, const QString &dataDir);
 CatalogFile loadCatalogFile(const QString &path);
 void decorateCatalog(CatalogFile &catalog, const QString &dataDir, const QString &cacheDir);
 
+// Fileiras gravadas pelo harvest antigo (status error/teach/harvesting, ou
+// texto de AT-SPI) não entram no guia. Se o JSON mudou, ele é regravado.
+bool harvestErrorText(const QString &text);
+bool removeHarvestErrors(QJsonObject &root);
+
 } // namespace zappe

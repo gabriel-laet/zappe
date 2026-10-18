@@ -1,13 +1,38 @@
+# Unit de SISTEMA. Áudio HDMI sai pela sessão do usuário no seat0
+# (PipeWire do usuário). getty@tty1 fica mascarado; esta unit ocupa o tty.
+#
+#   sudo cp packaging/appliance/zappe-kiosk.service /etc/systemd/system/
+#   # troque YOUR_USER
+#   sudo systemctl daemon-reload
+#   sudo systemctl mask getty@tty1.service
+#   loginctl enable-linger YOUR_USER
+#   sudo systemctl enable --now zappe-kiosk.service
+#
+# ~/bin/zappe-kiosk.sh deve chamar packaging/appliance/zappe-kiosk.sh.
+# PAMName=login + TTYPath=/dev/tty1 colocam o processo na sessão do seat0.
+# Sem isso o pactl não acha o PipeWire do usuário e o HDMI fica mudo.
 [Unit]
-Description=Zappe kiosk (one gamescope, Qt guide, Chrome inside)
-After=pipewire.service pipewire-pulse.service
+Description=Zappe kiosk (gamescope no tty1, sessão no seat0)
+After=systemd-user-sessions.service
+Wants=systemd-user-sessions.service
+Conflicts=getty@tty1.service
 
 [Service]
 Type=simple
-Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=%h/src/zappe/packaging/appliance/zappe-kiosk.sh
-Restart=on-failure
-RestartSec=3
+User=YOUR_USER
+Group=YOUR_USER
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=%h
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/%U/bus
+Environment=XDG_SESSION_TYPE=tty
+ExecStart=%h/bin/zappe-kiosk.sh
+Restart=always
+RestartSec=2
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target

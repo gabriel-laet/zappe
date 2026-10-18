@@ -80,6 +80,40 @@ int runSelfCheck()
     if (loadCatalogFile(badPath).ok)
         return fail("invalid json should not be ok");
 
+    const QString harvestPath = dir.filePath(QStringLiteral("harvest.json"));
+    QFile harvest(harvestPath);
+    if (!harvest.open(QIODevice::WriteOnly))
+        return fail("harvest catalog");
+    harvest.write(QByteArray(R"json({
+      "shelves": [
+        {
+          "id": "continue",
+          "title": "Continue watching",
+          "status": "error",
+          "message": "no Chrome/Chromium application on the AT-SPI bus (is the nest running?)",
+          "rows": []
+        },
+        {
+          "id": "library",
+          "title": "Library",
+          "status": "ok",
+          "rows": [
+            {"title": "Northwind", "service": "library"},
+            {"title": "no Chrome/Chromium application on the AT-SPI bus", "service": "netflix"}
+          ]
+        }
+      ]
+    })json"));
+    harvest.close();
+    const CatalogFile cleaned = loadCatalogFile(harvestPath);
+    if (!cleaned.ok || cleaned.shelves.size() != 1 || cleaned.shelves.at(0).id != QLatin1String("library")
+        || cleaned.shelves.at(0).rows.size() != 1
+        || cleaned.shelves.at(0).rows.at(0).title != QLatin1String("Northwind"))
+        return fail("harvest error shelf must disappear");
+    QFile harvestAgain(harvestPath);
+    if (!harvestAgain.open(QIODevice::ReadOnly) || harvestAgain.readAll().contains("AT-SPI"))
+        return fail("harvest catalog was not rewritten");
+
     const Branding defaults = loadBranding(dir.filePath(QStringLiteral("missing-brand")));
     if (defaults.name != QLatin1String("Zappe") || defaults.accent != QLatin1String("#E85A1B")
         || defaults.background != QLatin1String("#000000") || defaults.source != QLatin1String("default"))

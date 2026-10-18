@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QUrl>
 #include <QVariant>
 
@@ -237,6 +238,53 @@ QString resolveCatalogPath(const QString &explicitPath, const QString &dataDir)
     return QStringLiteral(":/zappe/data/catalog.json");
 }
 
+bool harvestErrorText(const QString &text)
+{
+    const QString folded = text.toLower();
+    return folded.contains(QStringLiteral("at-spi")) || folded.contains(QStringLiteral("no chrome/chromium"))
+           || folded.contains(QStringLiteral("org.a11y")) || folded.contains(QStringLiteral("accessibility is off"));
+}
+
+bool removeHarvestErrors(QJsonObject &root)
+{
+    const QJsonArray shelves = root.value(QStringLiteral("shelves")).toArray();
+    QJsonArray kept;
+    bool changed = false;
+    for (const QJsonValue &value : shelves) {
+        if (!value.isObject()) {
+            changed = true;
+            continue;
+        }
+        QJsonObject shelf = value.toObject();
+        const QString status = shelf.value(QStringLiteral("status")).toString().trimmed().toLower();
+        if (status == QLatin1String("error") || status == QLatin1String("teach")
+            || status == QLatin1String("harvesting") || harvestErrorText(shelf.value(QStringLiteral("message")).toString())
+            || harvestErrorText(shelf.value(QStringLiteral("title")).toString())) {
+            changed = true;
+            continue;
+        }
+        const QJsonArray rows = shelf.value(QStringLiteral("rows")).toArray();
+        QJsonArray cleanRows;
+        bool droppedRow = false;
+        for (const QJsonValue &rowValue : rows) {
+            const QString title = rowValue.toObject().value(QStringLiteral("title")).toString();
+            if (harvestErrorText(title)) {
+                droppedRow = true;
+                continue;
+            }
+            cleanRows.append(rowValue);
+        }
+        if (droppedRow) {
+            shelf.insert(QStringLiteral("rows"), cleanRows);
+            changed = true;
+        }
+        kept.append(shelf);
+    }
+    if (changed)
+        root.insert(QStringLiteral("shelves"), kept);
+    return changed;
+}
+
 CatalogFile loadCatalogFile(const QString &path)
 {
     CatalogFile catalog;
@@ -248,12 +296,22 @@ CatalogFile loadCatalogFile(const QString &path)
     }
     QJsonParseError error;
     const QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &error);
+    file.close();
     if (error.error != QJsonParseError::NoError || !doc.isObject()) {
         std::fprintf(stderr, "zappe: invalid catalog JSON (%s)\n", qPrintable(error.errorString()));
         return catalog;
     }
+    QJsonObject root = doc.object();
+    if (removeHarvestErrors(root) && !path.startsWith(QLatin1String(":/"))) {
+        QSaveFile out(path);
+        if (out.open(QIODevice::WriteOnly)) {
+            out.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+            if (!out.commit())
+                std::fprintf(stderr, "zappe: não consegui limpar o catálogo %s\n", qPrintable(path));
+        }
+    }
     catalog.ok = true;
-    const QJsonArray shelves = doc.object().value(QStringLiteral("shelves")).toArray();
+    const QJsonArray shelves = root.value(QStringLiteral("shelves")).toArray();
     for (const QJsonValue &shelfVal : shelves) {
         if (!shelfVal.isObject())
             continue;

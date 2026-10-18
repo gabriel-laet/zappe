@@ -45,6 +45,22 @@ QString existsScript(const QString &selector)
     return QStringLiteral("(() => document.querySelector(%1) ? 'ok' : 'missing')()").arg(jsString(selector));
 }
 
+QString historyBackScript()
+{
+    return QStringLiteral("(() => { try { if (window.history.length > 1) { window.history.back(); return 'back'; } }"
+                          " catch (e) { return 'root'; } return 'root'; })()");
+}
+
+QString historyGoBackScript()
+{
+    return QStringLiteral("(() => { try { window.history.back(); return 'back'; } catch (e) { return 'root'; } })()");
+}
+
+bool chromeCanGoBack(int currentIndex)
+{
+    return currentIndex > 0;
+}
+
 QString profileScript(const QString &name)
 {
     return QStringLiteral("(() => { const want = %1.toLowerCase();"
@@ -118,7 +134,7 @@ void CdpClient::send(const QString &method, const QJsonObject &params)
     const int id = m_nextId++;
     if (method == QLatin1String("Page.navigate"))
         m_pendingNav = id;
-    if (method == QLatin1String("Runtime.evaluate"))
+    if (method == QLatin1String("Runtime.evaluate") && m_pendingHistory != id)
         m_pendingEval = id;
     m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, method, params)));
 }
@@ -138,6 +154,48 @@ void CdpClient::evaluate(const QString &expression)
     send(QStringLiteral("Runtime.evaluate"), params);
 }
 
+void CdpClient::sendHistoryEval(const QString &expression)
+{
+    QJsonObject params;
+    params.insert(QStringLiteral("expression"), expression);
+    params.insert(QStringLiteral("returnByValue"), true);
+    const int id = m_nextId++;
+    m_pendingHistory = id;
+    m_historyStage = 2;
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Runtime.evaluate"), params)));
+}
+
+void CdpClient::historyBack()
+{
+    if (!m_socket || !m_connected) {
+        emit historyResult(false);
+        return;
+    }
+    const int id = m_nextId++;
+    m_pendingHistory = id;
+    m_historyStage = 1;
+    m_socket->sendTextMessage(
+        QString::fromUtf8(cdpCommand(id, QStringLiteral("Page.getNavigationHistory"), QJsonObject())));
+}
+
+void CdpClient::dispatchKey(const QString &key, const QString &code, int virtualKey)
+{
+    if (!m_socket || !m_connected)
+        return;
+    const QStringList types = {QStringLiteral("keyDown"), QStringLiteral("keyUp")};
+    for (const QString &type : types) {
+        QJsonObject params;
+        params.insert(QStringLiteral("type"), type);
+        params.insert(QStringLiteral("key"), key);
+        params.insert(QStringLiteral("code"), code);
+        params.insert(QStringLiteral("windowsVirtualKeyCode"), virtualKey);
+        params.insert(QStringLiteral("nativeVirtualKeyCode"), virtualKey);
+        const int id = m_nextId++;
+        m_socket->sendTextMessage(
+            QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchKeyEvent"), params)));
+    }
+}
+
 void CdpClient::onMessage(const QString &message)
 {
     const QJsonObject obj = QJsonDocument::fromJson(message.toUtf8()).object();
@@ -146,6 +204,16 @@ void CdpClient::onMessage(const QString &message)
         return;
     if (obj.contains(QStringLiteral("error"))) {
         const QString text = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
+        if (id == m_pendingHistory) {
+            if (m_historyStage == 1) {
+                sendHistoryEval(historyBackScript());
+                return;
+            }
+            m_pendingHistory = 0;
+            m_historyStage = 0;
+            emit historyResult(false);
+            return;
+        }
         if (id == m_pendingEval)
             emit evaluated(text, false);
         else
@@ -155,6 +223,29 @@ void CdpClient::onMessage(const QString &message)
     if (id == m_pendingNav) {
         m_pendingNav = 0;
         emit navigated();
+        return;
+    }
+    if (id == m_pendingHistory) {
+        const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+        if (m_historyStage == 1) {
+            const int index = result.value(QStringLiteral("currentIndex")).toInt(-1);
+            if (index < 0) {
+                sendHistoryEval(historyBackScript());
+                return;
+            }
+            if (chromeCanGoBack(index)) {
+                sendHistoryEval(historyGoBackScript());
+                return;
+            }
+            m_pendingHistory = 0;
+            m_historyStage = 0;
+            emit historyResult(false);
+            return;
+        }
+        m_pendingHistory = 0;
+        m_historyStage = 0;
+        const QString value = result.value(QStringLiteral("result")).toObject().value(QStringLiteral("value")).toString();
+        emit historyResult(value == QLatin1String("back"));
         return;
     }
     if (id == m_pendingEval) {

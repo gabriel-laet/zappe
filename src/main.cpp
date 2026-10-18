@@ -9,6 +9,7 @@
 
 #include <QCommandLineParser>
 #include <QFile>
+#include <QEvent>
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
@@ -34,6 +35,25 @@ bool envOn(const char *name)
     const QByteArray value = qgetenv(name);
     return !value.isEmpty() && value != "0" && value != "false" && value != "off";
 }
+
+bool g_allowClose = false;
+
+class StayOpen : public QObject {
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        Q_UNUSED(watched);
+        if ((event->type() == QEvent::Close || event->type() == QEvent::Quit) && !g_allowClose) {
+            event->ignore();
+            std::fprintf(stderr, "zappe: fechar a janela foi ignorado; voltar não encerra o app\n");
+            return true;
+        }
+        return false;
+    }
+};
 
 } // namespace
 
@@ -107,6 +127,9 @@ int main(int argc, char **argv)
 
     if (!envOn("ZAPPE_CURSOR"))
         QGuiApplication::setOverrideCursor(Qt::BlankCursor);
+    app.setQuitOnLastWindowClosed(false);
+    auto *stayOpen = new StayOpen(&app);
+    app.installEventFilter(stayOpen);
 
     const QString dataDir = zappe::resolveDataDir();
     const zappe::Branding branding = zappe::loadBranding(dataDir);
@@ -160,6 +183,7 @@ int main(int argc, char **argv)
     if (!window)
         return 1;
     guide.attachWindow(window);
+    window->installEventFilter(stayOpen);
     QObject::connect(&guide, &zappe::Guide::playRequested, &house, &zappe::House::playRequested);
     house.start(&guide, window, dataDir);
     zappe::applyHdmiAudio();
@@ -170,11 +194,13 @@ int main(int argc, char **argv)
             const QImage image = window->grabWindow();
             if (image.isNull() || !image.save(path)) {
                 std::fprintf(stderr, "zappe: screenshot failed: %s\n", qPrintable(path));
+                g_allowClose = true;
                 QCoreApplication::exit(1);
                 return;
             }
             std::fprintf(stderr, "zappe: wrote %s (%dx%d)\n", qPrintable(path), image.width(),
                          image.height());
+            g_allowClose = true;
             QCoreApplication::quit();
         });
     }

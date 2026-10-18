@@ -6,6 +6,7 @@
 #include <QString>
 
 class QQuickWindow;
+class QTimer;
 
 namespace zappe {
 
@@ -24,6 +25,13 @@ class House : public QObject {
     Q_PROPERTY(QString promptHint READ promptHint NOTIFY changed)
     Q_PROPERTY(bool listening READ listening NOTIFY changed)
     Q_PROPERTY(QString listeningText READ listeningText NOTIFY changed)
+    Q_PROPERTY(bool loading READ loading NOTIFY changed)
+    Q_PROPERTY(bool loadingFailed READ loadingFailed NOTIFY changed)
+    Q_PROPERTY(QString loadingTitle READ loadingTitle NOTIFY changed)
+    Q_PROPERTY(QString loadingArt READ loadingArt NOTIFY changed)
+    Q_PROPERTY(QString loadingStatus READ loadingStatus NOTIFY changed)
+    Q_PROPERTY(QString loadingError READ loadingError NOTIFY changed)
+    Q_PROPERTY(qreal loadingProgress READ loadingProgress NOTIFY changed)
 
 public:
     explicit House(QObject *parent = nullptr);
@@ -41,11 +49,23 @@ public:
     QString promptHint() const { return m_promptHint; }
     bool listening() const { return m_listening; }
     QString listeningText() const { return m_listeningText; }
+    bool loading() const { return m_loading; }
+    bool loadingFailed() const { return m_loadingFailed; }
+    QString loadingTitle() const { return m_loadingTitle; }
+    QString loadingArt() const { return m_loadingArt; }
+    QString loadingStatus() const { return m_loadingStatus; }
+    QString loadingError() const { return m_loadingError; }
+    qreal loadingProgress() const { return m_loadingProgress; }
 
     Q_INVOKABLE void submitPrompt(const QString &value);
     Q_INVOKABLE void cancelPrompt();
     Q_INVOKABLE void stopPlayback();
+    Q_INVOKABLE void goBack();
+    Q_INVOKABLE void cancelLoading();
+    Q_INVOKABLE void retryLoading();
     QObject *tv() const;
+
+    static constexpr int loadingTimeoutMs = 10000;
 
 public slots:
     void playRequested(const QString &title, const QString &service, const QString &href);
@@ -67,6 +87,16 @@ private:
     void mute();
     bool take(RemoteAction action);
     void onSettings(int index, int verb);
+    void beginLoading(const QString &title, const QString &art, const QString &kind);
+    void tickLoading();
+    void finishLoading();
+    void failLoading(const QString &message);
+    void onHistory(bool wentBack);
+    void chromeBack();
+    void updateKeyHold();
+    bool chromeFocused() const;
+    void forwardChromeKey(RemoteAction action);
+    void chromeDispatch(const QString &key, const QString &code, int virtualKey);
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -92,6 +122,21 @@ private:
     QString m_pendingUrl;
     qint64 m_lastRemote = 0;
     int m_lastAction = 0;
+    bool m_loading = false;
+    bool m_loadingFailed = false;
+    QString m_loadingTitle;
+    QString m_loadingArt;
+    QString m_loadingStatus;
+    QString m_loadingError;
+    QString m_loadingKind;
+    qreal m_loadingProgress = 0;
+    qint64 m_loadStarted = 0;
+    QString m_retryTitle;
+    QString m_retryService;
+    QString m_retryHref;
+    QString m_chromeOwner;
+    class QTimer *m_loadTimer = nullptr;
+    qint64 m_lastBack = 0;
 };
 
 } // namespace zappe

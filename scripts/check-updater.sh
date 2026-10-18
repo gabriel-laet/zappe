@@ -16,4 +16,8 @@ if ! grep -q 'zappe-kiosk.service' "${script}"; then
   echo "check-updater: updater must restart zappe-kiosk.service" >&2
   exit 1
 fi
+if ! grep -q 'sudo -n systemctl restart' "${script}"; then
+  echo "check-updater: updater must use sudo -n systemctl restart when the system unit exists" >&2
+  exit 1
+fi
 echo "check-updater: ok"

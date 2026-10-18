@@ -181,6 +181,7 @@ LoginRunner::LoginRunner(QObject *parent)
                 runStep();
         });
     });
+    connect(m_cdp, &CdpClient::historyResult, this, &LoginRunner::historyResult);
     connect(m_cdp, &CdpClient::evaluated, this, [this](const QString &value, bool ok) {
         if (!m_active || m_waiting)
             return;
@@ -367,6 +368,16 @@ void LoginRunner::cancel()
     m_active = false;
     m_waiting = false;
     m_inbox->stop();
+}
+
+void LoginRunner::historyBack()
+{
+    m_cdp->historyBack();
+}
+
+void LoginRunner::dispatchKey(const QString &key, const QString &code, int virtualKey)
+{
+    m_cdp->dispatchKey(key, code, virtualKey);
 }
 
 void LoginRunner::finishHome()

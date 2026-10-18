@@ -1,9 +1,11 @@
 #include "logiccheck.h"
 
 #include "audio.h"
+#include "catalog.h"
 #include "cdp.h"
 #include "chrome.h"
 #include "display.h"
+#include "house.h"
 #include "keymap.h"
 #include "logins.h"
 #include "ota.h"
@@ -13,6 +15,9 @@
 
 #include <QDir>
 #include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTemporaryDir>
 
 #include <cstdio>
@@ -249,6 +254,32 @@ int runLogicSelfCheck()
         return fail("cdp command");
     if (!fillScript(QStringLiteral("input[type='email']"), QStringLiteral("a@b.c")).contains(QStringLiteral("querySelector")))
         return fail("fill script");
+    const QString backScript = historyBackScript();
+    if (!backScript.contains(QStringLiteral("history.back")) || !backScript.contains(QStringLiteral("history.length")))
+        return fail("chrome history back");
+    if (!historyGoBackScript().contains(QStringLiteral("history.back")) || chromeCanGoBack(0) || !chromeCanGoBack(2))
+        return fail("chrome history index");
+    if (!mpvPlaybackStarted(QByteArrayLiteral("{\"data\":1.25,\"error\":\"success\"}"))
+        || mpvPlaybackStarted(QByteArrayLiteral("{\"data\":null,\"error\":\"success\"}"))
+        || mpvPlaybackStarted(QByteArrayLiteral("not-json")))
+        return fail("mpv playback");
+    if (House::loadingTimeoutMs != 10000)
+        return fail("loading timeout");
+    if (!harvestErrorText(QStringLiteral("no Chrome/Chromium application on the AT-SPI bus")))
+        return fail("harvest error text");
+    const QJsonObject root = QJsonDocument::fromJson(QByteArray(R"json({
+      "shelves": [{
+        "id": "continue",
+        "title": "Continue watching",
+        "status": "error",
+        "message": "AT-SPI dump timed out",
+        "rows": []
+      }]
+    })json"))
+                                .object();
+    QJsonObject editable = root;
+    if (!removeHarvestErrors(editable) || !editable.value(QStringLiteral("shelves")).toArray().isEmpty())
+        return fail("remove harvest shelf");
 
     std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;

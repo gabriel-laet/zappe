@@ -8,10 +8,16 @@ if [[ "$(tty 2>/dev/null || true)" != "/dev/tty1" ]]; then
 fi
 
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+
+# Deploy padrão: unit de sistema no seat0. Não sobe um segundo gamescope.
+if systemctl cat zappe-kiosk.service >/dev/null 2>&1; then
+  exec sleep infinity
+fi
+
 UNIT_DIR="${HOME}/.config/systemd/user"
 if [[ ! -f "${UNIT_DIR}/zappe-kiosk.service" ]]; then
   mkdir -p "${UNIT_DIR}"
-  cp "$(dirname "$0")/zappe-kiosk.service" "${UNIT_DIR}/zappe-kiosk.service"
+  cp "$(dirname "$0")/zappe-kiosk.user.service" "${UNIT_DIR}/zappe-kiosk.service"
   systemctl --user daemon-reload || true
 fi
 

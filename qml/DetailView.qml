@@ -97,7 +97,8 @@ Item {
                 radius: 32
                 color: guide.detailZone === 0 && guide.detailButton === 0 ? guide.accent : "#2a2a2e"
                 border.width: guide.detailZone === 0 && guide.detailButton === 0 ? 0 : 0
-                scale: guide.detailZone === 0 && guide.detailButton === 0 ? watchScale : 1
+                scale: (guide.detailZone === 0 && guide.detailButton === 0 ? watchScale : 1)
+                       * (guide.cardDown && guide.detailZone === 0 && guide.detailButton === 0 ? 0.94 : 1)
                 property real watchScale: 1
                 Text {
                     anchors.centerIn: parent

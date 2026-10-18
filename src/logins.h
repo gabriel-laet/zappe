@@ -59,12 +59,15 @@ public:
     void start(const LoginService &service, int port, const QString &dataDir);
     void submit(const QString &value);
     void cancel();
+    void historyBack();
+    void dispatchKey(const QString &key, const QString &code, int virtualKey);
 
 signals:
     void promptRequested(const QString &service, const QString &field, const QString &prompt, bool secret);
     void playing(const QString &url);
     void failed(const QString &message);
     void status(const QString &message);
+    void historyResult(bool wentBack);
 
 private:
     void attach();
