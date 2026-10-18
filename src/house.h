@@ -45,6 +45,7 @@ public:
     Q_INVOKABLE void submitPrompt(const QString &value);
     Q_INVOKABLE void cancelPrompt();
     Q_INVOKABLE void stopPlayback();
+    QObject *tv() const;
 
 public slots:
     void playRequested(const QString &title, const QString &service, const QString &href);
@@ -65,6 +66,7 @@ private:
     void volume(int delta);
     void mute();
     bool take(RemoteAction action);
+    void onSettings(int index, int verb);
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;

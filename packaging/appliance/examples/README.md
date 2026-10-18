@@ -49,7 +49,7 @@ Unknown keys (`_example`, `_comment`) are ignored.
 
 ## Samsung TV (Device Connect)
 
-Volume / mute on the ATONGX go to the living-room Samsung over Wi-Fi. Copy the sample (no token) and pair on the TV — see [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).
+Power, volume, mute and HDMI input on the ATONGX go to the living-room Samsung over Wi-Fi. Copy the sample (no token, no MAC) and pair on the TV — see [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).
 
 ```bash
 mkdir -p ~/.local/share/zappe
@@ -58,6 +58,6 @@ cp packaging/appliance/examples/samsung.json ~/.local/share/zappe/samsung.json
 systemctl --user restart zappe-kiosk.service
 ```
 
-Never commit a live `token`. `ZAPPE_SAMSUNG_HOST` / `ZAPPE_SAMSUNG_TOKEN` override the file. `ZAPPE_SAMSUNG_DISABLE=1` forces PulseAudio.
+Never commit a live `token` or MAC. `ZAPPE_SAMSUNG_HOST`, `ZAPPE_SAMSUNG_TOKEN`, `ZAPPE_SAMSUNG_MAC` and `ZAPPE_SAMSUNG_CEC` override the file. `ZAPPE_SAMSUNG_DISABLE=1` skips the TV. A leftover `wakeOnPower` field is not read: Power always toggles while control is enabled.
 
-ATONGX Power (evdev 116) is ignored. The Qt app does not send `KEY_POWER`. A leftover `wakeOnPower` field in an old `samsung.json` is not read. See [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).
+ATONGX Power (evdev 116) toggles the Samsung. Off goes out as Device Connect `KEY_POWER`. On uses that key and, when configured, Wake-on-LAN and `cec-ctl --image-view-on`. The power evdev node stays grabbed, so logind does not shut down the mini-PC. See [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).

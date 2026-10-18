@@ -6,9 +6,10 @@
   ./packaging/appliance/zappe-atongx-capture --mic-pointer
 
 Press Mic (red). Paste any (unmapped) line back if it differs from
-data/atongx-map.json. The living-room contract is Power 116 ignored,
-Home 158 = back, Mic 582. event4 is grabbed by the app so the cursor
-does not move.
+data/atongx-map.json. The living-room contract is Power 116 toggles
+the Samsung (the node stays grabbed so logind cannot power off the
+box), Home 158 = back, Mic 582. event4 is grabbed by the app so the
+cursor does not move.
 
 No third-party modules — Python 3 stdlib only.
 """

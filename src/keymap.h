@@ -5,7 +5,8 @@
 
 namespace zappe {
 
-// Contrato do controle ATONGX na sala. Power 116 é ignorado.
+// Contrato do controle ATONGX na sala. Power 116 alterna a Samsung.
+// O nó dessa tecla continua com EVIOCGRAB: o logind não desliga o mini-PC.
 // Home do controle chega como KEY_BACK 158 e significa voltar.
 enum class RemoteAction {
     Unmapped = 0,
@@ -24,6 +25,7 @@ enum class RemoteAction {
     VolumeDown,
     Mute,
     Voice,
+    Power,
 };
 
 RemoteAction actionForEvdev(int code);

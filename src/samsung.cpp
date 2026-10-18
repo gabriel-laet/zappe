@@ -1,13 +1,30 @@
 #include "samsung.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QHostAddress>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QTimer>
+#include <QUrl>
 #include <QWebSocket>
 
 #include <cstdio>
+
+#ifdef Q_OS_UNIX
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+#include <memory>
 
 namespace zappe {
 namespace {
@@ -25,7 +42,20 @@ bool envOff(const char *name)
            || value == QLatin1String("on");
 }
 
-const char *keyCode(TvKey key)
+QJsonValue powerValue(const QJsonObject &root, const QJsonObject &device)
+{
+    if (device.contains(QStringLiteral("PowerState")))
+        return device.value(QStringLiteral("PowerState"));
+    if (device.contains(QStringLiteral("powerState")))
+        return device.value(QStringLiteral("powerState"));
+    if (root.contains(QStringLiteral("PowerState")))
+        return root.value(QStringLiteral("PowerState"));
+    return {};
+}
+
+} // namespace
+
+const char *tvKeyCode(TvKey key)
 {
     switch (key) {
     case TvKey::VolumeUp:
@@ -34,17 +64,27 @@ const char *keyCode(TvKey key)
         return "KEY_VOLDOWN";
     case TvKey::Mute:
         return "KEY_MUTE";
+    case TvKey::Power:
+        return "KEY_POWER";
+    case TvKey::Hdmi1:
+        return "KEY_HDMI1";
+    case TvKey::Hdmi2:
+        return "KEY_HDMI2";
+    case TvKey::Hdmi3:
+        return "KEY_HDMI3";
+    case TvKey::Hdmi4:
+        return "KEY_HDMI4";
     }
     return "KEY_VOLUP";
 }
-
-} // namespace
 
 SamsungConfig loadSamsungConfig(const QString &dataDir)
 {
     SamsungConfig config;
     config.host = envOr("ZAPPE_SAMSUNG_HOST", config.host);
     config.name = envOr("ZAPPE_SAMSUNG_NAME", config.name);
+    config.mac = envOr("ZAPPE_SAMSUNG_MAC", QString());
+    config.cec = envOr("ZAPPE_SAMSUNG_CEC", QString());
     if (const QString port = qEnvironmentVariable("ZAPPE_SAMSUNG_PORT"); !port.isEmpty())
         config.port = port.toInt();
     if (const QString port = qEnvironmentVariable("ZAPPE_SAMSUNG_SECURE_PORT"); !port.isEmpty())
@@ -76,6 +116,13 @@ SamsungConfig loadSamsungConfig(const QString &dataDir)
                 if (!name.isEmpty())
                     config.name = name;
             }
+            if (qEnvironmentVariableIsEmpty("ZAPPE_SAMSUNG_MAC")) {
+                const QString mac = obj.value(QStringLiteral("mac")).toString().trimmed();
+                if (!mac.isEmpty())
+                    config.mac = mac;
+            }
+            if (qEnvironmentVariableIsEmpty("ZAPPE_SAMSUNG_CEC") && obj.contains(QStringLiteral("cec")))
+                config.cec = obj.value(QStringLiteral("cec")).toString().trimmed();
         }
     }
     config.disabled = envOff("ZAPPE_SAMSUNG_DISABLE") || config.host.trimmed().isEmpty();
@@ -97,7 +144,7 @@ QByteArray samsungKeyPayload(TvKey key)
 {
     QJsonObject params;
     params.insert(QStringLiteral("Cmd"), QStringLiteral("Click"));
-    params.insert(QStringLiteral("DataOfCmd"), QString::fromLatin1(keyCode(key)));
+    params.insert(QStringLiteral("DataOfCmd"), QString::fromLatin1(tvKeyCode(key)));
     params.insert(QStringLiteral("Option"), QStringLiteral("false"));
     params.insert(QStringLiteral("TypeOfRemote"), QStringLiteral("SendRemoteKey"));
     QJsonObject root;
@@ -112,22 +159,249 @@ QString samsungUserMessage(const QString &error, const SamsungConfig &config)
         .arg(config.host, QString::number(config.port), error);
 }
 
+TvPower parsePowerState(const QString &raw)
+{
+    const QString state = raw.trimmed().toLower();
+    if (state == QLatin1String("on"))
+        return TvPower::On;
+    if (state == QLatin1String("standby") || state == QLatin1String("ready") || state == QLatin1String("sleep"))
+        return TvPower::Standby;
+    return TvPower::Unknown;
+}
+
+TvProbe parseProbeJson(const QByteArray &body)
+{
+    TvProbe probe;
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
+    if (!doc.isObject())
+        return probe;
+    const QJsonObject root = doc.object();
+    const QJsonObject device = root.value(QStringLiteral("device")).toObject();
+    probe.model = device.value(QStringLiteral("modelName")).toString().trimmed();
+    if (probe.model.isEmpty())
+        probe.model = device.value(QStringLiteral("model")).toString().trimmed();
+    probe.name = root.value(QStringLiteral("name")).toString().trimmed();
+    if (probe.name.isEmpty())
+        probe.name = device.value(QStringLiteral("name")).toString().trimmed();
+    const QJsonValue power = powerValue(root, device);
+    if (power.isString())
+        probe.power = parsePowerState(power.toString());
+    return probe;
+}
+
+int parseUpnpVolume(const QByteArray &body)
+{
+    const QRegularExpression re(QStringLiteral("CurrentVolume[^0-9]{0,40}(\\d{1,3})"));
+    const QRegularExpressionMatch match = re.match(QString::fromUtf8(body));
+    if (!match.hasMatch())
+        return -1;
+    const int value = match.captured(1).toInt();
+    if (value < 0 || value > 100)
+        return -1;
+    return value;
+}
+
+bool parseMac(const QString &raw, quint8 out[6])
+{
+    QString hex;
+    hex.reserve(raw.size());
+    for (const QChar ch : raw) {
+        if (ch.isDigit() || (ch >= QLatin1Char('a') && ch <= QLatin1Char('f'))
+            || (ch >= QLatin1Char('A') && ch <= QLatin1Char('F')))
+            hex.append(ch);
+    }
+    if (hex.size() != 12)
+        return false;
+    for (int i = 0; i < 6; ++i) {
+        bool ok = false;
+        const uint value = hex.mid(i * 2, 2).toUInt(&ok, 16);
+        if (!ok)
+            return false;
+        out[i] = quint8(value);
+    }
+    return true;
+}
+
+QByteArray wolMagicPacket(const quint8 mac[6])
+{
+    QByteArray packet(102, '\0');
+    for (int i = 0; i < 6; ++i)
+        packet[i] = char(0xFF);
+    for (int copy = 0; copy < 16; ++copy) {
+        for (int i = 0; i < 6; ++i)
+            packet[6 + copy * 6 + i] = char(mac[i]);
+    }
+    return packet;
+}
+
+QString cecDevicePath(const SamsungConfig &config)
+{
+    const QString value = config.cec.trimmed();
+    const QString lower = value.toLower();
+    if (lower == QLatin1String("off") || lower == QLatin1String("0") || lower == QLatin1String("false")
+        || lower == QLatin1String("no"))
+        return {};
+    if (!value.isEmpty())
+        return value;
+    return QStringLiteral("/dev/cec0");
+}
+
+bool cecReady(const QString &path)
+{
+    return !path.isEmpty() && QFileInfo::exists(path);
+}
+
+QStringList cecWakeArgs(const QString &device)
+{
+    return {QStringLiteral("-d"), device, QStringLiteral("--playback"), QStringLiteral("--to"), QStringLiteral("0"),
+            QStringLiteral("--image-view-on")};
+}
+
+PowerPlan planPowerToggle(TvPower power, bool reachable, bool hasMac, bool cecAvailable)
+{
+    PowerPlan plan;
+    if (reachable && power == TvPower::On) {
+        plan.deviceConnect = true;
+        plan.turnOff = true;
+        return plan;
+    }
+    if (reachable && power == TvPower::Unknown) {
+        plan.deviceConnect = true;
+        return plan;
+    }
+    plan.deviceConnect = true;
+    plan.wakeOnLan = hasMac;
+    plan.cec = cecAvailable;
+    return plan;
+}
+
+bool sendWakeOnLan(const quint8 mac[6], const QString &host, QString *error)
+{
+#ifndef Q_OS_UNIX
+    Q_UNUSED(mac);
+    Q_UNUSED(host);
+    if (error)
+        *error = QStringLiteral("Wake-on-LAN só no Linux");
+    return false;
+#else
+    const QByteArray packet = wolMagicPacket(mac);
+    const int fd = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        if (error)
+            *error = QStringLiteral("sem soquete UDP");
+        return false;
+    }
+    const int yes = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &yes, sizeof(yes));
+    bool sent = false;
+    const auto poke = [&](quint32 address, quint16 port) {
+        sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_port = htons(port);
+        dest.sin_addr.s_addr = htonl(address);
+        if (::sendto(fd, packet.constData(), packet.size(), 0, reinterpret_cast<sockaddr *>(&dest), sizeof(dest))
+            == packet.size())
+            sent = true;
+    };
+    poke(0xFFFFFFFFu, 9);
+    poke(0xFFFFFFFFu, 7);
+    const QHostAddress ip(host);
+    if (ip.protocol() == QAbstractSocket::IPv4Protocol) {
+        const quint32 raw = ip.toIPv4Address();
+        poke(raw, 9);
+        poke((raw & 0xFFFFFF00u) | 0xFFu, 9);
+    }
+    ::close(fd);
+    if (!sent && error)
+        *error = QStringLiteral("pacote não saiu");
+    return sent;
+#endif
+}
+
 SamsungClient::SamsungClient(QObject *parent)
     : QObject(parent)
 {
 }
 
+QString SamsungClient::powerLabel() const
+{
+    if (m_controlOff)
+        return QStringLiteral("controle desligado");
+    if (!m_probed)
+        return QStringLiteral("—");
+    if (!m_reachable)
+        return QStringLiteral("sem resposta");
+    switch (m_power) {
+    case TvPower::On:
+        return QStringLiteral("ligada");
+    case TvPower::Standby:
+        return QStringLiteral("desligada");
+    case TvPower::Unknown:
+        break;
+    }
+    return QStringLiteral("desconhecido");
+}
+
+QString SamsungClient::volumeLabel() const
+{
+    if (m_volume < 0)
+        return m_probed ? QStringLiteral("indisponível") : QStringLiteral("—");
+    return QString::number(m_volume);
+}
+
+QString SamsungClient::statusLine() const
+{
+    return QStringLiteral("%1 · volume %2").arg(powerLabel(), volumeLabel());
+}
+
 void SamsungClient::send(TvKey key)
 {
-    if (m_busy)
-        return;
+    sendKey(key, false);
+}
+
+void SamsungClient::sendKey(TvKey key, bool quietPowerError)
+{
     const SamsungConfig config = loadSamsungConfig(m_dataDir);
     if (config.disabled) {
-        emit failed(QStringLiteral("Controle Samsung desligado."));
+        emit failed(int(key), QStringLiteral("Controle Samsung desligado."));
+        return;
+    }
+    if (m_busy) {
+        m_queued.key = key;
+        m_queued.quietPowerError = quietPowerError;
+        m_hasQueued = true;
         return;
     }
     m_busy = true;
+    m_quietPowerError = quietPowerError;
     sendOn(key, false);
+}
+
+void SamsungClient::finishSocket(const QString &error, bool trySecure, TvKey key)
+{
+    if (!m_busy)
+        return;
+    if (trySecure && !error.isEmpty()) {
+        sendOn(key, true);
+        return;
+    }
+    m_busy = false;
+    if (!error.isEmpty()) {
+        if (!(key == TvKey::Power && m_quietPowerError))
+            emit failed(int(key), error);
+        else
+            std::fprintf(stderr, "zappe: KEY_POWER não confirmou (%s); Wake-on-LAN/CEC seguem valendo\n",
+                         qPrintable(error));
+    } else {
+        emit sent(int(key));
+        if (key == TvKey::VolumeUp || key == TvKey::VolumeDown || key == TvKey::Mute || key == TvKey::Power)
+            QTimer::singleShot(350, this, [this] { refresh(); });
+    }
+    if (m_hasQueued) {
+        const Pending next = m_queued;
+        m_hasQueued = false;
+        sendKey(next.key, next.quietPowerError);
+    }
 }
 
 void SamsungClient::sendOn(TvKey key, bool secure)
@@ -136,29 +410,23 @@ void SamsungClient::sendOn(TvKey key, bool secure)
     auto *socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
-    const auto finish = [this, socket, timer](const QString &error, bool trySecure, TvKey key) {
-        if (!m_busy)
+    const auto once = std::make_shared<bool>(true);
+    const auto done = [this, socket, timer, once](const QString &error, bool trySecure, TvKey sentKey) {
+        if (!*once)
             return;
+        *once = false;
         timer->stop();
         socket->close();
         socket->deleteLater();
         timer->deleteLater();
-        if (trySecure && !error.isEmpty()) {
-            sendOn(key, true);
-            return;
-        }
-        m_busy = false;
-        if (!error.isEmpty())
-            emit failed(error);
-        else
-            emit sent(key);
+        finishSocket(error, trySecure, sentKey);
     };
-    connect(timer, &QTimer::timeout, this, [=] { finish(QStringLiteral("tempo esgotado"), !secure, key); });
+    connect(timer, &QTimer::timeout, this, [=] { done(QStringLiteral("tempo esgotado"), !secure, key); });
     connect(socket, &QWebSocket::textMessageReceived, this, [=](const QString &message) {
         const QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
         const QString event = doc.object().value(QStringLiteral("event")).toString();
         if (event == QLatin1String("ms.channel.unauthorized") || event == QLatin1String("ms.channel.timeOut")) {
-            finish(QStringLiteral("aceite o Zappe no Device Connect"), false, key);
+            done(QStringLiteral("aceite o Zappe no Device Connect"), false, key);
             return;
         }
         if (event != QLatin1String("ms.channel.connect"))
@@ -186,12 +454,145 @@ void SamsungClient::sendOn(TvKey key, bool secure)
             }
         }
         socket->sendTextMessage(QString::fromUtf8(samsungKeyPayload(key)));
-        QTimer::singleShot(180, this, [=] { finish({}, false, key); });
+        QTimer::singleShot(180, this, [=] { done({}, false, key); });
     });
     connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error), this,
-            [=](QAbstractSocket::SocketError) { finish(socket->errorString(), !secure, key); });
+            [=](QAbstractSocket::SocketError) { done(socket->errorString(), !secure, key); });
     timer->start(1800);
     socket->open(QUrl(samsungWebsocketUrl(config, secure)));
+}
+
+void SamsungClient::togglePower()
+{
+    beginProbe(true);
+}
+
+void SamsungClient::refresh()
+{
+    beginProbe(false);
+}
+
+void SamsungClient::nudgeHdmi(int delta)
+{
+    const int next = qBound(1, m_hdmi + delta, 3);
+    if (next == m_hdmi)
+        return;
+    m_hdmi = next;
+    emit statusChanged();
+}
+
+void SamsungClient::sendHdmi()
+{
+    TvKey key = TvKey::Hdmi1;
+    if (m_hdmi == 2)
+        key = TvKey::Hdmi2;
+    else if (m_hdmi >= 3)
+        key = TvKey::Hdmi3;
+    emit reported(QStringLiteral("Entrada HDMI %1").arg(m_hdmi));
+    send(key);
+}
+
+void SamsungClient::beginProbe(bool toggle)
+{
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    if (config.disabled) {
+        m_probed = true;
+        m_reachable = false;
+        m_controlOff = true;
+        m_power = TvPower::Unknown;
+        m_volume = -1;
+        emit statusChanged();
+        if (toggle)
+            emit failed(int(TvKey::Power), QStringLiteral("Controle Samsung desligado."));
+        return;
+    }
+    m_controlOff = false;
+    if (!m_net)
+        m_net = new QNetworkAccessManager(this);
+    const int generation = ++m_probeGen;
+    QNetworkRequest request(QUrl(QStringLiteral("http://%1:%2/api/v2/").arg(config.host).arg(config.port)));
+    request.setTransferTimeout(800);
+    QNetworkReply *reply = m_net->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation, toggle] {
+        const bool current = generation == m_probeGen;
+        const bool httpOk = reply->error() == QNetworkReply::NoError;
+        const QByteArray body = reply->isReadable() ? reply->readAll() : QByteArray();
+        reply->deleteLater();
+        if (!current)
+            return;
+        applyProbe(httpOk, httpOk ? parseProbeJson(body) : TvProbe{}, toggle);
+    });
+}
+
+void SamsungClient::applyProbe(bool httpOk, const TvProbe &probe, bool toggle)
+{
+    m_probed = true;
+    m_reachable = httpOk;
+    m_power = httpOk ? probe.power : TvPower::Unknown;
+    if (!httpOk || m_power != TvPower::On)
+        m_volume = -1;
+    emit statusChanged();
+    if (httpOk && m_power == TvPower::On)
+        queryVolume();
+    if (!toggle)
+        return;
+
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    quint8 mac[6] = {};
+    const bool hasMac = parseMac(config.mac, mac);
+    const QString cecPath = cecDevicePath(config);
+    const PowerPlan plan = planPowerToggle(m_power, httpOk, hasMac, cecReady(cecPath));
+    QStringList how;
+    if (plan.deviceConnect)
+        how.append(QStringLiteral("Device Connect"));
+    if (plan.wakeOnLan)
+        how.append(QStringLiteral("Wake-on-LAN"));
+    if (plan.cec)
+        how.append(QStringLiteral("HDMI-CEC"));
+    QString text = plan.turnOff ? QStringLiteral("Desligando a TV") : QStringLiteral("Ligando a TV");
+    if (!how.isEmpty())
+        text += QStringLiteral(" · ") + how.join(QStringLiteral(", "));
+    if (plan.wakeOnLan) {
+        QString error;
+        if (!sendWakeOnLan(mac, config.host, &error))
+            text += QStringLiteral(" (Wake-on-LAN falhou)");
+    }
+    if (plan.cec && !QProcess::startDetached(QStringLiteral("cec-ctl"), cecWakeArgs(cecPath)))
+        text += QStringLiteral(" (HDMI-CEC indisponível)");
+    emit reported(text);
+    if (plan.deviceConnect)
+        sendKey(TvKey::Power, !plan.turnOff);
+}
+
+void SamsungClient::queryVolume()
+{
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    if (config.disabled)
+        return;
+    if (!m_net)
+        m_net = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("http://%1:9197/upnp/control/RenderingControl1").arg(config.host)));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/xml; charset=\"utf-8\""));
+    request.setRawHeader("SOAPACTION", "\"urn:schemas-upnp-org:service:RenderingControl:1#GetVolume\"");
+    request.setTransferTimeout(800);
+    const QByteArray soap = QByteArrayLiteral(
+        "<?xml version=\"1.0\"?>"
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+        "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>"
+        "<u:GetVolume xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+        "<InstanceID>0</InstanceID><Channel>Master</Channel></u:GetVolume>"
+        "</s:Body></s:Envelope>");
+    QNetworkReply *reply = m_net->post(request, soap);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        const QByteArray body = reply->isReadable() ? reply->readAll() : QByteArray();
+        reply->deleteLater();
+        const int volume = ok ? parseUpnpVolume(body) : -1;
+        if (volume == m_volume)
+            return;
+        m_volume = volume;
+        emit statusChanged();
+    });
 }
 
 } // namespace zappe

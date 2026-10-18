@@ -81,13 +81,18 @@ House::House(QObject *parent)
         if (!m_chrome->running())
             setPlaying(false);
     });
-    connect(m_samsung, &SamsungClient::failed, this, [this](const QString &message) {
+    connect(m_samsung, &SamsungClient::failed, this, [this](int key, const QString &message) {
+        const auto tvKey = TvKey(key);
+        const bool volumeKey = tvKey == TvKey::VolumeUp || tvKey == TvKey::VolumeDown || tvKey == TvKey::Mute;
+        if (!volumeKey) {
+            toast(QStringLiteral("TV Samsung (%1): %2").arg(loadSamsungConfig(m_dataDir).host, message));
+            return;
+        }
         toast(samsungUserMessage(message, loadSamsungConfig(m_dataDir)));
-        const SamsungConfig config = loadSamsungConfig(m_dataDir);
-        Q_UNUSED(config);
         QProcess::startDetached(QStringLiteral("pactl"), {QStringLiteral("set-sink-volume"),
                                                           QStringLiteral("@DEFAULT_SINK@"), QStringLiteral("+0%")});
     });
+    connect(m_samsung, &SamsungClient::reported, this, [this](const QString &message) { toast(message); });
     connect(m_voice, &VoiceSession::started, this, [this] {
         m_listening = true;
         m_listeningText = QStringLiteral("Ouvindo…");
@@ -113,7 +118,19 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
     m_window = window;
     m_dataDir = dataDir;
     m_samsung->setDataDir(dataDir);
+    connect(m_guide, &Guide::settingsCommand, this, &House::onSettings);
+    connect(m_guide, &Guide::pageChanged, this, [this] {
+        if (m_guide && m_guide->page() == QLatin1String("settings"))
+            m_samsung->refresh();
+    });
+    if (m_guide->page() == QLatin1String("settings"))
+        m_samsung->refresh();
     m_remote->start();
+}
+
+QObject *House::tv() const
+{
+    return m_samsung;
 }
 
 void House::setDraft(const QString &draft)
@@ -306,6 +323,10 @@ void House::onRemote(int remoteAction)
         return;
     if (!take(action))
         return;
+    if (action == RemoteAction::Power) {
+        m_samsung->togglePower();
+        return;
+    }
     if (m_promptOpen) {
         if (action == RemoteAction::Back)
             cancelPrompt();
@@ -372,8 +393,45 @@ void House::onRemote(int remoteAction)
     case RemoteAction::Voice:
         m_voice->listen(m_dataDir);
         break;
+    case RemoteAction::Power:
+        m_samsung->togglePower();
+        break;
     case RemoteAction::Ignore:
     case RemoteAction::Unmapped:
+        break;
+    }
+}
+
+void House::onSettings(int index, int verb)
+{
+    if (!m_samsung)
+        return;
+    switch (index) {
+    case 2:
+        if (verb == 0)
+            m_samsung->refresh();
+        break;
+    case 3:
+        if (verb == 0)
+            m_samsung->togglePower();
+        break;
+    case 4:
+        if (verb < 0)
+            volume(-1);
+        else if (verb > 0)
+            volume(1);
+        break;
+    case 5:
+        if (verb == 0)
+            mute();
+        break;
+    case 6:
+        if (verb == 0)
+            m_samsung->sendHdmi();
+        else
+            m_samsung->nudgeHdmi(verb > 0 ? 1 : -1);
+        break;
+    default:
         break;
     }
 }

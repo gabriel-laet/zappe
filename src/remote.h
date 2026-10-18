@@ -23,4 +23,8 @@ private:
 
 bool hidDisabled();
 
+// O air mouse (event4) e o nó que só tem KEY_POWER são capturados.
+// Sem esse grab o logind vê a tecla 116 e pode desligar o mini-PC.
+bool shouldGrabEvdevNode(bool airMouse, bool hasKeyPower, bool hasKeyUp);
+
 } // namespace zappe

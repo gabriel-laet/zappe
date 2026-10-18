@@ -146,6 +146,7 @@ int main(int argc, char **argv)
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("guide"), &guide);
     engine.rootContext()->setContextProperty(QStringLiteral("house"), &house);
+    engine.rootContext()->setContextProperty(QStringLiteral("tv"), house.tv());
     // Qt 6.4 embeds the module at `:/Guide/`. Qt 6.5+ uses `:/qt/qml/Guide/`.
     const QString qmlPath = QFile::exists(QStringLiteral(":/Guide/Main.qml"))
                                 ? QStringLiteral("qrc:/Guide/Main.qml")
