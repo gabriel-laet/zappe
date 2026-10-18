@@ -191,6 +191,70 @@ int runLogicSelfCheck()
         return fail("voice globoplay");
     if (parseVoicePtBr(QStringLiteral("sincronizar")).ok() || parseVoicePtBr(QStringLiteral("conectar")).ok())
         return fail("harvest and companion phrases are gone");
+    if (whisperAudioCtx(0) != 256 || whisperAudioCtx(1000) != 256 || whisperAudioCtx(-5) != 256)
+        return fail("audio ctx short");
+    if (whisperAudioCtx(5000) != 314)
+        return fail("audio ctx 5s");
+    if (whisperAudioCtx(20000) != 1064)
+        return fail("audio ctx 20s");
+    if (whisperAudioCtx(28720) != 1500 || whisperAudioCtx(40000) != 1500)
+        return fail("audio ctx cap");
+    {
+        constexpr int rate = 16000;
+        const int lead = rate / 2;
+        const int speech = rate / 5;
+        const int tail = rate;
+        QVector<qint16> pcm(lead + speech + tail, 0);
+        for (int i = 0; i < speech; ++i)
+            pcm[lead + i] = (i % 2) ? 8000 : -8000;
+        const SilenceTrim trim = trimSilencePcm(pcm.constData(), pcm.size(), rate);
+        const int end = trim.startSample + trim.sampleCount;
+        const int pad = rate / 10;
+        if (trim.startSample < lead - pad || trim.startSample > lead)
+            return fail("vad start");
+        if (end < lead + speech || end > lead + speech + pad)
+            return fail("vad end");
+        QVector<qint16> quiet(rate, 0);
+        const SilenceTrim all = trimSilencePcm(quiet.constData(), quiet.size(), rate);
+        if (all.startSample != 0 || all.sampleCount != quiet.size())
+            return fail("vad silence");
+    }
+    if (voiceEditDistance(QStringLiteral("almento"), QStringLiteral("aumenta")) != 2)
+        return fail("edit almento");
+    if (fuzzyCorrectVoice(QStringLiteral("Almento")) != QLatin1String("aumenta")
+        || fuzzyCorrectVoice(QStringLiteral("almento")) != QLatin1String("aumenta"))
+        return fail("fuzzy almento");
+    if (fuzzyCorrectVoice(fuzzyCorrectVoice(QStringLiteral("Almento"))) != QLatin1String("aumenta"))
+        return fail("fuzzy idempotent");
+    const VoiceIntent almento = parseVoicePtBr(QStringLiteral("Almento o volume"));
+    if (almento.kind != VoiceKind::Volume || almento.delta != 1)
+        return fail("fuzzy volume");
+    if (fuzzyCorrectVoice(QStringLiteral("mudo sbt hbo max som vai ir")) != QLatin1String("mudo sbt hbo max som vai ir"))
+        return fail("fuzzy short");
+    if (fuzzyCorrectVoice(QStringLiteral("buscar dark na netflix")) != QLatin1String("buscar dark na netflix"))
+        return fail("fuzzy dark");
+    const auto flag = [](const QStringList &args, const char *name) {
+        const int index = args.indexOf(QLatin1String(name));
+        if (index < 0 || index + 1 >= args.size())
+            return QString();
+        return args.at(index + 1);
+    };
+    const QStringList cli = whisperCliArgs(QStringLiteral("m.bin"), QStringLiteral("a.wav"), 314);
+    if (flag(cli, "-ac") != QLatin1String("314") || flag(cli, "-bs") != QLatin1String("1")
+        || flag(cli, "-bo") != QLatin1String("1") || flag(cli, "-t") != QLatin1String("4")
+        || flag(cli, "-l") != QLatin1String("pt") || !cli.contains(QStringLiteral("-nt"))
+        || !cli.contains(QStringLiteral("--prompt")))
+        return fail("cli flags");
+    const QStringList serverArgs = whisperServerArgs(QStringLiteral("m.bin"), 8178);
+    if (!serverArgs.contains(QStringLiteral("--convert")) || serverArgs.contains(QStringLiteral("-ng"))
+        || flag(serverArgs, "-l") != QLatin1String("pt") || !serverArgs.contains(QStringLiteral("-nt"))
+        || flag(serverArgs, "-t") != QLatin1String("4") || flag(serverArgs, "-bs") != QLatin1String("1")
+        || flag(serverArgs, "-bo") != QLatin1String("1") || flag(serverArgs, "--host") != QLatin1String("127.0.0.1")
+        || flag(serverArgs, "--port") != QLatin1String("8178"))
+        return fail("server flags");
+    const QByteArray wav = wavFromPcm(QByteArray(8, '\x01'), 16000);
+    if (wav.size() != 52 || !wav.startsWith("RIFF") || wav.mid(8, 4) != QByteArray("WAVE"))
+        return fail("wav header");
 
     const HdmiAudio audio = defaultHdmiAudio();
     const QStringList audioArgs = pactlProfileArgs(audio);

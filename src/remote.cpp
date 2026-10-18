@@ -181,9 +181,20 @@ protected:
                     continue;
                 input_event event{};
                 while (::read(fds[i], &event, sizeof(event)) == ssize_t(sizeof(event))) {
-                    if (event.type != EV_KEY || event.value != 1)
+                    if (event.type != EV_KEY)
                         continue;
                     const RemoteAction action = actionForEvdev(event.code);
+                    if (action == RemoteAction::Voice) {
+                        if (event.value != 0 && event.value != 1)
+                            continue;
+                        const bool down = event.value == 1;
+                        QMetaObject::invokeMethod(m_owner, [owner = m_owner, down] {
+                            emit owner->voiceHold(down);
+                        }, Qt::QueuedConnection);
+                        continue;
+                    }
+                    if (event.value != 1)
+                        continue;
                     if (action == RemoteAction::Unmapped || action == RemoteAction::Ignore) {
                         if (action == RemoteAction::Ignore)
                             std::fprintf(stderr, "zappe: tecla %d ignorada\n", event.code);

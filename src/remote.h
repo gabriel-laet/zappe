@@ -19,6 +19,9 @@ public:
 
 signals:
     void action(int remoteAction);
+    // O microfone segura: pressiona começa, solta fecha. As outras teclas
+    // continuam só no toque.
+    void voiceHold(bool down);
 
 private:
     class Worker;

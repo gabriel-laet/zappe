@@ -70,6 +70,7 @@ public:
 public slots:
     void playRequested(const QString &title, const QString &service, const QString &href);
     void onRemote(int remoteAction);
+    void onVoiceHold(bool down);
 
 signals:
     void changed();
