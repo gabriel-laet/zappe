@@ -5,10 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Tauri --no-bundle release builds can take a while; default 90s would kill cargo.
+# A Release build can take a while; the default start timeout is too short.
 TimeoutStartSec=1h
 Environment=ZAPPE_SRC=%h/src/zappe
-Environment=PATH=%h/.cargo/bin:%h/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=ZAPPE_UNIT=zappe-kiosk.service
+Environment=PATH=%h/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=%h/src/zappe/packaging/appliance/zappe-update.sh
 Nice=10
 

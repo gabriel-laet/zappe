@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "note": "Roteiros declarativos. Seletores são ponto de partida e podem falhar no site real; o passo ask pede o dado na tela e no webhook.",
+  "services": [
+    {
+      "id": "netflix",
+      "name": "Netflix",
+      "homeUrl": "https://www.netflix.com/browse",
+      "loginUrl": "https://www.netflix.com/login",
+      "readySelector": "[data-uia='profile-gate'], [data-uia='profile-link']",
+      "steps": [
+        { "op": "navigate", "url": "https://www.netflix.com/login" },
+        { "op": "ask", "field": "email", "selector": "input[name='userLoginId'], input[type='email']", "prompt": "E-mail da Netflix" },
+        { "op": "click", "selector": "button[data-uia='login-submit-button'], button[type='submit']" },
+        { "op": "ask", "field": "password", "selector": "input[name='password'], input[type='password']", "prompt": "Senha da Netflix", "secret": true },
+        { "op": "click", "selector": "button[data-uia='login-submit-button'], button[type='submit']" },
+        { "op": "ask", "field": "code", "selector": "input[name='otp'], input[autocomplete='one-time-code']", "prompt": "Código da Netflix", "optional": true },
+        { "op": "ask", "field": "profile", "prompt": "Qual perfil da Netflix?", "optional": true }
+      ]
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "homeUrl": "https://www.youtube.com/",
+      "loginUrl": "https://accounts.google.com/ServiceLogin?service=youtube",
+      "readySelector": "button#avatar-btn, img.yt-spec-avatar-shape",
+      "steps": [
+        { "op": "navigate", "url": "https://accounts.google.com/ServiceLogin?service=youtube" },
+        { "op": "ask", "field": "email", "selector": "input[type='email']", "prompt": "E-mail da conta Google" },
+        { "op": "click", "selector": "#identifierNext button, button[type='button']" },
+        { "op": "ask", "field": "password", "selector": "input[type='password']", "prompt": "Senha da conta Google", "secret": true },
+        { "op": "click", "selector": "#passwordNext button, button[type='button']" },
+        { "op": "ask", "field": "code", "selector": "input[type='tel'], input[autocomplete='one-time-code']", "prompt": "Código do Google", "optional": true }
+      ]
+    },
+    {
+      "id": "prime",
+      "name": "Prime Video",
+      "homeUrl": "https://www.primevideo.com/",
+      "loginUrl": "https://www.primevideo.com/auth",
+      "readySelector": "[data-automation-id='nav-profile'], #pv-nav-profile",
+      "steps": [
+        { "op": "navigate", "url": "https://www.primevideo.com/auth" },
+        { "op": "ask", "field": "email", "selector": "input[name='email'], input[type='email']", "prompt": "E-mail do Prime Video" },
+        { "op": "click", "selector": "input[type='submit'], button[type='submit']" },
+        { "op": "ask", "field": "password", "selector": "input[name='password'], input[type='password']", "prompt": "Senha do Prime Video", "secret": true },
+        { "op": "click", "selector": "input[type='submit'], button[type='submit']" },
+        { "op": "ask", "field": "code", "selector": "input[name='otpCode'], input[type='tel']", "prompt": "Código do Prime Video", "optional": true },
+        { "op": "ask", "field": "profile", "prompt": "Qual perfil do Prime Video?", "optional": true }
+      ]
+    },
+    {
+      "id": "hbo",
+      "name": "HBO Max",
+      "homeUrl": "https://play.max.com/",
+      "loginUrl": "https://play.max.com/login",
+      "readySelector": "[data-testid='profile-button'], [data-testid='profilePicker']",
+      "steps": [
+        { "op": "navigate", "url": "https://play.max.com/login" },
+        { "op": "ask", "field": "email", "selector": "input[type='email'], input[name='email']", "prompt": "E-mail da HBO Max" },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "password", "selector": "input[type='password']", "prompt": "Senha da HBO Max", "secret": true },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "code", "selector": "input[autocomplete='one-time-code'], input[name='code']", "prompt": "Código da HBO Max", "optional": true },
+        { "op": "ask", "field": "profile", "prompt": "Qual perfil da HBO Max?", "optional": true }
+      ]
+    },
+    {
+      "id": "apple",
+      "name": "Apple TV",
+      "homeUrl": "https://tv.apple.com/",
+      "loginUrl": "https://tv.apple.com/login",
+      "readySelector": "[data-testid='account-menu'], .profile-button",
+      "steps": [
+        { "op": "navigate", "url": "https://tv.apple.com/login" },
+        { "op": "ask", "field": "email", "selector": "input[type='email'], input#account_name_text_field", "prompt": "E-mail da Apple" },
+        { "op": "click", "selector": "button[type='submit'], #sign-in" },
+        { "op": "ask", "field": "password", "selector": "input[type='password']", "prompt": "Senha da Apple", "secret": true },
+        { "op": "click", "selector": "button[type='submit'], #sign-in" },
+        { "op": "ask", "field": "code", "selector": "input[autocomplete='one-time-code'], input[type='tel']", "prompt": "Código da Apple", "optional": true }
+      ]
+    },
+    {
+      "id": "disney",
+      "name": "Disney+",
+      "homeUrl": "https://www.disneyplus.com/home",
+      "loginUrl": "https://www.disneyplus.com/login",
+      "readySelector": "[data-testid='profile-avatar'], [data-testid='profile-selection']",
+      "steps": [
+        { "op": "navigate", "url": "https://www.disneyplus.com/login" },
+        { "op": "ask", "field": "email", "selector": "input[type='email']", "prompt": "E-mail do Disney+" },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "password", "selector": "input[type='password']", "prompt": "Senha do Disney+", "secret": true },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "code", "selector": "input[autocomplete='one-time-code']", "prompt": "Código do Disney+", "optional": true },
+        { "op": "ask", "field": "profile", "prompt": "Qual perfil do Disney+?", "optional": true }
+      ]
+    },
+    {
+      "id": "globoplay",
+      "name": "Globoplay",
+      "homeUrl": "https://globoplay.globo.com/",
+      "loginUrl": "https://globoplay.globo.com/login",
+      "readySelector": "[data-testid='user-menu'], .user-avatar",
+      "steps": [
+        { "op": "navigate", "url": "https://globoplay.globo.com/login" },
+        { "op": "ask", "field": "email", "selector": "input[type='email'], input[name='login']", "prompt": "E-mail do Globoplay" },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "password", "selector": "input[type='password']", "prompt": "Senha do Globoplay", "secret": true },
+        { "op": "click", "selector": "button[type='submit']" },
+        { "op": "ask", "field": "code", "selector": "input[autocomplete='one-time-code'], input[name='code']", "prompt": "Código do Globoplay", "optional": true },
+        { "op": "ask", "field": "profile", "prompt": "Qual perfil do Globoplay?", "optional": true }
+      ]
+    }
+  ]
+}
