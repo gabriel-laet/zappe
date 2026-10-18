@@ -210,6 +210,14 @@ int runSelfCheck()
     guide.back();
     if (guide.page() != QLatin1String("home") || !guide.shelfShown(1))
         return fail("back home");
+    guide.setMirrorServiceIds({QStringLiteral("netflix")});
+    guide.openMirror(QStringLiteral("netflix"));
+    for (int i = 0; i < guide.shelfCount(); ++i) {
+        if (guide.shelfShown(i))
+            return fail("local catalog in streaming view");
+    }
+    guide.closeMirror();
+    guide.back();
     guide.adjustVolume(5);
     if (guide.volume() != 45 || !guide.volumeHud())
         return fail("volume");

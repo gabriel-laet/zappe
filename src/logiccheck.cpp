@@ -13,6 +13,7 @@
 #include "ota.h"
 #include "remote.h"
 #include "samsung.h"
+#include "util.h"
 #include "voice.h"
 
 #include <QDateTime>
@@ -379,6 +380,13 @@ int runLogicSelfCheck()
     if (!coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg?r=1"), QStringLiteral("https://cdn.example/a/box.jpg?r=2"))
         || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg")))
         return fail("cover url match");
+    const QString referer = coverDownloadReferer(QStringLiteral("https://www.netflix.com/browse"));
+    if (!referer.contains(QStringLiteral("netflix.com")) || referer.contains(QStringLiteral("nflxso"))
+        || !coverDownloadReferer(QStringLiteral("https://www.primevideo.com/")).contains(QStringLiteral("primevideo.com"))
+        || !coverDownloadReferer(QStringLiteral("notaurl")).isEmpty())
+        return fail("cover referer is the service");
+    if (!fileUrl(QStringLiteral("/tmp/zappe-cover.img")).startsWith(QStringLiteral("file://")))
+        return fail("cover file url");
     if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect")))
         return fail("cover clip script");
     if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))

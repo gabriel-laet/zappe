@@ -93,6 +93,8 @@ QString mirrorCoverClipScript(const QStringList &urls);
 // Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
 QString coverMatchKey(const QString &url);
 bool coverUrlsMatch(const QString &wanted, const QString &loaded);
+// Referer do serviço (https://www.netflix.com/...), não o host do CDN.
+QString coverDownloadReferer(const QString &homeUrl);
 // TypeError de CORS/rede: repetir o fetch não traz a imagem.
 bool coverFetchIsBlocked(const QString &error);
 
@@ -117,6 +119,7 @@ struct CoverJob {
     QString serviceId;
     QString url;
     QString path;
+    QString referer;
 };
 
 struct HeldImage {
@@ -187,6 +190,9 @@ private:
     void finishCoverPass();
     void logCoverSummary();
     void dropCurrentCoverJobs();
+    void startDirectCovers(const QVector<CoverJob> &jobs);
+    void pumpDirectCovers();
+    void logDirectCovers();
     void finishAccept();
     void storeCover(const CoverJob &job, const QByteArray &body);
     void onFrame(const QString &url);
@@ -257,6 +263,12 @@ private:
     bool m_coverClosed = false;
     QString m_coverError;
     QString m_coverSample;
+    QVector<CoverJob> m_directJobs;
+    int m_directActive = 0;
+    int m_directSaved = 0;
+    int m_directTotal = 0;
+    QString m_directError;
+    QString m_directFile;
 };
 
 } // namespace zappe

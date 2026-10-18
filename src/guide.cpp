@@ -224,7 +224,7 @@ bool Guide::shelfShown(int index) const
         return shelf->live;
     if (m_page == QLatin1String("streaming")) {
         if (!m_mirrorService.isEmpty())
-            return shelf->skillId == QStringLiteral("mirror:") + m_mirrorService;
+            return shelf->session && shelf->skillId == QStringLiteral("mirror:") + m_mirrorService;
         return !shelf->live;
     }
     if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
@@ -702,6 +702,7 @@ void Guide::replaceServiceShelves(const QString &serviceId, QVector<ShelfData> s
     }
     for (ShelfData &shelf : shelves) {
         shelf.skillId = skill;
+        shelf.session = true;
         if (shelf.status.isEmpty())
             shelf.status = QStringLiteral("ok");
         kept.append(shelf);

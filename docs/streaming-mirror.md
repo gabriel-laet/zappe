@@ -79,7 +79,9 @@ xdotool key --window "$WID" XF86Back
 
 Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. O extrator prefere `currentSrc` (a imagem que o browser de fato carregou) e, se ela for `blob:` ou vazia, cai para `src`, `srcset`, `data-src` e `background-image`. Arquivo com menos de 12 horas é reusado.
 
-Enquanto a página carrega, cada resposta `image/*` grande o bastante é guardada com `Network.getResponseBody`. Isso não depende de CORS: o corpo já está no Chrome. A URL do card e a da rede casam sem a query (o CDN assinado troca o token). O que sobrar tenta um `fetch` na aba, com `credentials: 'include'`, no máximo 8 URLs e uma vez cada. `Failed to fetch` (CORS) encerra essa tentativa na hora. Os cards visíveis que ainda faltam saem de um `Page.captureScreenshot` com o retângulo do elemento. O GET solto, com user-agent de Chrome, só roda para o que o fetch não classificou como bloqueio de rede. Até a imagem chegar, o guia usa uma capa gerada.
+Enquanto a página carrega, cada resposta `image/*` grande o bastante é guardada com `Network.getResponseBody`. A URL do card e a da rede casam sem a query. O caminho principal é o processo do app: `QNetworkAccessManager` baixa a URL com o user-agent de Chrome e `Referer` da home do serviço (`https://www.netflix.com/browse`, não o host do CDN). O JPEG vai para `covers/<sha1>.img` e o card recebe `file://` desse arquivo. Um recorte do card visível ainda cobre o que o GET não trouxer. Até a imagem chegar, o guia usa uma capa gerada.
+
+Na view de um streaming só entram as fileiras lidas agora daquele serviço. O catálogo local, mesmo com o mesmo nome de fileira, fica de fora.
 
 O log é uma linha por serviço (`artes N http, M sem url` e, se houve o que baixar, `capas N salvas (rede …, aba …, recorte …)`), com até três URLs de amostra e o primeiro erro. Não repete o lote.
 
