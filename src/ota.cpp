@@ -268,11 +268,12 @@ bool mpvPlaybackStarted(const QByteArray &ipcLine)
 
 QString otaPipelineScript(const QString &conf, const QString &channel)
 {
-    // setsid deixa o shell como líder do grupo. Back/Escape no mpv saem por
-    // input.conf; o app também manda TERM para os filhos (dvbv5-zap | mpv).
+    // setsid deixa o shell como líder do grupo. O mpv chama XF86Back de BACK
+    // (0.37) ou GO_BACK (0.38+); 0x21FF26 é o keysym quando ele não tem nome.
+    // O app também captura o keycode X11 166 e manda TERM para os filhos.
     const QString run = QStringLiteral(
                             "set -o pipefail; input=$(mktemp); "
-                            "printf '%s\\n' 'ESC quit' 'XF86Back quit' 'XF86_Back quit' 'XF86_BACK quit' > \"$input\"; "
+                            "printf '%s\\n' 'ESC quit' 'BACK quit' 'GO_BACK quit' '0x21FF26 quit' > \"$input\"; "
                             "trap 'pkill -TERM -P $$ >/dev/null 2>&1 || true' TERM INT; "
                             "dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
                             "mpv --hwdec=no --vo=gpu --demuxer-lavf-format=mpegts "

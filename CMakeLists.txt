@@ -8,6 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Quick Network WebSockets)
+find_package(X11 REQUIRED)
 
 set(QML_FILES
   qml/Main.qml
@@ -54,6 +55,7 @@ qt_add_executable(zappe
   src/learn.cpp
   src/remote.cpp
   src/house.cpp
+  src/xback.cpp
 )
 
 qt_add_qml_module(zappe
@@ -72,7 +74,7 @@ qt_add_resources(zappe "zappe_data"
 )
 
 target_include_directories(zappe PRIVATE src)
-target_link_libraries(zappe PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets)
+target_link_libraries(zappe PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::Network Qt6::WebSockets X11::X11)
 target_compile_options(zappe PRIVATE -Wall -Wextra -Wpedantic)
 
 add_custom_command(TARGET zappe POST_BUILD

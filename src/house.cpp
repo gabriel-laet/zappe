@@ -10,6 +10,7 @@
 #include "remote.h"
 #include "samsung.h"
 #include "voice.h"
+#include "xback.h"
 
 #include <QDateTime>
 #include <QProcess>
@@ -28,7 +29,9 @@ House::House(QObject *parent)
     , m_voice(new VoiceSession(this))
     , m_remote(new RemoteWatcher(this))
     , m_mirror(new MirrorSession(this))
+    , m_xback(new XBackGrab(this))
 {
+    connect(m_xback, &XBackGrab::pressed, this, &House::goBack);
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
             failLoading(message);
@@ -514,9 +517,13 @@ void House::setPlaying(bool playing)
 void House::updateKeyHold()
 {
     // O mpv em tela cheia fica com o foco. O teclado do controle fica exclusivo
-    // para Back e Escape fecharem o canal mesmo assim. O input.conf do mpv
-    // também sai nessas teclas; o fim do processo devolve o guia.
-    m_remote->setHoldKeyboard(chromeFocused() || (m_ota && m_ota->playing()));
+    // para Back e Escape fecharem o canal. O keycode X11 166 (XF86Back) também
+    // é capturado aqui: o xdotool manda essa tecla para o mpv, que não conhece
+    // o nome XF86Back.
+    const bool otaOn = m_ota && m_ota->playing();
+    m_remote->setHoldKeyboard(chromeFocused() || otaOn);
+    if (m_xback)
+        m_xback->setActive(otaOn);
 }
 
 bool House::chromeFocused() const
