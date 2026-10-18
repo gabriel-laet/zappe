@@ -9,7 +9,9 @@
 
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDate>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -2377,24 +2379,43 @@ void MirrorSession::postLearn(const QByteArray &png)
         finishEmpty();
         return;
     }
-    const QString serviceId = adapter->id;
-    const QByteArray body = llmRepairBody(*adapter, m_domSnap, m_samples, png, config.model);
+    postLearnRequest(adapter->id, png, config.model, false);
+}
+
+void MirrorSession::postLearnRequest(const QString &serviceId, const QByteArray &png, const QString &model, bool triedFallback)
+{
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
+    const LlmConfig config = loadLlmConfig(m_dataDir);
+    if (!adapter || !llmEnabled(config) || !m_http) {
+        finishEmpty();
+        return;
+    }
+    const QByteArray body = llmRepairBody(*adapter, m_domSnap, m_samples, png, model);
     QNetworkRequest request{QUrl(config.url)};
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    const QByteArray authorization = llmAuthorization(config);
-    if (!authorization.isEmpty())
-        request.setRawHeader("Authorization", authorization);
+    for (const LlmHeader &header : llmRequestHeaders(config, serviceId, QDate::currentDate())) {
+        if (header.name == "Content-Type")
+            request.setHeader(QNetworkRequest::ContentTypeHeader, QString::fromUtf8(header.value));
+        else if (header.name == "User-Agent")
+            request.setHeader(QNetworkRequest::UserAgentHeader, QString::fromUtf8(header.value));
+        else
+            request.setRawHeader(header.name, header.value);
+    }
+    QElapsedTimer clock;
+    clock.start();
     QNetworkReply *reply = m_http->post(request, body);
     QTimer *timer = new QTimer(this);
     timer->setSingleShot(true);
     connect(timer, &QTimer::timeout, reply, &QNetworkReply::abort);
     timer->start(25000);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, timer, serviceId] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timer, serviceId, model, triedFallback, png, clock] {
         timer->stop();
         timer->deleteLater();
         const QByteArray payload = reply->readAll();
         const bool httpOk = reply->error() == QNetworkReply::NoError;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const qint64 elapsed = clock.elapsed();
         reply->deleteLater();
+        std::fprintf(stderr, "%s\n", qPrintable(llmResultLog(serviceId, model, status, elapsed)));
         if (m_current != serviceId || (m_job != JobLearnShot && m_job != JobLearnDom))
             return;
         const MirrorAdapter *current = findMirrorAdapter(m_adapters, serviceId);
@@ -2410,6 +2431,11 @@ void MirrorSession::postLearn(const QByteArray &png)
                     return;
                 }
             }
+        }
+        const LlmConfig again = loadLlmConfig(m_dataDir);
+        if (llmUseFallback(!httpOk, !saved, triedFallback, again.fallbackModel, model)) {
+            postLearnRequest(serviceId, png, again.fallbackModel, true);
+            return;
         }
         std::fprintf(stderr, "zappe: adaptador %s não foi salvo\n", qPrintable(serviceId));
         finishEmpty();

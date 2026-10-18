@@ -200,6 +200,7 @@ private:
     void acceptPage(const MirrorPage &page);
     void beginRepair();
     void postLearn(const QByteArray &png);
+    void postLearnRequest(const QString &serviceId, const QByteArray &png, const QString &model, bool triedFallback);
     void finishEmpty();
     bool applyPage(const MirrorPage &page);
     void downloadNext();

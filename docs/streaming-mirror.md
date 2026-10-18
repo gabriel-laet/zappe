@@ -44,11 +44,16 @@ A configuração fica fora do git, em `~/.local/share/zappe/llm.json` (ou `$ZAPP
 {
   "url": "https://api.openai.com/v1/chat/completions",
   "model": "gpt-4o-mini",
+  "fallbackModel": "gpt-4o-mini",
+  "sessionHeader": "x-opencode-session",
+  "userAgent": "",
   "key": "coloque-a-chave-so-nesta-maquina"
 }
 ```
 
-`url` é o endpoint completo, no formato de chat completions. `ZAPPE_LLM_URL`, `ZAPPE_LLM_KEY` e `ZAPPE_LLM_MODEL` substituem o arquivo. A chave vai no cabeçalho `Authorization` e não entra no JSON do pedido.
+`url` é o endpoint completo, no formato de chat completions, com `image_url` em JPEG base64 quando há retrato. `ZAPPE_LLM_URL`, `ZAPPE_LLM_KEY`, `ZAPPE_LLM_MODEL`, `ZAPPE_LLM_FALLBACK_MODEL`, `ZAPPE_LLM_SESSION_HEADER` e `ZAPPE_LLM_USER_AGENT` substituem o arquivo. A chave vai no cabeçalho `Authorization` e não entra no JSON do pedido nem no log.
+
+`sessionHeader` é o nome do cabeçalho (no plano Go, `x-opencode-session`). O valor é `zappe-<serviço>-<yyyymmdd>`, estável naquele serviço naquele dia. Sem ele o Go responde `400 MissingSessionID`. Vazio, o cabeçalho não é enviado. `userAgent` vazio manda `zappe/<versão>`. Se o pedido falha ou o adaptador devolvido não passa na validação, o app tenta `fallbackModel` uma vez. O log é `zappe: llm <serviço> model <modelo> http <status> <ms> ms`.
 
 Quando o adaptador falha, o app tira um retrato: DOM enxuto (tag, classe, link, rótulo), as amostras de rede e um JPEG da página. O modelo devolve um adaptador. Antes de gravar, o app roda esse adaptador nas amostras capturadas. Só salva se saírem pelo menos 4 títulos com capa `http` e link de Play. Resposta só com seletor de DOM, ou feed que não extrai essas amostras, é descartada. Há uma tentativa por serviço a cada processo.
 

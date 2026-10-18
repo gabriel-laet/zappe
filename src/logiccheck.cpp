@@ -18,6 +18,7 @@
 #include "util.h"
 #include "voice.h"
 
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -982,6 +983,9 @@ int runLogicSelfCheck()
     qunsetenv("ZAPPE_LLM_URL");
     qunsetenv("ZAPPE_LLM_KEY");
     qunsetenv("ZAPPE_LLM_MODEL");
+    qunsetenv("ZAPPE_LLM_FALLBACK_MODEL");
+    qunsetenv("ZAPPE_LLM_SESSION_HEADER");
+    qunsetenv("ZAPPE_LLM_USER_AGENT");
     QDir().mkpath(dir.filePath(QStringLiteral("llm-off")));
     QFile llmOff(dir.filePath(QStringLiteral("llm-off/llm.json")));
     if (!llmOff.open(QIODevice::WriteOnly) || llmOff.write(QByteArrayLiteral("{\"url\":\"\"}")) < 0)
@@ -1002,6 +1006,63 @@ int runLogicSelfCheck()
     if (loadLlmConfig(dir.filePath(QStringLiteral("llm-on"))).url != QLatin1String("https://env.example/v1/chat/completions"))
         return fail("llm env");
     qunsetenv("ZAPPE_LLM_URL");
+    QDir().mkpath(dir.filePath(QStringLiteral("llm-go")));
+    QFile llmGo(dir.filePath(QStringLiteral("llm-go/llm.json")));
+    const QByteArray goJson = QByteArrayLiteral(
+        "{\"url\":\"https://go.example/v1/chat/completions\",\"key\":\"sk-go-secret\","
+        "\"model\":\"go-main\",\"fallbackModel\":\"go-fallback\","
+        "\"sessionHeader\":\"x-opencode-session\",\"userAgent\":\"zappe-tv/9\"}");
+    if (!llmGo.open(QIODevice::WriteOnly) || llmGo.write(goJson) != goJson.size())
+        return fail("llm go file");
+    llmGo.close();
+    const LlmConfig go = loadLlmConfig(dir.filePath(QStringLiteral("llm-go")));
+    const QDate goDay(2026, 10, 18);
+    if (go.url != QLatin1String("https://go.example/v1/chat/completions") || go.key != QLatin1String("sk-go-secret")
+        || go.model != QLatin1String("go-main") || go.fallbackModel != QLatin1String("go-fallback")
+        || go.sessionHeader != QLatin1String("x-opencode-session") || go.userAgent != QLatin1String("zappe-tv/9")
+        || llmSessionId(QStringLiteral("Globoplay"), goDay) != QLatin1String("zappe-globoplay-20261018")
+        || llmSessionId(QStringLiteral("netflix"), goDay) == llmSessionId(QStringLiteral("prime"), goDay))
+        return fail("llm go config");
+    bool sawSession = false;
+    bool sawAgent = false;
+    bool sawAuth = false;
+    bool leaked = false;
+    for (const LlmHeader &header : llmRequestHeaders(go, QStringLiteral("netflix"), goDay)) {
+        if (header.name == "User-Agent" && header.value == "zappe-tv/9")
+            sawAgent = true;
+        if (header.name == "x-opencode-session" && header.value == "zappe-netflix-20261018")
+            sawSession = true;
+        if (header.name == "Authorization" && header.value == "Bearer sk-go-secret")
+            sawAuth = true;
+        if (header.name != "Authorization" && QString::fromUtf8(header.value).contains(QStringLiteral("sk-go-secret")))
+            leaked = true;
+    }
+    LlmConfig plain;
+    bool plainSession = false;
+    QByteArray plainAgent;
+    for (const LlmHeader &header : llmRequestHeaders(plain, QStringLiteral("netflix"), goDay)) {
+        if (header.name == "User-Agent")
+            plainAgent = header.value;
+        if (header.name == "x-opencode-session" || header.value.startsWith("zappe-"))
+            plainSession = true;
+    }
+    if (!sawSession || !sawAgent || !sawAuth || leaked || plainSession || plainAgent != "zappe/0.2.0")
+        return fail("llm headers");
+    if (!llmUseFallback(true, false, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || !llmUseFallback(false, true, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, true, true, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, true, false, QString(), QStringLiteral("go-main"))
+        || llmUseFallback(false, false, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, false, false, QStringLiteral("go-main"), QStringLiteral("go-main")))
+        return fail("llm fallback");
+    const QString goLog = llmResultLog(QStringLiteral("netflix"), QStringLiteral("go-main"), 400, 90);
+    if (!goLog.contains(QStringLiteral("model go-main")) || !goLog.contains(QStringLiteral("http 400"))
+        || !goLog.contains(QStringLiteral("90 ms")) || goLog.contains(QStringLiteral("sk-go-secret")))
+        return fail("llm log");
+    qputenv("ZAPPE_LLM_FALLBACK_MODEL", "from-env");
+    if (loadLlmConfig(dir.filePath(QStringLiteral("llm-go"))).fallbackModel != QLatin1String("from-env"))
+        return fail("llm fallback env");
+    qunsetenv("ZAPPE_LLM_FALLBACK_MODEL");
 
     LlmConfig secret;
     secret.key = QStringLiteral("sk-live-DO-NOT-LEAK");

@@ -241,6 +241,9 @@ journalctl --user -u zappe-update.service -n 50
 | `ZAPPE_LLM_URL` | endpoint de chat completions; vazio desliga o aprendizado |
 | `ZAPPE_LLM_KEY` | chave só no cabeçalho; não vai para o git |
 | `ZAPPE_LLM_MODEL` | modelo do endpoint (padrão `gpt-4o-mini`) |
+| `ZAPPE_LLM_FALLBACK_MODEL` | segunda tentativa se o pedido ou o adaptador falha |
+| `ZAPPE_LLM_SESSION_HEADER` | nome do cabeçalho de sessão (`x-opencode-session`); o valor é `zappe-<serviço>-<yyyymmdd>` |
+| `ZAPPE_LLM_USER_AGENT` | User-Agent; vazio manda `zappe/<versão>` |
 | `ZAPPE_LOGIN_WEBHOOK` | URL do webhook de login |
 | `ZAPPE_HDMI_CARD` / `ZAPPE_HDMI_PROFILE` | perfil PipeWire |
 | `ZAPPE_AUDIO_DISABLE` | não chama `pactl` |
