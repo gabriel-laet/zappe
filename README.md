@@ -229,6 +229,8 @@ systemctl --user start zappe-update.service
 journalctl --user -u zappe-update.service -n 50
 ```
 
+O log do app (espelho, capas, adaptador) fica em `~/.local/share/zappe/kiosk.log`. O `journalctl` acima é só o timer de update.
+
 ## Variáveis
 
 | Variável | Efeito |

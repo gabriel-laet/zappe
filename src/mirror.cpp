@@ -1795,26 +1795,66 @@ MirrorPage parseMirrorFeeds(const QVector<NetworkSample> &samples, const MirrorA
 QString mirrorDomSnapshotScript()
 {
     return QStringLiteral(R"js((() => {
-  const skip = {script:1, style:1, svg:1, noscript:1, path:1};
-  const nodes = [];
-  const walk = (el, depth) => {
-    if (!el || depth > 5 || nodes.length >= 60 || el.nodeType !== 1) return;
-    const tag = (el.tagName || '').toLowerCase();
-    if (skip[tag]) return;
-    const cls = ((el.className && el.className.baseVal) || el.className || '').toString().replace(/\s+/g, ' ').trim().slice(0, 80);
-    const item = {t: tag};
-    if (el.id) item.id = String(el.id).slice(0, 60);
-    if (cls) item.c = cls;
+  const links = [];
+  const headings = [];
+  const seen = new Set();
+  const textOf = (el) => {
+    if (!el) return '';
+    const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'))) || '';
+    const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
+    return (String(aria).trim() || text).replace(/\s+/g, ' ').trim().slice(0, 140);
+  };
+  const imgOf = (el) => {
+    if (!el) return '';
+    let img = null;
+    try { img = el.querySelector && el.querySelector('img, source'); } catch (e) { img = null; }
+    const src = img && (img.currentSrc || img.src || (img.getAttribute && (img.getAttribute('src') || img.getAttribute('srcset'))));
+    const url = String(src || '');
+    if (url.indexOf('http') === 0 || url.indexOf('//') === 0) return url.slice(0, 300);
+    return '';
+  };
+  const consider = (el) => {
+    if (!el || links.length >= 80) return;
     const href = el.getAttribute && el.getAttribute('href');
-    if (href) item.h = String(href).slice(0, 160);
-    const al = el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'));
-    if (al) item.a = String(al).replace(/\s+/g, ' ').trim().slice(0, 80);
-    nodes.push(item);
-    const kids = el.children || [];
-    for (let i = 0; i < kids.length && nodes.length < 60; i++) walk(kids[i], depth + 1);
+    if (!href || seen.has(href)) return;
+    const name = textOf(el);
+    if (!name || name.length < 2) return;
+    seen.add(href);
+    const item = {h: String(href).slice(0, 240), t: name};
+    const img = imgOf(el);
+    if (img) item.img = img;
+    const cls = ((el.className && el.className.toString) ? el.className.toString() : '').replace(/\s+/g, ' ').trim();
+    if (cls) item.c = cls.slice(0, 80);
+    links.push(item);
+  };
+  const walk = (root, depth) => {
+    if (!root || depth > 8 || links.length >= 80) return;
+    try {
+      const anchors = root.querySelectorAll ? root.querySelectorAll('a[href]') : [];
+      for (let i = 0; i < anchors.length && links.length < 80; i++) consider(anchors[i]);
+    } catch (e) {}
+    try {
+      const heads = root.querySelectorAll ? root.querySelectorAll('h1, h2, h3') : [];
+      for (let i = 0; i < heads.length && headings.length < 24; i++) {
+        const name = textOf(heads[i]);
+        if (name && headings.indexOf(name) < 0) headings.push(name);
+      }
+    } catch (e) {}
+    const queue = [root];
+    let seenNodes = 0;
+    while (queue.length && links.length < 80 && seenNodes < 80) {
+      const el = queue.shift();
+      if (!el) continue;
+      seenNodes++;
+      try { if (el.shadowRoot) walk(el.shadowRoot, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 80; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
   };
   walk(document.body, 0);
-  return JSON.stringify({url: location.href, title: document.title, nodes: nodes});
+  return JSON.stringify({url: location.href, title: document.title, headings: headings, links: links});
 })())js");
 }
 
@@ -2616,9 +2656,14 @@ void MirrorSession::postLearnRequest(const QString &serviceId, const QByteArray 
         const qint64 elapsed = clock.elapsed();
         reply->deleteLater();
         std::fprintf(stderr, "%s\n", qPrintable(llmResultLog(serviceId, model, status, elapsed)));
+        std::fflush(stderr);
         if (m_current != serviceId || (m_job != JobLearnShot && m_job != JobLearnDom))
             return;
         const MirrorAdapter *current = findMirrorAdapter(m_adapters, serviceId);
+        const QString report = current ? learnValidationReport(*current, m_samples, payload, 4)
+                                       : QStringLiteral("sem adaptador");
+        std::fprintf(stderr, "zappe: adaptador %s validação: %s\n", qPrintable(serviceId), qPrintable(report));
+        std::fflush(stderr);
         const bool saved = httpOk && current && applyLearnResponse(m_dataDir, *current, m_samples, payload);
         if (saved) {
             m_adapters = loadMirrorAdapters(m_dataDir);
@@ -2713,7 +2758,7 @@ void MirrorSession::onResponseBody(const QString &requestId, const QByteArray &b
         return;
     NetworkSample sample;
     sample.url = url;
-    sample.body = trimmed.left(48 * 1024);
+    sample.body = trimmed.left(512 * 1024);
     m_samples.append(sample);
 }
 
@@ -2920,7 +2965,7 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
     }
     if (m_job == JobLearnDom) {
         if (ok)
-            m_domSnap = value.left(12000);
+            m_domSnap = value.left(48000);
         m_job = JobLearnShot;
         m_learnPosted = false;
         const QString serviceId = m_current;

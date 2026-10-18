@@ -1,5 +1,7 @@
 #include "learn.h"
 
+#include <algorithm>
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -265,23 +267,215 @@ QString llmResultLog(const QString &serviceId, const QString &model, int httpSta
         .arg(serviceId.left(40), model.left(80), QString::number(httpStatus), QString::number(elapsedMs));
 }
 
+QString jsonLearnDigest(const QByteArray &body, int maxItems)
+{
+    if (maxItems < 1)
+        maxItems = 1;
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
+    if (doc.isNull())
+        return QStringLiteral("json inválido (%1 bytes)").arg(body.size());
+    struct Item {
+        QString title;
+        QString titleKey;
+        QString href;
+        QString hrefKey;
+        QString art;
+        QString artKey;
+    };
+    QVector<Item> items;
+    int seen = 0;
+    const auto prefer = [](const QString &key, const QStringList &names) {
+        const QString lower = key.toLower();
+        for (const QString &name : names) {
+            if (lower == name)
+                return true;
+        }
+        return false;
+    };
+    const auto walk = [&](auto &&self, const QJsonValue &value, int depth) -> void {
+        if (items.size() >= maxItems || depth > 14 || seen > 4000)
+            return;
+        ++seen;
+        if (value.isArray()) {
+            for (const QJsonValue &child : value.toArray())
+                self(self, child, depth + 1);
+            return;
+        }
+        if (!value.isObject())
+            return;
+        const QJsonObject obj = value.toObject();
+        QString title;
+        QString titleKey;
+        QString href;
+        QString hrefKey;
+        QString art;
+        QString artKey;
+        int titleScore = -1;
+        int hrefScore = -1;
+        int artScore = -1;
+        for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+            QString text;
+            if (it.value().isString())
+                text = it.value().toString().trimmed();
+            else if (it.value().isDouble()) {
+                const qint64 number = qRound64(it.value().toDouble());
+                if (number >= 10000)
+                    text = QString::number(number);
+            }
+            if (text.size() < 2 || text.size() > 220)
+                continue;
+            const QString lower = text.toLower();
+            const bool http = lower.startsWith(QStringLiteral("http://")) || lower.startsWith(QStringLiteral("https://"))
+                              || lower.startsWith(QStringLiteral("//"));
+            const bool path = text.startsWith(QLatin1Char('/'));
+            const bool image = http
+                               && (lower.contains(QStringLiteral(".jpg")) || lower.contains(QStringLiteral(".jpeg"))
+                                   || lower.contains(QStringLiteral(".png")) || lower.contains(QStringLiteral(".webp"))
+                                   || lower.contains(QStringLiteral(".avif")) || lower.contains(QStringLiteral("image"))
+                                   || lower.contains(QStringLiteral("thumb")) || lower.contains(QStringLiteral("glbimg"))
+                                   || lower.contains(QStringLiteral("media-amazon")) || lower.contains(QStringLiteral("mzstatic")));
+            if (image) {
+                const int score = prefer(it.key(), {QStringLiteral("image"), QStringLiteral("thumb"), QStringLiteral("artwork"),
+                                                     QStringLiteral("poster"), QStringLiteral("src"), QStringLiteral("cover"),
+                                                     QStringLiteral("boxart")})
+                                      ? 2
+                                      : 1;
+                if (score > artScore) {
+                    art = text;
+                    artKey = it.key();
+                    artScore = score;
+                }
+                continue;
+            }
+            if (http || path || (text.size() <= 32 && it.value().isDouble())) {
+                const int score = prefer(it.key(), {QStringLiteral("href"), QStringLiteral("url"), QStringLiteral("slug"),
+                                                     QStringLiteral("link"), QStringLiteral("path"), QStringLiteral("watchid"),
+                                                     QStringLiteral("videoid")})
+                                      ? 2
+                                      : 1;
+                if (score > hrefScore) {
+                    href = text;
+                    hrefKey = it.key();
+                    hrefScore = score;
+                }
+                continue;
+            }
+            if (text.size() < 3 || text.size() > 120)
+                continue;
+            const int score = prefer(it.key(), {QStringLiteral("title"), QStringLiteral("name"), QStringLiteral("headline"),
+                                                 QStringLiteral("label"), QStringLiteral("titulo")})
+                                  ? 2
+                                  : 1;
+            if (score > titleScore) {
+                title = text;
+                titleKey = it.key();
+                titleScore = score;
+            }
+        }
+        if (title.size() >= 3 && !href.isEmpty())
+            items.append(Item{title, titleKey, href, hrefKey, art, artKey});
+        for (auto it = obj.constBegin(); it != obj.constEnd(); ++it)
+            self(self, it.value(), depth + 1);
+    };
+    walk(walk, doc.isArray() ? QJsonValue(doc.array()) : QJsonValue(doc.object()), 0);
+    if (items.isEmpty())
+        return QStringLiteral("nenhum item com título e link (%1 bytes)").arg(body.size());
+    QStringList lines;
+    lines.append(QStringLiteral("%1 itens em %2 bytes").arg(items.size()).arg(body.size()));
+    const int shown = std::min(int(items.size()), maxItems);
+    for (int i = 0; i < shown; ++i) {
+        const Item &item = items.at(i);
+        QString line = QStringLiteral("title=%1 [%2] href=%3 [%4]")
+                           .arg(item.title, item.titleKey, item.href, item.hrefKey);
+        if (!item.art.isEmpty())
+            line += QStringLiteral(" art=%1 [%2]").arg(item.art, item.artKey);
+        lines.append(line);
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString learnValidationReport(const MirrorAdapter &base, const QVector<NetworkSample> &samples, const QByteArray &response,
+                              int minTitles)
+{
+    QStringList parts;
+    parts.append(QStringLiteral("resposta %1 bytes").arg(response.size()));
+    if (extractJsonObject(response).isEmpty())
+        parts.append(QStringLiteral("sem objeto JSON"));
+    const MirrorAdapter candidate = parseLearnedAdapter(response, base);
+    parts.append(QStringLiteral("id=%1").arg(candidate.id.isEmpty() ? QStringLiteral("-") : candidate.id));
+    parts.append(QStringLiteral("feeds=%1").arg(candidate.feeds.size()));
+    parts.append(QStringLiteral("amostras=%1").arg(samples.size()));
+    if (candidate.feeds.isEmpty())
+        parts.append(QStringLiteral("sem feeds"));
+    if (samples.isEmpty())
+        parts.append(QStringLiteral("sem JSON da página"));
+    QStringList urls;
+    for (const NetworkSample &sample : samples) {
+        if (urls.size() >= 6)
+            break;
+        urls.append(sample.url);
+    }
+    if (!urls.isEmpty())
+        parts.append(QStringLiteral("urls=%1").arg(urls.join(QStringLiteral(" | "))));
+    for (int i = 0; i < candidate.feeds.size() && i < 4; ++i) {
+        const MirrorFeed &feed = candidate.feeds.at(i);
+        parts.append(QStringLiteral("feed%1 urlContains=%2 titleKeys=%3 hrefKeys=%4 artworkKeys=%5 hrefTemplate=%6")
+                         .arg(i)
+                         .arg(feed.urlContains.join(QLatin1Char(',')), feed.titleKeys.join(QLatin1Char(',')),
+                              feed.hrefKeys.join(QLatin1Char(',')), feed.artworkKeys.join(QLatin1Char(',')))
+                         .arg(feed.hrefTemplate));
+    }
+    int titles = 0;
+    int withArt = 0;
+    QStringList examples;
+    if (!candidate.feeds.isEmpty() && !samples.isEmpty()) {
+        const MirrorPage page = parseMirrorFeeds(samples, candidate);
+        for (const ShelfData &shelf : page.shelves) {
+            if (shelf.id.endsWith(QStringLiteral(":profiles")) || shelf.status != QLatin1String("ok"))
+                continue;
+            for (const RowData &row : shelf.rows) {
+                ++titles;
+                if (row.artworkSpec.startsWith(QStringLiteral("http")))
+                    ++withArt;
+                if (examples.size() < 4)
+                    examples.append(QStringLiteral("%1 href=%2 art=%3").arg(row.title, row.href, row.artworkSpec));
+            }
+        }
+    }
+    parts.append(QStringLiteral("títulos=%1 com capa http=%2 mínimo=%3").arg(titles).arg(withArt).arg(minTitles));
+    if (!examples.isEmpty())
+        parts.append(examples.join(QStringLiteral("; ")));
+    if (candidate.id.isEmpty() || candidate.feeds.isEmpty() || samples.isEmpty() || withArt < minTitles)
+        parts.append(QStringLiteral("rejeitado"));
+    else
+        parts.append(QStringLiteral("aceito"));
+    return parts.join(QStringLiteral("; "));
+}
+
 QByteArray llmRepairBody(const MirrorAdapter &current, const QString &dom, const QVector<NetworkSample> &samples,
                          const QByteArray &screenshot, const QString &model)
 {
     QString text = QStringLiteral(
-        "A extração não achou fileiras com títulos reproduzíveis. Repare o adaptador usando as amostras. "
+        "A extração não achou fileiras com títulos reproduzíveis. Repare o adaptador usando o DOM e o JSON abaixo. "
+        "As chaves entre colchetes são as que existem na página: copie titleKeys, hrefKeys e artworkKeys desses nomes. "
+        "urlContains tem de ser um trecho da URL da amostra. Um href que começa com / resolve na homeUrl; um id numérico "
+        "precisa de hrefTemplate com {href}. Os links do DOM dizem o seletor (href e classe). "
         "Responda só com o objeto JSON do serviço, incluindo feeds.\nAdaptador atual:\n");
     text += QString::fromUtf8(mirrorAdapterJson(current));
     text += QStringLiteral("\nDOM:\n");
-    text += dom.left(8000);
+    text += dom.left(32000);
     int added = 0;
     for (const NetworkSample &sample : samples) {
-        if (added >= 4)
+        if (added >= 6)
             break;
+        const QString digest = jsonLearnDigest(sample.body, 24);
         text += QStringLiteral("\nURL: ");
         text += sample.url;
+        text += QStringLiteral("\nJSON:\n");
+        text += digest;
         text += QLatin1Char('\n');
-        text += QString::fromUtf8(sample.body.left(24 * 1024));
+        const bool thin = digest.startsWith(QStringLiteral("nenhum item")) || digest.startsWith(QStringLiteral("json inválido"));
+        text += QString::fromUtf8(sample.body.left(thin ? 48 * 1024 : 12 * 1024));
         ++added;
     }
     if (!screenshot.isEmpty() && screenshot.size() > 80000)
@@ -295,8 +489,9 @@ QByteArray llmRepairBody(const MirrorAdapter &current, const QString &dom, const
                                  "sem markdown. O objeto tem id, kind, homeUrl e feeds. feeds é obrigatório. Cada feed "
                                  "tem urlContains, titleKeys, hrefKeys, artworkKeys, shelfKeys e hrefTemplate. "
                                  "urlContains deve aparecer na URL da amostra. hrefTemplate usa {href} quando o valor "
-                                 "não é http. As chaves precisam existir nas amostras e extrair títulos, capas http e "
-                                 "links de reprodução. Não invente segredo, chave ou token."));
+                                 "não é http. Use só chaves que aparecem no JSON da página (os nomes entre colchetes) e "
+                                 "urlContains que aparece na URL da amostra. Os seletores de DOM têm de casar os links "
+                                 "do retrato (href e classe). Não invente segredo, chave ou token."));
     QJsonObject user;
     user.insert(QStringLiteral("role"), QStringLiteral("user"));
     if (!screenshot.isEmpty() && screenshot.size() <= 80000) {

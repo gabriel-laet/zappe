@@ -24,6 +24,9 @@ fi
 export PATH="${HOME}/bin:/usr/local/bin:${PATH}"
 
 DATA="${ZAPPE_DATA_DIR:-${HOME}/.local/share/zappe}"
+# O app escreve aqui. journalctl não recebe o stderr do zappe.
+LOG="${DATA}/kiosk.log"
+mkdir -p "${DATA}"
 
 while true; do
   WIDTH=1920
@@ -39,6 +42,12 @@ while true; do
     pactl set-card-profile "${CARD}" "${PROFILE}" || true
   fi
 
-  gamescope -W "${WIDTH}" -H "${HEIGHT}" -f -- zappe || true
+  if [[ -f "${LOG}" ]]; then
+    log_bytes="$(wc -c < "${LOG}" || true)"
+    if [[ "${log_bytes:-0}" -gt 2097152 ]]; then
+      mv "${LOG}" "${LOG}.1"
+    fi
+  fi
+  gamescope -W "${WIDTH}" -H "${HEIGHT}" -f -- zappe >>"${LOG}" 2>&1 || true
   sleep 1
 done

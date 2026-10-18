@@ -881,7 +881,8 @@ int runLogicSelfCheck()
         || youtube->feeds.isEmpty() || !youtube->feeds.at(0).hrefKeys.contains(QStringLiteral("videoId"))
         || prime->feeds.isEmpty())
         return fail("mirror feeds");
-    if (!mirrorDomSnapshotScript().contains(QStringLiteral("nodes"))
+    if (!mirrorDomSnapshotScript().contains(QStringLiteral("links"))
+        || !mirrorDomSnapshotScript().contains(QStringLiteral("shadowRoot"))
         || !mirrorDomSnapshotScript().contains(QStringLiteral("JSON.stringify")))
         return fail("dom snapshot");
 
@@ -1118,11 +1119,32 @@ int runLogicSelfCheck()
     LlmConfig secret;
     secret.key = QStringLiteral("sk-live-DO-NOT-LEAK");
     secret.model = QStringLiteral("local-model");
-    const QByteArray repair = llmRepairBody(*netflix, QStringLiteral("{\"nodes\":[]}"), {netflixSample}, QByteArrayLiteral("abc"),
+    const QString domTail = QString(20000, QLatin1Char('x')) + QStringLiteral("https://globoplay.globo.com/novela/t/12345");
+    QByteArray lateBody(30000, ' ');
+    lateBody += QByteArray(R"json({"title":"Novela das nove","href":"/novela/t/12345","image":"https://img.example/novela.jpg"})json");
+    const QString lateDigest = jsonLearnDigest(lateBody, 8);
+    if (!lateDigest.contains(QStringLiteral("Novela das nove")) || !lateDigest.contains(QStringLiteral("/novela/t/12345"))
+        || !lateDigest.contains(QStringLiteral("[title]")) || !lateDigest.contains(QStringLiteral("[href]"))
+        || !lateDigest.contains(QStringLiteral("https://img.example/novela.jpg")))
+        return fail("json digest keeps the tail");
+    NetworkSample lateSample;
+    lateSample.url = QStringLiteral("https://multicloud-jarvis.globo.com/graphql");
+    lateSample.body = lateBody;
+    const QByteArray repair = llmRepairBody(*netflix, domTail, {netflixSample, lateSample}, QByteArrayLiteral("abc"),
                                             secret.model);
     if (!QJsonDocument::fromJson(repair).isObject() || repair.contains(secret.key.toUtf8()) || !repair.contains("local-model")
-        || !repair.contains("Dark") || !repair.contains("hrefTemplate") || !repair.contains("data:image/jpeg;base64"))
+        || !repair.contains("Dark") || !repair.contains("hrefTemplate") || !repair.contains("data:image/jpeg;base64")
+        || !repair.contains("https://globoplay.globo.com/novela/t/12345")
+        || !repair.contains("Novela das nove") || !repair.contains("multicloud-jarvis.globo.com/graphql"))
         return fail("llm body");
+    const QString accepted = learnValidationReport(*netflix, {netflixSample}, fenced, 4);
+    const QString rejected = learnValidationReport(*netflix, {netflixSample}, domResponse, 4);
+    if (!accepted.contains(QStringLiteral("títulos=4")) || !accepted.contains(QStringLiteral("com capa http=4"))
+        || !accepted.contains(QStringLiteral("aceito")) || !accepted.contains(QStringLiteral("Dark"))
+        || !accepted.contains(QStringLiteral("titleKeys=title")) || accepted.contains(QStringLiteral("sk-"))
+        || !rejected.contains(QStringLiteral("rejeitado")) || !rejected.contains(QStringLiteral("sem feeds"))
+        || !rejected.contains(QStringLiteral("títulos=0")) || rejected.size() < 40)
+        return fail("validation report");
     const QByteArray huge = llmRepairBody(*netflix, QStringLiteral("dom"), {netflixSample}, QByteArray(80001, 'x'), secret.model);
     if (huge.contains("data:image") || !llmAuthorization(secret).contains(secret.key.toUtf8()) || !llmAuthorization(LlmConfig()).isEmpty())
         return fail("llm secret");

@@ -39,6 +39,11 @@ bool llmUseFallback(bool requestFailed, bool adapterRejected, bool alreadyTriedF
 QString llmResultLog(const QString &serviceId, const QString &model, int httpStatus, qint64 elapsedMs);
 QByteArray llmRepairBody(const MirrorAdapter &current, const QString &dom, const QVector<NetworkSample> &samples,
                          const QByteArray &screenshot, const QString &model);
+// Títulos, hrefs e capas que o JSON realmente tem, mesmo depois do começo do corpo.
+QString jsonLearnDigest(const QByteArray &body, int maxItems = 24);
+// Resultado inteiro da validação: feeds, chaves, títulos, capas e o motivo. Sem corte.
+QString learnValidationReport(const MirrorAdapter &base, const QVector<NetworkSample> &samples,
+                              const QByteArray &response, int minTitles);
 bool validateLearnedAdapter(const MirrorAdapter &candidate, const QVector<NetworkSample> &samples, int minTitles);
 bool saveLearnedAdapter(const QString &dataDir, MirrorAdapter &adapter);
 bool rollbackLearnedAdapter(const QString &dataDir, const QString &serviceId);

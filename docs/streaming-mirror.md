@@ -6,7 +6,7 @@ O perfil do Chrome tem lock. No Play o app fecha o Chrome do Xvfb e sobe outro c
 
 Cada streaming tem a própria aba. A fila é serial: o próximo serviço só começa depois que o atual contou os títulos do feed e, se o feed veio vazio, do DOM. `PUT /json/new?about:blank` cria o target, o websocket dessa aba recebe `Page.enable` e `Network.enable`, e só então `Page.navigate` abre a home. O histórico do YouTube reusa a aba do YouTube. Login e uma URL aberta na hora ganham outra aba e não navegam a do catálogo. A espera de cada home chega a 8 segundos enquanto ainda há resposta de feed em voo.
 
-O processo do Chrome fica pronto antes da porta de depuração. O app espera `/json/version` antes da primeira aba. Cada passo sai no stderr (`zappe: cdp nova aba`, `zappe: espelho …`). Se a home não abre em 20 segundos, a fileira deixa o “Atualizando…” e mostra um card de erro. OK nesse card é “Tentar de novo”.
+O processo do Chrome fica pronto antes da porta de depuração. O app espera `/json/version` antes da primeira aba. Cada passo sai no stderr (`zappe: cdp nova aba`, `zappe: espelho …`). No kiosk esse stderr vai para `~/.local/share/zappe/kiosk.log`, não para o `journalctl`. Se a home não abre em 20 segundos, a fileira deixa o “Atualizando…” e mostra um card de erro. OK nesse card é “Tentar de novo”.
 
 ## Adaptadores
 
@@ -23,7 +23,7 @@ Seletores medidos na TV com o catálogo logado: a capa da Netflix é `a[href^="/
 
 Endpoints: `www.netflix.com/graphql`; `youtubei/v1/browse`, `/guide` e `/search`; `primevideo.com/api/enrichItemMetadata`; `api.hbomax.com/cms/routes` e `/cms/collections`; `disney.api.edge.bamgrid.com/explore`; `multicloud-jarvis.globo.com/graphql` e `multicloud-mystique.globo.com`. O catálogo da Apple TV veio no HTML, não num JSON estável.
 
-Cada `feeds` diz quais URLs interessam (`urlContains`) e quais chaves do JSON são título, link, capa e nome da fileira. Se o link não for `http`, `hrefTemplate` monta a URL com `{href}`. O app guarda até 8 corpos JSON, com 48 KB cada. Os extratores de `data/mirrors.json` rodam sempre, com ou sem `llm.json`. O stderr conta os títulos:
+Cada `feeds` diz quais URLs interessam (`urlContains`) e quais chaves do JSON são título, link, capa e nome da fileira. Se o link não for `http`, `hrefTemplate` monta a URL com `{href}`. O app guarda até 8 corpos JSON, com 512 KB cada. Os extratores de `data/mirrors.json` rodam sempre, com ou sem `llm.json`. O log em `kiosk.log` conta os títulos:
 
 ```text
 zappe: espelho netflix feed 12 títulos em 2 corpos
@@ -55,7 +55,7 @@ A configuração fica fora do git, em `~/.local/share/zappe/llm.json` (ou `$ZAPP
 
 `sessionHeader` é o nome do cabeçalho (no plano Go, `x-opencode-session`). O valor é `zappe-<serviço>-<yyyymmdd>`, estável naquele serviço naquele dia. Sem ele o Go responde `400 MissingSessionID`. Vazio, o cabeçalho não é enviado. `userAgent` vazio manda `zappe/<versão>`. Se o pedido falha ou o adaptador devolvido não passa na validação, o app tenta `fallbackModel` uma vez. O log é `zappe: llm <serviço> model <modelo> http <status> <ms> ms`.
 
-Quando o adaptador falha, o app tira um retrato: DOM enxuto (tag, classe, link, rótulo), as amostras de rede e um JPEG da página. O modelo devolve um adaptador. Antes de gravar, o app roda esse adaptador nas amostras capturadas. Só salva se saírem pelo menos 4 títulos com capa `http` e link de Play. Resposta só com seletor de DOM, ou feed que não extrai essas amostras, é descartada. Há uma tentativa por serviço a cada processo.
+Quando o adaptador falha, o app tira um retrato: até 80 links da página (href, texto, classe e `img`, inclusive dentro de shadow root) e os corpos JSON. O pedido manda esse DOM e, de cada amostra, os itens que têm título e link — com o nome da chave entre colchetes — mesmo quando o título só aparece no fim do corpo. O modelo devolve um adaptador. Antes de gravar, o app roda esse adaptador nas amostras capturadas. Só salva se saírem pelo menos 4 títulos com capa `http` e link de Play. A linha `zappe: adaptador <serviço> validação:` traz o resultado inteiro (feeds, chaves, títulos, capas e `aceito` ou `rejeitado`), sem corte. Resposta só com seletor de DOM, ou feed que não extrai essas amostras, é descartada. Há uma tentativa por serviço a cada processo, e mais uma com `fallbackModel`.
 
 O arquivo vigente é `~/.local/share/zappe/adapters/<id>.json`. Ele substitui o serviço de mesmo `id` que veio no pacote. A versão anterior vai para `adapters/history/<id>/<versão>.json` e permanece lá. Se o arquivo aprendido falha de novo, o app restaura a versão histórica imediatamente anterior, uma vez por processo, e tenta extrair de novo. Apagar `adapters/<id>.json` volta ao adaptador do pacote. Netflix e YouTube conservam o `kind`, para a URL de Play continuar a mesma.
 

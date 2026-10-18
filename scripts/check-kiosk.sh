@@ -51,6 +51,10 @@ if ! grep -q 'while true' "${kiosk}"; then
   echo "check-kiosk: kiosk script must relaunch zappe" >&2
   exit 1
 fi
+if ! grep -q 'kiosk.log' "${kiosk}"; then
+  echo "check-kiosk: app logs must go to kiosk.log" >&2
+  exit 1
+fi
 if ! grep -q 'sudo -n systemctl restart' "${update}"; then
   echo "check-kiosk: updater must restart the system unit" >&2
   exit 1
