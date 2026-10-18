@@ -93,10 +93,11 @@ private:
     void failLoading(const QString &message);
     void onHistory(bool wentBack);
     void chromeBack();
+    void leavePlayer();
+    void showMirror(const QString &serviceId);
     void updateKeyHold();
     bool chromeFocused() const;
     void forwardChromeKey(RemoteAction action);
-    void chromeDispatch(const QString &key, const QString &code, int virtualKey);
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -108,7 +109,9 @@ private:
     class SamsungClient *m_samsung = nullptr;
     class VoiceSession *m_voice = nullptr;
     class RemoteWatcher *m_remote = nullptr;
+    class MirrorSession *m_mirror = nullptr;
     bool m_playing = false;
+    bool m_player = false;
     bool m_promptOpen = false;
     bool m_promptSecret = false;
     bool m_listening = false;

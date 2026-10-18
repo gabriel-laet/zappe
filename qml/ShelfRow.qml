@@ -10,7 +10,7 @@ Item {
     required property var rows
 
     readonly property int shelfIndex: index
-    readonly property bool shown: guide.shelfShown(index)
+    readonly property bool shown: guide.layoutEpoch >= 0 && guide.shelfShown(index)
     readonly property bool rowFocused: shown && guide.shelf === shelfIndex && !guide.detailOpen
                                        && !guide.menuOpen && guide.page !== "settings"
     readonly property int cardH: wide ? 243 : 324

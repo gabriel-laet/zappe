@@ -6,6 +6,10 @@ Remote capture lives next to this folder: [`../zappe-atongx-capture`](../zappe-a
 
 [`xing-wei-devices.txt`](xing-wei-devices.txt) is a **synthetic** `/proc/bus/input/devices` dump. It is not a live zappe-tv capture. The key contract the app uses is [`data/atongx-map.json`](../../../data/atongx-map.json).
 
+## Learned adapters and the LLM
+
+Streaming adapters ship in `data/mirrors.json`. A repaired copy is written only on the machine, under `~/.local/share/zappe/adapters/`, with older copies in `adapters/history/`. Learning stays off until `llm.json` has a chat-completions `url`. Copy [`llm.json`](llm.json) and add the key locally. Do not commit that key.
+
 ## Custom branding (not in git)
 
 Zappe reads branding from the **user data dir**, never from this repository:

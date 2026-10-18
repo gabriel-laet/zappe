@@ -5,7 +5,7 @@
 
 namespace zappe {
 
-enum class VoiceKind { None, Home, Back, PlayPause, Open, Ota, Volume, Mute };
+enum class VoiceKind { None, Home, Back, PlayPause, Open, Search, Ota, Volume, Mute };
 
 struct VoiceIntent {
     VoiceKind kind = VoiceKind::None;

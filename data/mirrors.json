@@ -1,0 +1,194 @@
+{
+  "version": 1,
+  "note": "Adaptadores declarativos. A extração prefere respostas JSON/GraphQL (feeds). Os seletores de DOM são o fallback. Netflix e YouTube normalizam a URL de reprodução no código.",
+  "services": [
+    {
+      "id": "netflix",
+      "name": "Netflix",
+      "kind": "netflix",
+      "homeUrl": "https://www.netflix.com/browse",
+      "searchUrl": "https://www.netflix.com/search?q={q}",
+      "rowSelector": "[data-list-context], section",
+      "rowTitleSelector": "h2, .row-header-title, .rowTitle",
+      "cardSelector": "[class*='card'], .slider-item, .title-card",
+      "linkSelector": "a[href*='/title/'], a[href*='/watch/']",
+      "imageSelector": "img.boxart-image, img.boxart-image-in-padded-container, img",
+      "progressSelector": ".progress-bar, [role='progressbar']",
+      "profileSelector": ".profile-name, [data-uia='profile-name']",
+      "feeds": [
+        {
+          "urlContains": ["netflix.com/nq", "netflix.com/graphql", "/pathEvaluator"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["watchId", "videoId"],
+          "artworkKeys": ["boxart", "artwork", "storyArt", "image"],
+          "shelfKeys": ["rowTitle", "displayName", "title", "listContext"],
+          "hrefTemplate": "https://www.netflix.com/watch/{href}"
+        }
+      ],
+      "continueHints": ["continueWatching", "continuar", "continue watching"]
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "kind": "youtube",
+      "homeUrl": "https://www.youtube.com/feed/subscriptions",
+      "extraUrls": ["https://www.youtube.com/feed/history"],
+      "searchUrl": "https://www.youtube.com/results?search_query={q}",
+      "rowSelector": "ytd-rich-shelf-renderer, ytd-reel-shelf-renderer, ytd-item-section-renderer",
+      "rowTitleSelector": "#title, #title-text, yt-formatted-string#title",
+      "cardSelector": "ytd-rich-item-renderer, ytd-grid-video-renderer, ytd-video-renderer, ytd-reel-item-renderer",
+      "linkSelector": "a#video-title-link, a#thumbnail, a[href*='watch']",
+      "imageSelector": "ytd-thumbnail img, img#img, img",
+      "progressSelector": "#progress, ytd-thumbnail-overlay-resume-playback-renderer #progress",
+      "profileSelector": "button#avatar-btn, yt-img-shadow#avatar img",
+      "feeds": [
+        {
+          "urlContains": ["youtubei/v1/browse", "youtubei/v1/search", "youtubei/v1/guide", "youtube.com/youtubei"],
+          "titleKeys": ["title", "headline"],
+          "hrefKeys": ["videoId"],
+          "artworkKeys": ["thumbnail", "thumbnails"],
+          "shelfKeys": ["title", "headline"],
+          "hrefTemplate": "https://www.youtube.com/watch?v={href}"
+        }
+      ],
+      "continueHints": ["continuar assistindo", "continue watching", "history"]
+    },
+    {
+      "id": "prime",
+      "name": "Prime Video",
+      "kind": "generic",
+      "homeUrl": "https://www.primevideo.com/",
+      "searchUrl": "https://www.primevideo.com/search?phrase={q}",
+      "rowSelector": "[data-testid*='carousel'], [data-testid*='shelf'], section",
+      "rowTitleSelector": "h2, [data-testid*='title']",
+      "cardSelector": "[data-testid*='card'], a[href*='/detail/']",
+      "linkSelector": "a[href*='/detail/'], a[href*='/watch']",
+      "imageSelector": "img",
+      "progressSelector": "[role='progressbar']",
+      "profileSelector": "[data-automation-id='nav-profile'], #pv-nav-profile",
+      "playPaths": ["/detail/", "/watch", "/play", "/player", "/video"],
+      "playClick": "[data-testid='dp-atf-play-button'], [data-testid='episodes-playbutton']",
+      "rejectHints": ["watch with", "paramount+", "cinemax", "mgm+", "starz", "discovery+", "amc+", "bet+"],
+      "feeds": [
+        {
+          "urlContains": ["primevideo.com/api/enrichItemMetadata", "atv-ps.primevideo.com", "primevideo.com"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["playbackUrl", "link", "href"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
+      "continueHints": ["continuar", "continue watching"]
+    },
+    {
+      "id": "hbo",
+      "name": "HBO Max",
+      "kind": "generic",
+      "homeUrl": "https://play.max.com/",
+      "searchUrl": "https://play.max.com/search?q={q}",
+      "rowSelector": "section, [data-testid*='shelf']",
+      "rowTitleSelector": "h2, [data-testid*='title']",
+      "cardSelector": "[data-testid*='tile'], a[href*='/show/'], a[href*='/movie/'], a[href*='/video/watch/']",
+      "linkSelector": "a[href*='/video/watch/'], a[href*='/show/'], a[href*='/movie/']",
+      "imageSelector": "img",
+      "progressSelector": "[role='progressbar']",
+      "profileSelector": "[data-testid='profile-button'], [data-testid='profilePicker']",
+      "playPaths": ["/video/watch", "/show/", "/movie/", "/watch", "/play"],
+      "playClick": "text:assistir|watch|resume|retomar",
+      "feeds": [
+        {
+          "urlContains": ["api.hbomax.com/cms/routes", "api.hbomax.com/cms/collections", "hbomax.com"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["playbackUrl", "href", "id"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
+      "continueHints": ["continuar", "continue watching"]
+    },
+    {
+      "id": "apple",
+      "name": "Apple TV",
+      "kind": "generic",
+      "homeUrl": "https://tv.apple.com/",
+      "searchUrl": "https://tv.apple.com/search?term={q}",
+      "rowSelector": "[class*='shelf'], section",
+      "rowTitleSelector": "h2, [class*='title']",
+      "cardSelector": "a[href*='/movie/'], a[href*='/show/'], a[href*='/episode/']",
+      "linkSelector": "a[href*='/episode/'], a[href*='/movie/'], a[href*='/show/']",
+      "imageSelector": "img, picture source",
+      "progressSelector": "[role='progressbar']",
+      "profileSelector": "[data-testid='account-menu'], .profile-button",
+      "playPaths": ["/episode/", "/movie/", "/show/", "/watch", "/play"],
+      "playClick": "text:retomar|reproduzir|assistir|resume",
+      "feeds": [
+        {
+          "urlContains": ["tv.apple.com/api", "amp-api.tv.apple.com", "uts/v3"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["url", "href"],
+          "artworkKeys": ["artwork", "image"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
+      "continueHints": ["continuar", "continue watching"]
+    },
+    {
+      "id": "disney",
+      "name": "Disney+",
+      "kind": "generic",
+      "homeUrl": "https://www.disneyplus.com/home",
+      "searchUrl": "https://www.disneyplus.com/search?q={q}",
+      "rowSelector": "[data-testid*='carousel'], [data-testid*='set'], section",
+      "rowTitleSelector": "h2, [data-testid*='title']",
+      "cardSelector": "[data-testid*='tile'], a[href*='/play/'], a[href*='/browse/']",
+      "linkSelector": "a[href*='/play/'], a[href*='/browse/']",
+      "imageSelector": "img",
+      "progressSelector": "[role='progressbar']",
+      "profileSelector": "[data-testid='profile-avatar'], [data-testid='profile-selection']",
+      "playerSeek": "script",
+      "feeds": [
+        {
+          "urlContains": ["disney.api.edge.bamgrid.com/explore", "bamgrid.com", "disneyplus.com"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["href", "playbackUrl"],
+          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
+      "continueHints": ["continuar", "continue watching"]
+    },
+    {
+      "id": "globoplay",
+      "name": "Globoplay",
+      "kind": "generic",
+      "homeUrl": "https://globoplay.globo.com/",
+      "searchUrl": "https://globoplay.globo.com/busca/?q={q}",
+      "rowSelector": "[class*='carousel'], section, [class*='slider']",
+      "rowTitleSelector": "h2, [data-testid*='title']",
+      "cardSelector": "[class*='card'], a[href*='/v/'], a[href*='/ao-vivo/']",
+      "linkSelector": "a[href*='/v/'], a[href*='/ao-vivo/'], a[href*='/t/']",
+      "imageSelector": "img",
+      "progressSelector": "[role='progressbar']",
+      "profileSelector": "[data-testid='user-menu'], .user-avatar",
+      "playPaths": ["/v/", "/ao-vivo", "/watch", "/play", "/video"],
+      "playerOk": "script",
+      "playerSeek": "script",
+      "playerClick": true,
+      "feeds": [
+        {
+          "urlContains": ["multicloud-jarvis.globo.com/graphql", "multicloud-mystique.globo.com", "globoplay.globo.com"],
+          "titleKeys": ["title", "name"],
+          "hrefKeys": ["href", "url"],
+          "artworkKeys": ["image", "thumb", "artwork"],
+          "shelfKeys": ["title", "name"],
+          "hrefTemplate": ""
+        }
+      ],
+      "continueHints": ["continuar assistindo", "continuar"]
+    }
+  ]
+}

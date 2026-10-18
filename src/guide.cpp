@@ -7,6 +7,7 @@
 #include <QColor>
 #include <QDateTime>
 #include <QDir>
+#include <QUrl>
 #include <QFontDatabase>
 #include <QQuickWindow>
 #include <QStandardPaths>
@@ -87,11 +88,10 @@ void Guide::setBranding(const Branding &branding)
 void Guide::setCatalog(CatalogFile catalog)
 {
     m_catalogPath = catalog.path;
-    m_shelves->setShelves(std::move(catalog.shelves));
-    m_shelf = 0;
-    m_index = 0;
-    m_detailOpen = false;
-    syncFocusFields();
+    m_baseShelves = std::move(catalog.shelves);
+    m_mirrorShelves.clear();
+    m_mirrorService.clear();
+    publishShelves(true);
 }
 
 void Guide::setInitial(int shelf, int index, bool detail)
@@ -217,12 +217,17 @@ bool Guide::shelfShown(int index) const
     const ShelfData *shelf = m_shelves->shelfAt(index);
     if (!shelf)
         return false;
-    if (m_page == QLatin1String("live"))
-        return shelf->live;
-    if (m_page == QLatin1String("streaming"))
-        return !shelf->live;
     if (m_page == QLatin1String("settings"))
         return false;
+    if (m_page == QLatin1String("live"))
+        return shelf->live;
+    if (m_page == QLatin1String("streaming")) {
+        if (!m_mirrorService.isEmpty())
+            return shelf->skillId == QStringLiteral("mirror:") + m_mirrorService;
+        return !shelf->live;
+    }
+    if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
+        return shelf->id.contains(QStringLiteral(":continue")) || shelf->id.endsWith(QStringLiteral(":profiles"));
     return true;
 }
 
@@ -272,6 +277,8 @@ void Guide::setPage(const QString &page)
         return;
     m_page = page;
     m_menuIndex = menuForPage(page);
+    ++m_layoutEpoch;
+    emit layoutChanged();
     clampFocusToPage();
     emit pageChanged();
     emit menuChanged();
@@ -476,6 +483,16 @@ void Guide::activate()
     }
     if (!currentRow())
         return;
+    const ShelfData *shelf = m_shelves->shelfAt(m_shelf);
+    if (shelf && shelf->id == QLatin1String("apps")) {
+        emit serviceRequested(currentRow()->service);
+        return;
+    }
+    if (currentRow()->href.startsWith(QStringLiteral("zappe://profile/"))) {
+        const QString encoded = currentRow()->href.mid(QStringLiteral("zappe://profile/").size());
+        emit profileRequested(currentRow()->service, QUrl::fromPercentEncoding(encoded.toUtf8()));
+        return;
+    }
     if (m_focusLive) {
         pulseCard();
         emit playRequested(m_focusTitle, m_focusService, m_focusHref);
@@ -548,10 +565,108 @@ void Guide::back()
         emit focusChanged();
         return;
     }
+    if (!m_mirrorService.isEmpty() && m_page == QLatin1String("streaming")) {
+        closeMirror();
+        return;
+    }
     if (m_page != QLatin1String("home")) {
         setPage(QStringLiteral("home"));
         return;
     }
+}
+
+void Guide::publishShelves(bool resetFocus)
+{
+    const QString keepHref = resetFocus ? QString() : m_focusHref;
+    const int keepShelf = m_shelf;
+    QVector<ShelfData> merged;
+    merged.reserve(m_baseShelves.size() + m_mirrorShelves.size());
+    bool inserted = false;
+    for (const ShelfData &shelf : m_baseShelves) {
+        merged.append(shelf);
+        if (!inserted && shelf.id == QLatin1String("apps")) {
+            merged += m_mirrorShelves;
+            inserted = true;
+        }
+    }
+    if (!inserted)
+        merged += m_mirrorShelves;
+    m_shelves->setShelves(std::move(merged));
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    if (resetFocus) {
+        m_shelf = 0;
+        m_index = 0;
+        m_detailOpen = false;
+    } else if (!keepHref.isEmpty()) {
+        bool found = false;
+        for (int shelf = 0; shelf < shelfCount() && !found; ++shelf) {
+            const RowModel *rows = m_shelves->rowsAt(shelf);
+            if (!rows)
+                continue;
+            for (int i = 0; i < rows->rowCount(); ++i) {
+                const RowData *row = rows->at(i);
+                if (row && row->href == keepHref) {
+                    m_shelf = shelf;
+                    m_index = i;
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if (!found)
+            m_shelf = shelfCount() == 0 ? 0 : std::clamp(keepShelf, 0, shelfCount() - 1);
+    }
+    clampFocusToPage();
+    syncFocusFields();
+    emit focusChanged();
+}
+
+void Guide::openMirror(const QString &serviceId)
+{
+    if (serviceId.isEmpty())
+        return;
+    m_mirrorService = serviceId;
+    m_menuOpen = false;
+    m_detailOpen = false;
+    m_page = QStringLiteral("streaming");
+    m_menuIndex = menuForPage(m_page);
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    emit menuChanged();
+    emit detailChanged();
+    emit pageChanged();
+    clampFocusToPage();
+    emit focusChanged();
+}
+
+void Guide::closeMirror()
+{
+    if (m_mirrorService.isEmpty())
+        return;
+    m_mirrorService.clear();
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    clampFocusToPage();
+    emit focusChanged();
+}
+
+void Guide::replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves)
+{
+    const QString skill = QStringLiteral("mirror:") + serviceId;
+    QVector<ShelfData> kept;
+    for (const ShelfData &shelf : m_mirrorShelves) {
+        if (shelf.skillId != skill)
+            kept.append(shelf);
+    }
+    for (ShelfData &shelf : shelves) {
+        shelf.skillId = skill;
+        if (shelf.status.isEmpty())
+            shelf.status = QStringLiteral("ok");
+        kept.append(shelf);
+    }
+    m_mirrorShelves = std::move(kept);
+    publishShelves(false);
 }
 
 void Guide::toggleMenu()

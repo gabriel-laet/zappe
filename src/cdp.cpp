@@ -61,6 +61,51 @@ bool chromeCanGoBack(int currentIndex)
     return currentIndex > 0;
 }
 
+QVector<PlayerKeyEvent> playerKeyEvents(const QString &action)
+{
+    const QString name = action.trimmed().toLower();
+    QString key;
+    QString code;
+    int vk = 0;
+    if (name == QLatin1String("left")) {
+        key = QStringLiteral("ArrowLeft");
+        code = key;
+        vk = 37;
+    } else if (name == QLatin1String("right")) {
+        key = QStringLiteral("ArrowRight");
+        code = key;
+        vk = 39;
+    } else if (name == QLatin1String("up")) {
+        key = QStringLiteral("ArrowUp");
+        code = key;
+        vk = 38;
+    } else if (name == QLatin1String("down")) {
+        key = QStringLiteral("ArrowDown");
+        code = key;
+        vk = 40;
+    } else if (name == QLatin1String("ok") || name == QLatin1String("play")) {
+        key = QStringLiteral(" ");
+        code = QStringLiteral("Space");
+        vk = 32;
+    } else if (name == QLatin1String("back")) {
+        key = QStringLiteral("BrowserBack");
+        code = key;
+        vk = 166;
+    } else {
+        return {};
+    }
+    QVector<PlayerKeyEvent> events;
+    for (const char *type : {"rawKeyDown", "keyDown", "keyUp"}) {
+        PlayerKeyEvent event;
+        event.type = QString::fromLatin1(type);
+        event.key = key;
+        event.code = code;
+        event.virtualKey = vk;
+        events.append(event);
+    }
+    return events;
+}
+
 QString profileScript(const QString &name)
 {
     return QStringLiteral("(() => { const want = %1.toLowerCase();"
@@ -182,7 +227,7 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
 {
     if (!m_socket || !m_connected)
         return;
-    const QStringList types = {QStringLiteral("keyDown"), QStringLiteral("keyUp")};
+    const QStringList types = {QStringLiteral("rawKeyDown"), QStringLiteral("keyDown"), QStringLiteral("keyUp")};
     for (const QString &type : types) {
         QJsonObject params;
         params.insert(QStringLiteral("type"), type);
@@ -190,6 +235,86 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
         params.insert(QStringLiteral("code"), code);
         params.insert(QStringLiteral("windowsVirtualKeyCode"), virtualKey);
         params.insert(QStringLiteral("nativeVirtualKeyCode"), virtualKey);
+        if (key == QLatin1String(" ")) {
+            params.insert(QStringLiteral("text"), QStringLiteral(" "));
+            params.insert(QStringLiteral("unmodifiedText"), QStringLiteral(" "));
+        }
+        const int id = m_nextId++;
+        m_socket->sendTextMessage(
+            QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchKeyEvent"), params)));
+    }
+}
+
+void CdpClient::enableNetwork()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingEnable = m_nextId++;
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingEnable, QStringLiteral("Network.enable"), QJsonObject())));
+}
+
+void CdpClient::getResponseBody(const QString &requestId)
+{
+    if (!m_socket || !m_connected || requestId.isEmpty())
+        return;
+    const int id = m_nextId++;
+    m_pendingBodies.insert(id, requestId);
+    QJsonObject params;
+    params.insert(QStringLiteral("requestId"), requestId);
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Network.getResponseBody"), params)));
+}
+
+void CdpClient::closeBrowser()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingClose = m_nextId++;
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingClose, QStringLiteral("Browser.close"), QJsonObject())));
+}
+
+void CdpClient::dispatchMouseClick(int x, int y)
+{
+    if (!m_socket || !m_connected || x <= 0 || y <= 0)
+        return;
+    const QStringList types = {QStringLiteral("mousePressed"), QStringLiteral("mouseReleased")};
+    for (const QString &type : types) {
+        QJsonObject params;
+        params.insert(QStringLiteral("type"), type);
+        params.insert(QStringLiteral("x"), x);
+        params.insert(QStringLiteral("y"), y);
+        params.insert(QStringLiteral("button"), QStringLiteral("left"));
+        params.insert(QStringLiteral("clickCount"), 1);
+        const int id = m_nextId++;
+        m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchMouseEvent"), params)));
+    }
+}
+
+void CdpClient::captureScreenshot()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingShot = m_nextId++;
+    QJsonObject params;
+    params.insert(QStringLiteral("format"), QStringLiteral("jpeg"));
+    params.insert(QStringLiteral("quality"), 40);
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingShot, QStringLiteral("Page.captureScreenshot"), params)));
+}
+
+void CdpClient::dispatchAction(const QString &action)
+{
+    if (!m_socket || !m_connected)
+        return;
+    for (const PlayerKeyEvent &event : playerKeyEvents(action)) {
+        QJsonObject params;
+        params.insert(QStringLiteral("type"), event.type);
+        params.insert(QStringLiteral("key"), event.key);
+        params.insert(QStringLiteral("code"), event.code);
+        params.insert(QStringLiteral("windowsVirtualKeyCode"), event.virtualKey);
+        params.insert(QStringLiteral("nativeVirtualKeyCode"), event.virtualKey);
+        if (event.key == QLatin1String(" ")) {
+            params.insert(QStringLiteral("text"), QStringLiteral(" "));
+            params.insert(QStringLiteral("unmodifiedText"), QStringLiteral(" "));
+        }
         const int id = m_nextId++;
         m_socket->sendTextMessage(
             QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchKeyEvent"), params)));
@@ -199,9 +324,53 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
 void CdpClient::onMessage(const QString &message)
 {
     const QJsonObject obj = QJsonDocument::fromJson(message.toUtf8()).object();
+    const QString method = obj.value(QStringLiteral("method")).toString();
+    if (!method.isEmpty() && !obj.contains(QStringLiteral("id"))) {
+        const QJsonObject params = obj.value(QStringLiteral("params")).toObject();
+        if (method == QLatin1String("Network.responseReceived")) {
+            const QJsonObject response = params.value(QStringLiteral("response")).toObject();
+            emit networkResponse(params.value(QStringLiteral("requestId")).toString(),
+                                 response.value(QStringLiteral("url")).toString(),
+                                 response.value(QStringLiteral("mimeType")).toString());
+        } else if (method == QLatin1String("Network.loadingFinished")) {
+            emit networkFinished(params.value(QStringLiteral("requestId")).toString());
+        }
+        return;
+    }
     const int id = obj.value(QStringLiteral("id")).toInt();
     if (id == 0)
         return;
+    if (m_pendingBodies.contains(id)) {
+        const QString requestId = m_pendingBodies.take(id);
+        if (obj.contains(QStringLiteral("error"))) {
+            emit responseBody(requestId, QByteArray(), false);
+            return;
+        }
+        const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+        QByteArray body = result.value(QStringLiteral("body")).toString().toUtf8();
+        if (result.value(QStringLiteral("base64Encoded")).toBool())
+            body = QByteArray::fromBase64(body);
+        emit responseBody(requestId, body, !body.isEmpty());
+        return;
+    }
+    if (id == m_pendingShot) {
+        m_pendingShot = 0;
+        if (obj.contains(QStringLiteral("error"))) {
+            emit screenshotReady(QByteArray(), false);
+            return;
+        }
+        const QByteArray png =
+            QByteArray::fromBase64(obj.value(QStringLiteral("result")).toObject().value(QStringLiteral("data")).toString().toLatin1());
+        emit screenshotReady(png, !png.isEmpty());
+        return;
+    }
+    if (id == m_pendingEnable || id == m_pendingClose) {
+        if (id == m_pendingEnable)
+            m_pendingEnable = 0;
+        if (id == m_pendingClose)
+            m_pendingClose = 0;
+        return;
+    }
     if (obj.contains(QStringLiteral("error"))) {
         const QString text = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
         if (id == m_pendingHistory) {
