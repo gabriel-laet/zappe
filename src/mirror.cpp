@@ -24,6 +24,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 
+#include <algorithm>
 #include <cstdio>
 
 namespace zappe {
@@ -370,6 +371,23 @@ int mirrorCoverMaxAgeSecs()
 int mirrorRefreshMs()
 {
     return 20 * 60 * 1000;
+}
+
+int mirrorLoadTimeoutMs()
+{
+    return 20000;
+}
+
+bool mirrorShelfRetries(const QString &status, const QString &skillId, QString &serviceId)
+{
+    serviceId.clear();
+    if (status != QLatin1String("error"))
+        return false;
+    const QString prefix = QStringLiteral("mirror:");
+    if (!skillId.startsWith(prefix))
+        return false;
+    serviceId = skillId.mid(prefix.size());
+    return !serviceId.isEmpty();
 }
 
 bool mirrorChromeInFront(bool playerOpen)
@@ -974,13 +992,28 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     connect(m_cdp, &CdpClient::responseBody, this, &MirrorSession::onResponseBody);
     connect(m_cdp, &CdpClient::screenshotReady, this, &MirrorSession::onScreenshot);
     connect(m_cdp, &CdpClient::failed, this, [this](const QString &message) {
+        std::fprintf(stderr, "zappe: espelho cdp falhou: %s\n", qPrintable(message));
         if (m_job == JobLearnDom || m_job == JobLearnShot)
             return;
+        const bool down = !m_cdp || !m_cdp->connected();
         if (m_job == JobPlay)
             emit failed(message);
+        if (down) {
+            if (m_job != JobPlay)
+                m_busy = false;
+            scheduleAttach();
+            return;
+        }
+        if (m_job == JobPlay) {
+            m_busy = false;
+            return;
+        }
+        if (!m_current.isEmpty() && (m_job == JobExtract || m_job == JobSearch))
+            showError(m_current, message);
+        ++m_epoch;
         m_busy = false;
-        if (!m_player)
-            QTimer::singleShot(800, this, &MirrorSession::pump);
+        m_job = JobNone;
+        QTimer::singleShot(400, this, &MirrorSession::pump);
     });
     connect(m_chrome, &ChromeSession::ready, this, &MirrorSession::onChromeReady);
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) { emit failed(message); });
@@ -1002,11 +1035,37 @@ void MirrorSession::onChromeReady()
 {
     if (!m_cdp || !m_chrome)
         return;
-    m_cdp->attach(m_chrome->port());
+    m_attachTries = 0;
+    scheduleAttach();
+}
+
+void MirrorSession::scheduleAttach()
+{
+    if (!m_cdp || !m_chrome || m_cdp->connected())
+        return;
+    if (m_attachTries >= 12) {
+        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        return;
+    }
+    const int attempt = m_attachTries++;
+    int delay = 0;
+    if (attempt > 0) {
+        delay = 250;
+        for (int i = 1; i < attempt && delay < 2000; ++i)
+            delay *= 2;
+        delay = std::min(delay, 2000);
+    }
+    QTimer::singleShot(delay, this, [this] {
+        if (!m_cdp || !m_chrome || m_cdp->connected())
+            return;
+        std::fprintf(stderr, "zappe: espelho attach porta %d tentativa %d\n", m_chrome->port(), m_attachTries);
+        m_cdp->attach(m_chrome->port());
+    });
 }
 
 void MirrorSession::onAttached()
 {
+    m_attachTries = 0;
     if (m_cdp)
         m_cdp->enableNetwork();
     if (!m_pendingUrl.isEmpty() && m_job == JobPlay) {
@@ -1034,6 +1093,60 @@ void MirrorSession::showLoading(const QString &serviceId)
     shelf.title = adapter->name;
     shelf.status = QStringLiteral("loading");
     shelf.message = QStringLiteral("Atualizando…");
+    m_guide->replaceServiceShelves(serviceId, {shelf});
+    armWatch(serviceId);
+}
+
+void MirrorSession::armWatch(const QString &serviceId)
+{
+    const int token = m_loadToken.value(serviceId) + 1;
+    m_loadToken.insert(serviceId, token);
+    QTimer::singleShot(mirrorLoadTimeoutMs(), this, [this, serviceId, token] {
+        if (m_loadToken.value(serviceId) != token || m_player)
+            return;
+        if (m_pages.contains(serviceId) && !m_pages.value(serviceId).isEmpty())
+            return;
+        std::fprintf(stderr, "zappe: espelho timeout %s depois de %d ms\n", qPrintable(serviceId), mirrorLoadTimeoutMs());
+        showError(serviceId, QString());
+        if (m_player)
+            return;
+        const qint64 busyFor = QDateTime::currentMSecsSinceEpoch() - m_busySince;
+        if (m_busy && (m_current == serviceId || !m_cdp || !m_cdp->connected() || busyFor >= mirrorLoadTimeoutMs())) {
+            std::fprintf(stderr, "zappe: espelho abortando job %s preso há %lld ms\n", qPrintable(m_current),
+                         static_cast<long long>(busyFor));
+            ++m_epoch;
+            m_busy = false;
+            m_job = JobNone;
+        }
+        if (!m_cdp || !m_cdp->connected())
+            scheduleAttach();
+        else if (!m_busy)
+            QTimer::singleShot(400, this, &MirrorSession::pump);
+    });
+}
+
+void MirrorSession::showError(const QString &serviceId, const QString &detail)
+{
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
+    if (!m_guide || !adapter)
+        return;
+    m_loadToken.insert(serviceId, m_loadToken.value(serviceId) + 1);
+    QString message = QStringLiteral("O Chrome não abriu esta página.");
+    if (detail.contains(QStringLiteral("sem aba"), Qt::CaseInsensitive))
+        message = QStringLiteral("O Chrome não abriu uma aba.");
+    else if (detail.contains(QStringLiteral("sem conexão"), Qt::CaseInsensitive)
+             || detail.contains(QStringLiteral("Connection refused"), Qt::CaseInsensitive)
+             || detail.contains(QStringLiteral("desconectou"), Qt::CaseInsensitive))
+        message = QStringLiteral("O Chrome não respondeu.");
+    message += QStringLiteral("\nTentar de novo");
+    ShelfData shelf;
+    shelf.id = QStringLiteral("mirror:%1:error").arg(serviceId);
+    shelf.skillId = QStringLiteral("mirror:") + serviceId;
+    shelf.title = adapter->name;
+    shelf.status = QStringLiteral("error");
+    shelf.message = message;
+    std::fprintf(stderr, "zappe: espelho erro %s: %s\n", qPrintable(serviceId),
+                 qPrintable(detail.isEmpty() ? message : detail));
     m_guide->replaceServiceShelves(serviceId, {shelf});
 }
 
@@ -1146,9 +1259,11 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
         m_extraLeft.clear();
     m_job = job;
     m_busy = true;
+    m_busySince = QDateTime::currentMSecsSinceEpoch();
     m_learnPosted = false;
     m_samples.clear();
     m_inflight.clear();
+    std::fprintf(stderr, "zappe: espelho %s -> %s\n", qPrintable(serviceId), qPrintable(url));
     m_cdp->navigate(url);
 }
 
@@ -1487,6 +1602,7 @@ void MirrorSession::applyPage(const MirrorPage &page)
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_current);
     if (!adapter)
         return;
+    m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     QVector<ShelfData> shelves = page.shelves;
     if (m_mergePage) {
         QVector<ShelfData> prior;

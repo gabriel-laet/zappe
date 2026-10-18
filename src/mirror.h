@@ -92,6 +92,9 @@ QString coverCachePath(const QString &cacheDir, const QString &url);
 bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs);
 int mirrorCoverMaxAgeSecs();
 int mirrorRefreshMs();
+int mirrorLoadTimeoutMs();
+// Fileira de erro do espelho: OK dispara de novo em vez de abrir o detalhe.
+bool mirrorShelfRetries(const QString &status, const QString &skillId, QString &serviceId);
 
 // Mantém o Qt na frente. O Chrome só aparece quando o player está aberto.
 bool mirrorChromeInFront(bool playerOpen);
@@ -145,6 +148,9 @@ private:
     void applyPage(const MirrorPage &page);
     void downloadNext();
     void showLoading(const QString &serviceId);
+    void showError(const QString &serviceId, const QString &detail);
+    void armWatch(const QString &serviceId);
+    void scheduleAttach();
 
     Guide *m_guide = nullptr;
     ChromeSession *m_chrome = nullptr;
@@ -167,7 +173,10 @@ private:
     QString m_domSnap;
     QNetworkAccessManager *m_http = nullptr;
     QTimer *m_refresh = nullptr;
+    QHash<QString, int> m_loadToken;
     int m_job = 0;
+    int m_attachTries = 0;
+    qint64 m_busySince = 0;
     bool m_busy = false;
     bool m_player = false;
     bool m_started = false;

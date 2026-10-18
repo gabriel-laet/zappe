@@ -41,12 +41,15 @@ signals:
 
 private:
     void startProcess();
+    void probeDevTools(int attempt);
 
     ChromeLaunch m_launch;
     QProcess *m_process = nullptr;
     QString m_dataDir;
     ChromeFace m_face = ChromeFace::Hidden;
     bool m_relaunchHidden = false;
+    bool m_devtoolsReady = false;
+    int m_probeGen = 0;
 };
 
 } // namespace zappe

@@ -1,6 +1,7 @@
 #include "guide.h"
 
 #include "display.h"
+#include "mirror.h"
 #include "posters.h"
 #include "util.h"
 
@@ -481,9 +482,14 @@ void Guide::activate()
         activateDetail();
         return;
     }
+    const ShelfData *shelf = m_shelves->shelfAt(m_shelf);
+    QString retryService;
+    if (shelf && mirrorShelfRetries(shelf->status, shelf->skillId, retryService)) {
+        emit mirrorRetryRequested(retryService);
+        return;
+    }
     if (!currentRow())
         return;
-    const ShelfData *shelf = m_shelves->shelfAt(m_shelf);
     if (shelf && shelf->id == QLatin1String("apps")) {
         emit serviceRequested(currentRow()->service);
         return;

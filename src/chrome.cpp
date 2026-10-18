@@ -2,9 +2,13 @@
 
 #include <QDir>
 #include <QFile>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 
 #include <cstdio>
 
@@ -48,15 +52,16 @@ ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face)
                         QStringLiteral("--disable-features=TranslateUI"),
                         QStringLiteral("--disable-background-timer-throttling"),
                         QStringLiteral("--disable-renderer-backgrounding"),
-                        QStringLiteral("--disable-backgrounding-occluded-windows")};
+                        QStringLiteral("--disable-backgrounding-occluded-windows"),
+                        // Sem isto o headless injeta 800,600 e briga com a janela.
+                        QStringLiteral("--ozone-override-screen-size=1920,1080"),
+                        QStringLiteral("--window-size=1920,1080")};
     if (face == ChromeFace::Player) {
         // Tela cheia só no Play. No gamescope, minimizar não tira a janela da frente.
         launch.arguments.append(QStringLiteral("--kiosk"));
-        launch.arguments.append(QStringLiteral("--window-size=1920,1080"));
     } else {
         // Sem janela: o kiosk em about:blank ficava branco por cima do guia.
         launch.arguments.append(QStringLiteral("--headless=new"));
-        launch.arguments.append(QStringLiteral("--window-size=1920,1080"));
         launch.arguments.append(QStringLiteral("--mute-audio"));
     }
     launch.arguments.append(QStringLiteral("about:blank"));
@@ -83,17 +88,21 @@ void ChromeSession::startProcess()
         return;
     }
     QDir().mkpath(m_launch.profileDir);
+    ++m_probeGen;
+    m_devtoolsReady = false;
     auto *process = new QProcess(this);
     process->setProcessChannelMode(QProcess::ForwardedChannels);
     process->setProgram(m_launch.binary);
     process->setArguments(m_launch.arguments);
-    connect(process, &QProcess::started, this, &ChromeSession::ready);
+    connect(process, &QProcess::started, this, [this] { probeDevTools(0); });
     connect(process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         emit failed(QStringLiteral("Chrome não iniciou."));
     });
     connect(process, &QProcess::finished, this, [this, process] {
         if (m_process == process)
             m_process = nullptr;
+        m_devtoolsReady = false;
+        ++m_probeGen;
         process->deleteLater();
         emit exited();
         if (!m_relaunchHidden || m_dataDir.isEmpty())
@@ -111,11 +120,45 @@ void ChromeSession::startProcess()
     process->start();
 }
 
+void ChromeSession::probeDevTools(int attempt)
+{
+    if (!running())
+        return;
+    const int generation = m_probeGen;
+    const int port = m_launch.port;
+    auto *http = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/json/version").arg(port)));
+    request.setTransferTimeout(800);
+    QNetworkReply *reply = http->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, http, attempt, generation, port] {
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        http->deleteLater();
+        if (generation != m_probeGen || !running())
+            return;
+        if (ok) {
+            m_devtoolsReady = true;
+            std::fprintf(stderr, "zappe: chrome cdp pronto na porta %d\n", port);
+            emit ready();
+            return;
+        }
+        if (attempt >= 40) {
+            std::fprintf(stderr, "zappe: chrome cdp não abriu na porta %d\n", port);
+            emit failed(QStringLiteral("Chrome não abriu a porta de depuração."));
+            return;
+        }
+        if (attempt == 0 || attempt % 4 == 0)
+            std::fprintf(stderr, "zappe: chrome cdp porta %d ainda fechada (tentativa %d)\n", port, attempt + 1);
+        QTimer::singleShot(250, this, [this, attempt] { probeDevTools(attempt + 1); });
+    });
+}
+
 void ChromeSession::ensure(const QString &dataDir)
 {
     m_dataDir = dataDir;
     if (running()) {
-        emit ready();
+        if (m_devtoolsReady)
+            emit ready();
         return;
     }
     m_relaunchHidden = false;
@@ -128,7 +171,8 @@ void ChromeSession::present(const QString &dataDir)
     m_dataDir = dataDir;
     m_relaunchHidden = false;
     if (running() && m_face == ChromeFace::Player) {
-        emit ready();
+        if (m_devtoolsReady)
+            emit ready();
         return;
     }
     if (running())
