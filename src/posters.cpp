@@ -305,6 +305,52 @@ QImage renderPoster(const QString &title, const QString &serviceLabel, bool wide
     return image;
 }
 
+QImage renderChannel(const QString &name, const Palette &pal)
+{
+    QImage image(960, 540, QImage::Format_RGB32);
+    QPainter p(&image);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setRenderHint(QPainter::TextAntialiasing);
+    const QRectF rect = image.rect();
+
+    QLinearGradient bg(0, 0, rect.width(), rect.height());
+    bg.setColorAt(0, pal.a);
+    bg.setColorAt(0.55, pal.b);
+    bg.setColorAt(1, pal.a.darker(160));
+    p.fillRect(rect, bg);
+
+    QRadialGradient glow(rect.width() * 0.72, rect.height() * 0.28, rect.width() * 0.55);
+    QColor glowColor = pal.c;
+    glowColor.setAlpha(70);
+    glow.setColorAt(0, glowColor);
+    glow.setColorAt(1, QColor(0, 0, 0, 0));
+    p.fillRect(rect, glow);
+
+    QFont kicker(uiFamily());
+    kicker.setPixelSize(22);
+    kicker.setWeight(QFont::DemiBold);
+    kicker.setLetterSpacing(QFont::AbsoluteSpacing, 2.2);
+    p.setFont(kicker);
+    p.setPen(QColor(255, 255, 255, 220));
+    p.drawText(QRectF(48, 48, rect.width() - 96, 32), Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("AO VIVO"));
+
+    QFont titleFont(uiFamily());
+    titleFont.setPixelSize(72);
+    titleFont.setWeight(QFont::DemiBold);
+    titleFont.setLetterSpacing(QFont::AbsoluteSpacing, -1.1);
+    p.setFont(titleFont);
+    p.setPen(Qt::white);
+    const QFontMetricsF metrics(titleFont);
+    const QStringList lines = wrapLines(metrics, name, rect.width() - 96, 2);
+    const qreal lineH = metrics.height();
+    qreal y = rect.center().y() - lines.size() * lineH * 0.5 + metrics.ascent() * 0.15;
+    for (const QString &line : lines) {
+        p.drawText(QPointF(48, y + metrics.ascent()), line);
+        y += lineH;
+    }
+    return image;
+}
+
 QImage ambientFrom(const QImage &poster)
 {
     const QImage small = poster.scaled(140, 78, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
@@ -367,6 +413,23 @@ ArtPaths makePoster(const QString &cacheDir, const QString &title, const QString
     }
     const QImage poster = renderPoster(title, serviceLabel, wide, pal, hash);
     return finish(cacheDir, key, poster, hexColor(vivid(pal)));
+}
+
+ArtPaths makeChannelCard(const QString &cacheDir, const QString &name)
+{
+    const quint32 hash = fnv1a(name + QStringLiteral("|channel"));
+    const Palette pal = kPalettes[hash % (sizeof(kPalettes) / sizeof(kPalettes[0]))];
+    const QString key = QStringLiteral("v%1-channel-%2").arg(kArtVersion).arg(slug(name));
+    const QString artwork = artFile(cacheDir, key);
+    const QString ambient = artFile(cacheDir, key + QStringLiteral("-ambient"));
+    if (QFileInfo::exists(artwork) && QFileInfo::exists(ambient)) {
+        ArtPaths cached;
+        cached.artwork = artwork;
+        cached.ambient = ambient;
+        cached.color = hexColor(vivid(pal));
+        return cached;
+    }
+    return finish(cacheDir, key, renderChannel(name, pal), hexColor(vivid(pal)));
 }
 
 ArtPaths artFromFile(const QString &cacheDir, const QString &imagePath, const QString &title, const QString &serviceLabel,

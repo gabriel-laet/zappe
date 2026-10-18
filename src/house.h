@@ -110,6 +110,7 @@ private:
     class VoiceSession *m_voice = nullptr;
     class RemoteWatcher *m_remote = nullptr;
     class MirrorSession *m_mirror = nullptr;
+    class XBackGrab *m_xback = nullptr;
     bool m_playing = false;
     bool m_player = false;
     bool m_promptOpen = false;

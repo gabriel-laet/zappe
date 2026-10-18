@@ -13,6 +13,8 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QImageReader>
+#include <QProcess>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -943,6 +945,165 @@ QString coverDownloadReferer(const QString &homeUrl)
     return url.toString(QUrl::FullyEncoded);
 }
 
+QString expandCoverUrl(const QString &input)
+{
+    QString url = input.trimmed();
+    if (url.isEmpty())
+        return url;
+    if (url.startsWith(QStringLiteral("//")))
+        url.prepend(QStringLiteral("https:"));
+    url.replace(QStringLiteral("%7B"), QStringLiteral("{"), Qt::CaseInsensitive);
+    url.replace(QStringLiteral("%7D"), QStringLiteral("}"), Qt::CaseInsensitive);
+    const QPair<const char *, const char *> subs[] = {
+        {"{{width}}", "640"},  {"{width}", "640"},  {"{{height}}", "360"}, {"{height}", "360"},
+        {"{{quality}}", "80"}, {"{quality}", "80"}, {"{{format}}", "jpg"}, {"{format}", "jpg"},
+        {"{{size}}", "640x360"}, {"{size}", "640x360"}, {"{{w}}", "640"}, {"{w}", "640"},
+        {"{{h}}", "360"},       {"{h}", "360"},       {"{{q}}", "80"},   {"{q}", "80"},
+        {"{{f}}", "jpg"},       {"{f}", "jpg"},       {"{{c}}", "bb"},   {"{c}", "bb"},
+    };
+    for (const auto &sub : subs)
+        url.replace(QLatin1String(sub.first), QLatin1String(sub.second), Qt::CaseInsensitive);
+    if (url.contains(QStringLiteral("mzstatic.com"))
+        && (url.endsWith(QStringLiteral("/source")) || url.endsWith(QStringLiteral("/source/")))) {
+        while (url.endsWith(QLatin1Char('/')))
+            url.chop(1);
+        url += QStringLiteral("/640x360bb.jpg");
+    }
+    return url;
+}
+
+QString coverKind(const QByteArray &body)
+{
+    if (body.size() >= 12 && body.startsWith("RIFF") && body.mid(8, 4) == "WEBP")
+        return QStringLiteral("webp");
+    if (body.size() >= 12 && body.mid(4, 4) == "ftyp") {
+        const QByteArray brand = body.mid(8, 4);
+        if (brand == "avif" || brand == "avis")
+            return QStringLiteral("avif");
+    }
+    if (body.size() >= 3 && static_cast<unsigned char>(body.at(0)) == 0xFF
+        && static_cast<unsigned char>(body.at(1)) == 0xD8)
+        return QStringLiteral("jpeg");
+    if (body.startsWith("\x89PNG"))
+        return QStringLiteral("png");
+    if (body.startsWith("GIF87a") || body.startsWith("GIF89a"))
+        return QStringLiteral("gif");
+    const QByteArray head = body.left(24).trimmed().toLower();
+    if (head.startsWith("<!") || head.startsWith("<ht") || head.startsWith("<htm") || head.startsWith("{")
+        || head.startsWith("["))
+        return QStringLiteral("texto");
+    return QStringLiteral("bin");
+}
+
+QString coverBodyLabel(const QByteArray &body)
+{
+    return coverKind(body) + QLatin1Char(' ') + QString::fromLatin1(body.left(8).toHex());
+}
+
+QByteArray encodeJpeg(const QImage &image)
+{
+    if (image.isNull() || image.width() < 24 || image.height() < 24)
+        return {};
+    QByteArray jpeg;
+    QBuffer buffer(&jpeg);
+    buffer.open(QIODevice::WriteOnly);
+    if (!image.save(&buffer, "JPEG", 82) || jpeg.size() < 32)
+        return {};
+    return jpeg;
+}
+
+QImage imageFromCover(const QByteArray &body, const QByteArray &format)
+{
+    QBuffer buffer;
+    buffer.setData(body);
+    if (!buffer.open(QIODevice::ReadOnly))
+        return {};
+    QImageReader reader(&buffer, format);
+    reader.setAutoTransform(true);
+    return reader.read();
+}
+
+QByteArray ffmpegJpeg(const QByteArray &body)
+{
+    QProcess proc;
+    proc.start(QStringLiteral("ffmpeg"),
+               {QStringLiteral("-nostdin"), QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                QStringLiteral("error"), QStringLiteral("-i"), QStringLiteral("pipe:0"), QStringLiteral("-an"),
+                QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-f"), QStringLiteral("image2pipe"),
+                QStringLiteral("-vcodec"), QStringLiteral("mjpeg"), QStringLiteral("-q:v"), QStringLiteral("3"),
+                QStringLiteral("pipe:1")});
+    if (!proc.waitForStarted(2000))
+        return {};
+    proc.write(body);
+    proc.closeWriteChannel();
+    if (!proc.waitForFinished(8000)) {
+        proc.kill();
+        proc.waitForFinished(400);
+        return {};
+    }
+    const QByteArray out = proc.readAllStandardOutput();
+    if (out.size() < 32 || static_cast<unsigned char>(out.at(0)) != 0xFF || static_cast<unsigned char>(out.at(1)) != 0xD8)
+        return {};
+    return out;
+}
+
+void logImageFormatsOnce()
+{
+    static bool done = false;
+    if (done)
+        return;
+    done = true;
+    QStringList names;
+    for (const QByteArray &fmt : QImageReader::supportedImageFormats())
+        names.append(QString::fromLatin1(fmt));
+    std::fprintf(stderr, "zappe: formatos de imagem Qt: %s\n", qPrintable(names.join(QLatin1Char(' '))));
+}
+
+QByteArray coverJpegFromBody(const QByteArray &body, QString *detail)
+{
+    const auto note = [detail](const QString &text) {
+        if (detail)
+            *detail = text;
+    };
+    if (body.size() < 32) {
+        note(QStringLiteral("curto %1").arg(coverBodyLabel(body)));
+        return {};
+    }
+    const QString kind = coverKind(body);
+    QByteArray format;
+    if (kind == QLatin1String("jpeg"))
+        format = "jpeg";
+    else if (kind == QLatin1String("png") || kind == QLatin1String("gif") || kind == QLatin1String("webp")
+             || kind == QLatin1String("avif"))
+        format = kind.toLatin1();
+    QImage image;
+    if (!format.isEmpty())
+        image = imageFromCover(body, format);
+    if (image.isNull())
+        image.loadFromData(body);
+    if (!image.isNull() && (image.width() < 24 || image.height() < 24)) {
+        note(QStringLiteral("pequena %1x%2 %3").arg(image.width()).arg(image.height()).arg(coverBodyLabel(body)));
+        return {};
+    }
+    QByteArray jpeg = encodeJpeg(image);
+    if (jpeg.size() >= 32) {
+        note(QString());
+        return jpeg;
+    }
+    jpeg = ffmpegJpeg(body);
+    if (jpeg.size() >= 32) {
+        const QImage check = imageFromCover(jpeg, "jpeg");
+        if (check.isNull() || check.width() < 24 || check.height() < 24) {
+            note(QStringLiteral("pequena ffmpeg %1").arg(coverBodyLabel(body)));
+            return {};
+        }
+        note(QString());
+        return jpeg;
+    }
+    note(coverBodyLabel(body));
+    return {};
+}
+
 bool coverFetchIsBlocked(const QString &error)
 {
     const QString text = error.toLower();
@@ -1073,7 +1234,7 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             row.service = adapter.id;
             row.serviceLabel = adapter.name;
             row.href = href;
-            row.artworkSpec = rowObj.value(QStringLiteral("artwork")).toString();
+            row.artworkSpec = expandCoverUrl(rowObj.value(QStringLiteral("artwork")).toString());
             row.synopsis = rowObj.value(QStringLiteral("synopsis")).toString().simplified();
             if (row.synopsis.compare(name, Qt::CaseInsensitive) == 0)
                 row.synopsis.clear();
@@ -1231,7 +1392,7 @@ QString coverCachePath(const QString &cacheDir, const QString &url)
     const QByteArray hash = QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex();
     QDir dir(cacheDir);
     dir.mkpath(QStringLiteral("covers"));
-    return dir.filePath(QStringLiteral("covers/%1.img").arg(QString::fromLatin1(hash)));
+    return dir.filePath(QStringLiteral("covers/%1.jpg").arg(QString::fromLatin1(hash)));
 }
 
 bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs)
@@ -2337,9 +2498,14 @@ void MirrorSession::rememberImage(const QString &url, const QByteArray &body)
         if (image.key == key)
             return;
     }
-    QImage probe;
-    if (!probe.loadFromData(body) || probe.width() < 80 || probe.height() < 80)
+    const QString kind = coverKind(body);
+    if (kind == QLatin1String("texto") || kind == QLatin1String("bin"))
         return;
+    if (kind == QLatin1String("jpeg") || kind == QLatin1String("png") || kind == QLatin1String("gif")) {
+        QImage probe;
+        if (!probe.loadFromData(body) || probe.width() < 80 || probe.height() < 80)
+            return;
+    }
     HeldImage held;
     held.url = url.left(500);
     held.key = key;
@@ -2358,11 +2524,10 @@ int MirrorSession::takeHeldCovers()
             continue;
         }
         const QByteArray body = heldImage(job.url);
-        QImage image;
-        if (!body.isEmpty())
-            image.loadFromData(body);
-        if (!image.isNull()) {
-            storeCover(job, body);
+        QString detail;
+        const QByteArray jpeg = body.isEmpty() ? QByteArray() : coverJpegFromBody(body, &detail);
+        if (jpeg.size() >= 32) {
+            storeCover(job, jpeg);
             ++saved;
         } else {
             left.append(job);
@@ -2535,11 +2700,18 @@ void MirrorSession::finishAccept()
 
 void MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
 {
+    QByteArray jpeg = body;
+    if (coverKind(body) != QLatin1String("jpeg")) {
+        QString detail;
+        jpeg = coverJpegFromBody(body, &detail);
+    }
+    if (jpeg.size() < 32)
+        return;
     QDir().mkpath(QFileInfo(job.path).absolutePath());
     QFile out(job.path);
     if (!out.open(QIODevice::WriteOnly))
         return;
-    out.write(body);
+    out.write(jpeg);
     QVector<ShelfData> shelves = m_pages.value(job.serviceId);
     bool changed = false;
     for (ShelfData &shelf : shelves) {
@@ -2564,22 +2736,26 @@ void MirrorSession::startDirectCovers(const QVector<CoverJob> &jobs)
     m_directTotal = int(jobs.size());
     m_directError.clear();
     m_directFile.clear();
-    if (!jobs.isEmpty())
-        pumpDirectCovers();
+    logImageFormatsOnce();
+    if (jobs.isEmpty()) {
+        logDirectCovers();
+        return;
+    }
+    pumpDirectCovers();
 }
 
 void MirrorSession::logDirectCovers()
 {
-    if (m_directTotal <= 0 || m_current.isEmpty())
+    if (m_directTotal < 0 || m_current.isEmpty())
         return;
     QString extra;
     if (!m_directFile.isEmpty())
         extra += QStringLiteral(" ") + m_directFile;
     if (!m_directError.isEmpty())
-        extra += QStringLiteral(" erro ") + m_directError.left(140);
+        extra += QStringLiteral(" erro ") + m_directError.left(240);
     std::fprintf(stderr, "zappe: espelho %s capas %d/%d direto%s\n", qPrintable(m_current), m_directSaved,
                  m_directTotal, qPrintable(extra));
-    m_directTotal = 0;
+    m_directTotal = -1;
 }
 
 void MirrorSession::pumpDirectCovers()
@@ -2587,9 +2763,9 @@ void MirrorSession::pumpDirectCovers()
     while (m_directActive < 4 && !m_directJobs.isEmpty()) {
         const CoverJob job = m_directJobs.takeFirst();
         ++m_directActive;
-        QNetworkRequest request{QUrl(job.url)};
+        QNetworkRequest request{QUrl(expandCoverUrl(job.url))};
         request.setHeader(QNetworkRequest::UserAgentHeader, chromeCatalogUserAgent());
-        request.setRawHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+        request.setRawHeader("Accept", "image/jpeg,image/png,image/webp;q=0.5,image/*;q=0.2,*/*;q=0.1");
         const QString referer = coverDownloadReferer(job.referer);
         if (!referer.isEmpty()) {
             request.setRawHeader("Referer", referer.toUtf8());
@@ -2608,29 +2784,23 @@ void MirrorSession::pumpDirectCovers()
             const bool httpOk = reply->error() == QNetworkReply::NoError;
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString netErr = reply->errorString();
+            const QString type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
             reply->deleteLater();
-            QImage image;
-            if (httpOk && body.size() >= 32)
-                image.loadFromData(body);
-            if (!image.isNull() && image.width() >= 24 && image.height() >= 24) {
-                QByteArray jpeg;
-                QBuffer buffer(&jpeg);
-                buffer.open(QIODevice::WriteOnly);
-                if (image.save(&buffer, "JPEG", 82) && jpeg.size() >= 32) {
-                    storeCover(job, jpeg);
-                    ++m_directSaved;
-                    if (m_directFile.isEmpty())
-                        m_directFile = fileUrl(job.path);
-                } else if (m_directError.isEmpty()) {
-                    m_directError = QStringLiteral("jpeg");
-                }
+            QString detail;
+            const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail) : QByteArray();
+            if (jpeg.size() >= 32) {
+                storeCover(job, jpeg);
+                ++m_directSaved;
+                if (m_directFile.isEmpty())
+                    m_directFile = fileUrl(job.path);
             } else if (m_directError.isEmpty()) {
-                if (status > 0)
-                    m_directError = QStringLiteral("http %1").arg(status);
-                else if (!httpOk)
+                const QString mime = type.section(QLatin1Char(';'), 0, 0).trimmed();
+                if (!httpOk && status <= 0)
                     m_directError = netErr.left(120);
                 else
-                    m_directError = QStringLiteral("sem imagem");
+                    m_directError = QStringLiteral("http %1 %2 %3 %4")
+                                        .arg(QString::number(status), mime.isEmpty() ? QStringLiteral("-") : mime.left(40),
+                                             detail.isEmpty() ? coverBodyLabel(body) : detail, job.url.left(90));
             }
             --m_directActive;
             if (m_directJobs.isEmpty() && m_directActive == 0)
@@ -2647,9 +2817,9 @@ void MirrorSession::downloadNext()
         return;
     m_downloading = true;
     const CoverJob job = m_covers.takeFirst();
-    QNetworkRequest request{QUrl(job.url)};
+    QNetworkRequest request{QUrl(expandCoverUrl(job.url))};
     request.setHeader(QNetworkRequest::UserAgentHeader, chromeCatalogUserAgent());
-    request.setRawHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+    request.setRawHeader("Accept", "image/jpeg,image/png,image/webp;q=0.5,image/*;q=0.2,*/*;q=0.1");
     QString referer = coverDownloadReferer(job.referer);
     if (referer.isEmpty()) {
         const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, job.serviceId);
@@ -2664,16 +2834,10 @@ void MirrorSession::downloadNext()
         const QByteArray body = reply->readAll();
         const bool httpOk = reply->error() == QNetworkReply::NoError;
         reply->deleteLater();
-        QImage image;
-        if (httpOk && body.size() >= 32)
-            image.loadFromData(body);
-        if (!image.isNull() && image.width() >= 24 && image.height() >= 24) {
-            QByteArray jpeg;
-            QBuffer buffer(&jpeg);
-            buffer.open(QIODevice::WriteOnly);
-            if (image.save(&buffer, "JPEG", 82) && jpeg.size() >= 32)
-                storeCover(job, jpeg);
-        }
+        QString detail;
+        const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail) : QByteArray();
+        if (jpeg.size() >= 32)
+            storeCover(job, jpeg);
         m_downloading = false;
         downloadNext();
     });

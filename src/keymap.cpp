@@ -25,6 +25,7 @@ RemoteAction actionForEvdev(int code)
         return RemoteAction::Ok;
     case 158:
     case 14:
+    case 1:
         return RemoteAction::Back;
     case 127:
         return RemoteAction::Menu;

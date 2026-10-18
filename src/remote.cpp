@@ -168,8 +168,7 @@ protected:
                     held = wantHold;
                     holdFails = 0;
                     if (wantHold && !keyboardFds.isEmpty())
-                        std::fprintf(stderr,
-                                     "zappe: teclado do controle exclusivo enquanto o Chrome está aberto\n");
+                        std::fprintf(stderr, "zappe: teclado do controle exclusivo\n");
                 } else if (wantHold && holdFails++ % 20 == 0) {
                     std::fprintf(stderr, "zappe: não consegui segurar o teclado do controle\n");
                 }

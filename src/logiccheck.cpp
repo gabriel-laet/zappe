@@ -11,6 +11,7 @@
 #include "logins.h"
 #include "mirror.h"
 #include "ota.h"
+#include "posters.h"
 #include "remote.h"
 #include "samsung.h"
 #include "util.h"
@@ -19,9 +20,13 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QBuffer>
+#include <QProcess>
 #include <QTemporaryDir>
 
 #include <cstdio>
@@ -51,8 +56,8 @@ int runLogicSelfCheck()
         || actionForEvdev(105) != RemoteAction::Left || actionForEvdev(106) != RemoteAction::Right)
         return fail("arrows");
     if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Back
-        || actionForEvdev(14) != RemoteAction::Back)
-        return fail("ok/home/del");
+        || actionForEvdev(14) != RemoteAction::Back || actionForEvdev(1) != RemoteAction::Back)
+        return fail("ok/home/del/escape");
     if (actionForEvdev(127) != RemoteAction::Menu || actionForEvdev(104) != RemoteAction::PageUp
         || actionForEvdev(109) != RemoteAction::PageDown)
         return fail("menu/page");
@@ -131,8 +136,47 @@ int runLogicSelfCheck()
     if (resolveChannelName(QStringLiteral("SBT"), names) != QLatin1String("SBT HD"))
         return fail("sbt hd");
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
-    if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv")))
+    if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
+        || !script.contains(QStringLiteral("ESC quit")) || !script.contains(QStringLiteral("BACK quit"))
+        || !script.contains(QStringLiteral("GO_BACK quit")) || !script.contains(QStringLiteral("0x21FF26 quit"))
+        || !script.contains(QStringLiteral("pkill -TERM -P")) || !script.contains(QStringLiteral("exec setsid")))
         return fail("ota pipeline");
+    if (otaFrameIntervalMs() != 3 * 60 * 1000)
+        return fail("ota frame interval");
+    QTemporaryDir frameDir;
+    if (!frameDir.isValid())
+        return fail("ota frame dir");
+    const QString framePath = otaFramePath(frameDir.path(), QStringLiteral("Globo HD"));
+    QDir().mkpath(QFileInfo(framePath).absolutePath());
+    QImage shot(32, 18, QImage::Format_RGB32);
+    shot.fill(Qt::red);
+    if (!shot.save(framePath, "JPG"))
+        return fail("ota frame save");
+    const QDateTime frameNow = QDateTime::currentDateTime();
+    if (!otaFrameIsFresh(framePath, frameNow))
+        return fail("fresh ota frame");
+    RowData liveRow;
+    liveRow.title = QStringLiteral("Globo HD");
+    liveRow.live = true;
+    assignOtaFrame(liveRow, frameDir.path(), frameNow);
+    if (liveRow.artworkSpec != framePath || !liveRow.frame)
+        return fail("ota frame assigned");
+    QFile frameFile(framePath);
+    if (!frameFile.open(QIODevice::ReadWrite))
+        return fail("ota frame touch");
+    frameFile.setFileTime(frameNow.addDays(-2), QFileDevice::FileModificationTime);
+    frameFile.close();
+    if (otaFrameIsFresh(framePath, frameNow))
+        return fail("stale ota frame");
+    const QString artDir = frameDir.filePath(QStringLiteral("art"));
+    const ArtPaths card = makeChannelCard(artDir, QStringLiteral("Globo HD"));
+    const ArtPaths poster = makePoster(artDir, QStringLiteral("Globo HD"), QStringLiteral("TV aberta"), true);
+    const QImage cardImage(card.artwork);
+    const QImage posterImage(poster.artwork);
+    if (cardImage.isNull() || cardImage.size() != QSize(960, 540) || card.artwork == poster.artwork)
+        return fail("channel card");
+    if (cardImage.pixel(80, 80) == posterImage.pixel(80, 80) && cardImage.pixel(480, 270) == posterImage.pixel(480, 270))
+        return fail("channel card matches the generic poster");
 
     if (parseVoicePtBr(QStringLiteral("abrir Netflix")).service != QLatin1String("netflix"))
         return fail("voice netflix");
@@ -385,8 +429,44 @@ int runLogicSelfCheck()
         || !coverDownloadReferer(QStringLiteral("https://www.primevideo.com/")).contains(QStringLiteral("primevideo.com"))
         || !coverDownloadReferer(QStringLiteral("notaurl")).isEmpty())
         return fail("cover referer is the service");
-    if (!fileUrl(QStringLiteral("/tmp/zappe-cover.img")).startsWith(QStringLiteral("file://")))
+    if (!fileUrl(QStringLiteral("/tmp/zappe-cover.jpg")).startsWith(QStringLiteral("file://")))
         return fail("cover file url");
+    if (!coverCachePath(QStringLiteral("/tmp/zappe-cache"), QStringLiteral("https://cdn.example/a.webp"))
+             .endsWith(QStringLiteral(".jpg")))
+        return fail("cover cache is jpeg");
+    const QString hboArt = expandCoverUrl(
+        QStringLiteral("https://images.cdn.prd.api.discomax.com/a.jpeg?w={width}&h={height}"));
+    const QString appleArt = expandCoverUrl(
+        QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/{w}x{h}{c}.{f}"));
+    const QString encodedArt = expandCoverUrl(QStringLiteral("https://cdn.example/a.jpg?w=%7Bwidth%7D"));
+    if (hboArt.contains(QLatin1Char('{')) || !hboArt.contains(QStringLiteral("w=640"))
+        || !hboArt.contains(QStringLiteral("h=360"))
+        || appleArt != QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/640x360bb.jpg")
+        || encodedArt.contains(QLatin1Char('{')) || !encodedArt.contains(QStringLiteral("w=640")))
+        return fail("cover template");
+    QImage solid(40, 30, QImage::Format_RGB32);
+    solid.fill(Qt::red);
+    QByteArray solidJpeg;
+    QBuffer solidBuffer(&solidJpeg);
+    solidBuffer.open(QIODevice::WriteOnly);
+    if (!solid.save(&solidBuffer, "JPEG") || coverJpegFromBody(solidJpeg, nullptr).size() < 32)
+        return fail("jpeg cover decodes");
+    const QString webpPath = QDir::temp().filePath(QStringLiteral("zappe-cover.webp"));
+    QProcess webp;
+    webp.start(QStringLiteral("ffmpeg"),
+               {QStringLiteral("-y"), QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("color=c=red:s=32x24"), QStringLiteral("-frames:v"), QStringLiteral("1"), webpPath});
+    if (!webp.waitForStarted(2000) || !webp.waitForFinished(8000) || webp.exitCode() != 0)
+        return fail("webp sample");
+    QFile webpFile(webpPath);
+    if (!webpFile.open(QIODevice::ReadOnly))
+        return fail("webp sample open");
+    QString webpDetail;
+    const QByteArray webpJpeg = coverJpegFromBody(webpFile.readAll(), &webpDetail);
+    if (webpJpeg.size() < 32 || static_cast<unsigned char>(webpJpeg.at(0)) != 0xFF
+        || static_cast<unsigned char>(webpJpeg.at(1)) != 0xD8)
+        return fail("webp cover becomes jpeg");
     if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect")))
         return fail("cover clip script");
     if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))

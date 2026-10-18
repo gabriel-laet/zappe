@@ -592,6 +592,26 @@ void Guide::back()
     }
 }
 
+void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color)
+{
+    if (href.isEmpty() || artwork.isEmpty())
+        return;
+    bool changed = false;
+    for (ShelfData &shelf : m_baseShelves) {
+        for (RowData &row : shelf.rows) {
+            if (row.href != href)
+                continue;
+            row.artwork = artwork;
+            row.ambient = ambient;
+            row.color = color;
+            row.frame = true;
+            changed = true;
+        }
+    }
+    if (changed)
+        publishShelves(false);
+}
+
 void Guide::publishShelves(bool resetFocus)
 {
     const QString keepHref = resetFocus ? QString() : m_focusHref;

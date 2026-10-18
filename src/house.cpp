@@ -6,9 +6,11 @@
 #include "logins.h"
 #include "mirror.h"
 #include "ota.h"
+#include "posters.h"
 #include "remote.h"
 #include "samsung.h"
 #include "voice.h"
+#include "xback.h"
 
 #include <QDateTime>
 #include <QProcess>
@@ -27,7 +29,9 @@ House::House(QObject *parent)
     , m_voice(new VoiceSession(this))
     , m_remote(new RemoteWatcher(this))
     , m_mirror(new MirrorSession(this))
+    , m_xback(new XBackGrab(this))
 {
+    connect(m_xback, &XBackGrab::pressed, this, &House::goBack);
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
             failLoading(message);
@@ -117,9 +121,17 @@ House::House(QObject *parent)
         else if (!m_loading)
             toast(message);
     });
+    connect(m_ota, &OtaPlayer::frameReady, this, [this](const QString &channel, const QString &path) {
+        if (!m_guide)
+            return;
+        const ArtPaths art = artFromFile(cacheDir(), path, channel, QStringLiteral("TV aberta"), true);
+        m_guide->noteLiveFrame(QStringLiteral("zappe://ota/") + channel, art.artwork, art.ambient, art.color);
+    });
     connect(m_ota, &OtaPlayer::stopped, this, [this] {
-        if (!m_chrome->running())
-            setPlaying(false);
+        if (m_player && m_chrome->running())
+            return;
+        setPlaying(false);
+        showGuide();
     });
     connect(m_samsung, &SamsungClient::failed, this, [this](int key, const QString &message) {
         const auto tvKey = TvKey(key);
@@ -504,7 +516,14 @@ void House::setPlaying(bool playing)
 
 void House::updateKeyHold()
 {
-    m_remote->setHoldKeyboard(chromeFocused());
+    // O mpv em tela cheia fica com o foco. O teclado do controle fica exclusivo
+    // para Back e Escape fecharem o canal. O keycode X11 166 (XF86Back) também
+    // é capturado aqui: o xdotool manda essa tecla para o mpv, que não conhece
+    // o nome XF86Back.
+    const bool otaOn = m_ota && m_ota->playing();
+    m_remote->setHoldKeyboard(chromeFocused() || otaOn);
+    if (m_xback)
+        m_xback->setActive(otaOn);
 }
 
 bool House::chromeFocused() const

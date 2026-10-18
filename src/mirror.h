@@ -95,6 +95,11 @@ QString coverMatchKey(const QString &url);
 bool coverUrlsMatch(const QString &wanted, const QString &loaded);
 // Referer do serviço (https://www.netflix.com/...), não o host do CDN.
 QString coverDownloadReferer(const QString &homeUrl);
+// Troca {width}, {w}x{h}{c}.{f} e afins por um tamanho real. Idempotente.
+QString expandCoverUrl(const QString &url);
+// JPEG pronto para o card. detail descreve o corpo quando a conversão falha.
+QByteArray coverJpegFromBody(const QByteArray &body, QString *detail);
+QString coverBodyLabel(const QByteArray &body);
 // TypeError de CORS/rede: repetir o fetch não traz a imagem.
 bool coverFetchIsBlocked(const QString &error);
 
