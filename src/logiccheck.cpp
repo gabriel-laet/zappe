@@ -257,14 +257,34 @@ int runLogicSelfCheck()
     if (!joined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
         || !joined.contains(QStringLiteral("--window-size=1920,1080")) || joined.contains(QStringLiteral("800,600")))
         return fail("chrome screen");
-    if (!joined.contains(QStringLiteral("--window-position=-3000,-3000"))
+    if (joined.contains(QStringLiteral("--window-position="))
         || !joined.contains(QStringLiteral("--disable-blink-features=AutomationControlled"))
+        || !joined.contains(QStringLiteral("--hide-crash-restore-bubble"))
+        || !joined.contains(QStringLiteral("--ozone-platform=x11")) || !joined.contains(QStringLiteral("--disable-gpu"))
         || !joined.contains(QStringLiteral("--mute-audio"))
         || !joined.contains(QStringLiteral("--user-agent=") + chromeCatalogUserAgent())
         || chromeCatalogUserAgent().contains(QStringLiteral("HeadlessChrome"))
         || joined.contains(QStringLiteral("HeadlessChrome")))
         return fail("chrome catalog window");
-    if (!playerJoined.contains(QStringLiteral("--kiosk")) || playerJoined.contains(QStringLiteral("--headless")))
+    if (chromeCatalogDisplay(QStringLiteral(":1")) != QLatin1String(":99")
+        || chromeCatalogDisplay(QStringLiteral(":99")) != QLatin1String(":98")
+        || x11SocketPath(QStringLiteral(":99")) != QLatin1String("/tmp/.X11-unix/X99"))
+        return fail("catalog display");
+    QProcessEnvironment guideEnv;
+    guideEnv.insert(QStringLiteral("DISPLAY"), QStringLiteral(":1"));
+    guideEnv.insert(QStringLiteral("WAYLAND_DISPLAY"), QStringLiteral("wayland-0"));
+    const QProcessEnvironment catalogEnv =
+        chromeFaceEnvironment(ChromeFace::Hidden, guideEnv, QStringLiteral(":1"), QStringLiteral("wayland-0"), QStringLiteral(":99"));
+    const QProcessEnvironment playerEnv =
+        chromeFaceEnvironment(ChromeFace::Player, guideEnv, QStringLiteral(":1"), QStringLiteral("wayland-0"), QStringLiteral(":99"));
+    if (catalogEnv.value(QStringLiteral("DISPLAY")) != QLatin1String(":99") || catalogEnv.contains(QStringLiteral("WAYLAND_DISPLAY")))
+        return fail("catalog env");
+    if (playerEnv.value(QStringLiteral("DISPLAY")) != QLatin1String(":1")
+        || playerEnv.value(QStringLiteral("WAYLAND_DISPLAY")) != QLatin1String("wayland-0"))
+        return fail("player env");
+    if (!playerJoined.contains(QStringLiteral("--kiosk")) || playerJoined.contains(QStringLiteral("--headless"))
+        || playerJoined.contains(QStringLiteral("--ozone-platform=x11"))
+        || !playerJoined.contains(QStringLiteral("--hide-crash-restore-bubble")))
         return fail("chrome player");
     if (!playerJoined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
         || !playerJoined.contains(QStringLiteral("--window-size=1920,1080")))
@@ -320,14 +340,18 @@ int runLogicSelfCheck()
         return fail("mirror kinds");
     const QString netflixScript = mirrorExtractScript(*netflix);
     if (!netflixScript.contains(QStringLiteral("data-list-context")) || !netflixScript.contains(QStringLiteral("continueWatching"))
+        || !netflixScript.contains(QStringLiteral("jbv")) || !netflixScript.contains(QStringLiteral("flatLinks"))
         || !netflixScript.contains(QStringLiteral("JSON.stringify")))
         return fail("netflix extract");
     if (!mirrorExtractScript(*youtube).contains(QStringLiteral("ytd-rich-shelf-renderer")))
         return fail("youtube extract");
     if (mirrorPlayUrl(*netflix, QStringLiteral("https://www.netflix.com/title/80100172"))
-        != QStringLiteral("https://www.netflix.com/watch/80100172"))
+        != QStringLiteral("https://www.netflix.com/watch/80100172")
+        || mirrorPlayUrl(*netflix, QStringLiteral("https://www.netflix.com/browse?jbv=80100172"))
+               != QStringLiteral("https://www.netflix.com/watch/80100172"))
         return fail("netflix watch url");
     if (!mirrorIsPlayable(*netflix, QStringLiteral("https://www.netflix.com/title/80100172"))
+        || !mirrorIsPlayable(*netflix, QStringLiteral("https://www.netflix.com/browse?jbv=80100172"))
         || mirrorIsPlayable(*netflix, netflix->homeUrl))
         return fail("netflix playable");
     if (mirrorPlayUrl(*youtube, QStringLiteral("https://youtu.be/abcdefghijk"))
@@ -337,12 +361,16 @@ int runLogicSelfCheck()
         || !mirrorIsPlayable(*prime, QStringLiteral("https://www.primevideo.com/detail/0ABC"))
         || mirrorIsPlayable(*prime, prime->homeUrl))
         return fail("generic playable");
-    if (!youtube->homeUrl.contains(QStringLiteral("/feed/subscriptions")) || youtube->extraUrls.isEmpty()
-        || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
+    if (youtube->homeUrl.contains(QStringLiteral("/feed/subscriptions")) || !youtube->homeUrl.contains(QStringLiteral("youtube.com"))
+        || youtube->extraUrls.isEmpty() || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
         return fail("youtube home");
     const MirrorAdapter *disney = findMirrorAdapter(mirrors, QStringLiteral("disney"));
     const MirrorAdapter *globoplay = findMirrorAdapter(mirrors, QStringLiteral("globoplay"));
-    if (!disney || disney->playerSeek != QLatin1String("script") || !globoplay || !globoplay->playerClick
+    if (!disney || disney->playerSeek != QLatin1String("script")
+        || !disney->cardSelector.contains(QStringLiteral("set-item"))
+        || !disney->linkSelector.contains(QStringLiteral("/browse/entity"))
+        || !mirrorIsPlayable(*disney, QStringLiteral("https://www.disneyplus.com/browse/entity-abc")) || !globoplay
+        || !globoplay->playerClick
         || globoplay->playerOk != QLatin1String("script") || globoplay->playerSeek != QLatin1String("script"))
         return fail("player transport");
     if (!mirrorFocusPlayerScript(*prime).contains(QStringLiteral("mediaKeys"))

@@ -9,17 +9,19 @@ O nome padrão é **Zappe**. Marca, logo e splash vêm de um arquivo na máquina
 ```text
 zappe-kiosk.service   (systemd de sistema, tty1, seat0)
   └─ gamescope 1920×1080
-       ├─ zappe          guia Qt Quick
-       └─ google-chrome  janela fora da tela (kiosk só no Play) --remote-debugging-port=9222
-            perfil ~/.local/share/zappe/chrome-profile
+       └─ zappe          guia Qt Quick
+            ├─ Xvfb :99
+            │    └─ google-chrome   catálogo (não entra no gamescope)
+            └─ no Play: google-chrome --kiosk neste gamescope
+                 perfil ~/.local/share/zappe/chrome-profile
 ```
 
-Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY` / `DISPLAY` do gamescope.
+Não há segundo gamescope. O gamescope ignora posição de janela e mostra o que tem foco, então o Chrome do catálogo não pode nascer nesse display. O app abre um Xvfb (`:99`, ou `ZAPPE_CATALOG_DISPLAY`) e aponta só esse Chrome para lá, com user-agent normal. No Play o app fecha essa instância — o perfil não aceita duas ao mesmo tempo — e sobe o Chrome `--kiosk` no display do gamescope. Ao sair do vídeo, o catálogo volta para o Xvfb.
 
 | Peça | Função |
 | --- | --- |
 | Guia | Qt Quick. Fileiras, ficha, menu, ajustes. |
-| Chrome | Um perfil, porta CDP 9222. Janela fora da tela no guia; kiosk só no Play. |
+| Chrome | Um perfil, porta CDP 9222. Catálogo num Xvfb; kiosk no gamescope só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
 | TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
@@ -40,6 +42,7 @@ sudo pacman -S --needed \
   base-devel cmake ninja pkgconf \
   qt6-base qt6-declarative qt6-websockets qt6-wayland qt6-5compat \
   mesa gamescope \
+  xorg-server-xvfb \
   google-chrome \
   pipewire pipewire-pulse \
   alsa-utils
@@ -132,21 +135,27 @@ pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:hdmi-stereo
 
 ## Chrome e roteiros de login
 
-Fora do Play o Chrome é uma janela real, parada em `--window-position=-3000,-3000`, com o áudio mudo. `--headless=new` anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo nem disparam os feeds JSON medidos na TV. O user-agent é o de um Chrome normal, com `--disable-blink-features=AutomationControlled`. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`. O guia pede o foco de volta a cada segundo; o gamescope mostra a janela focada. No Play a mesma tela entra com `--kiosk`.
+Fora do Play o Chrome é uma janela real num Xvfb, não no gamescope. `--headless=new` anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo. Posição `-3000,-3000` também não serve: o gamescope ignora a posição, dá foco à janela e ela cobre o guia, com abas e o balão “Restore pages?”. O user-agent é o de um Chrome normal, com `--ozone-platform=x11`, `--disable-gpu` (não disputa o DRM com o gamescope), `--disable-blink-features=AutomationControlled` e `--hide-crash-restore-bubble`. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`.
 
 ```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac
+DISPLAY=:99 WAYLAND_DISPLAY= \
 google-chrome-stable \
   --user-data-dir="$HOME/.local/share/zappe/chrome-profile" \
   --remote-debugging-port=9222 \
   --remote-allow-origins=* \
   --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36" \
   --disable-blink-features=AutomationControlled \
+  --ozone-platform=x11 \
+  --disable-gpu \
+  --hide-crash-restore-bubble \
   --ozone-override-screen-size=1920,1080 \
   --window-size=1920,1080 \
-  --window-position=-3000,-3000 \
   --mute-audio \
   about:blank
 ```
+
+No Play o app encerra esse processo e sobe outro com `--kiosk`, no `DISPLAY` / `WAYLAND_DISPLAY` do gamescope, no mesmo perfil. São sempre uma instância de cada vez.
 
 `data/logins.json` descreve cada streaming: `homeUrl`, `readySelector` e passos `navigate`, `click` e `ask`. Um `ask` pede `email`, `password`, `code` ou `profile`.
 

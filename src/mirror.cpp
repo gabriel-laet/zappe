@@ -605,6 +605,22 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
       seenRow.add(key);
       shelves.push({title: title, context: context, rows: rows});
     }
+    if (!shelves.length && cfg.link) {
+      const rows = [];
+      const seen = new Set();
+      for (const link of document.querySelectorAll(cfg.link)) {
+        if (rows.length >= cfg.maxCards) break;
+        if (!link || (link.matches && !link.matches('a[href]'))) continue;
+        const img = link.querySelector(cfg.image);
+        const href = abs(link.getAttribute('href'));
+        const name = label(link) || label(img);
+        if (!href || !name || seen.has(href)) continue;
+        seen.add(href);
+        rows.push({title: name, href: href, artwork: artOf(img), progress: progressOf(link.querySelector(cfg.progress))});
+      }
+      if (rows.length)
+        shelves.push({title: '', context: 'flatLinks', rows: rows});
+    }
     const login = !!document.querySelector("input[type='password'], form[action*='login']");
     return JSON.stringify({needsLogin: login && shelves.length === 0, profiles: profiles, shelves: shelves});
   } catch (e) {
@@ -685,9 +701,15 @@ QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href)
         QRegularExpressionMatch match = watch.match(url.path());
         if (!match.hasMatch())
             match = title.match(url.path());
-        if (!match.hasMatch())
+        QString id = match.hasMatch() ? match.captured(1) : QString();
+        if (id.isEmpty()) {
+            const QString jbv = QUrlQuery(url).queryItemValue(QStringLiteral("jbv"));
+            if (QRegularExpression(QStringLiteral("^\\d{4,12}$")).match(jbv).hasMatch())
+                id = jbv;
+        }
+        if (id.isEmpty())
             return {};
-        return QStringLiteral("https://www.netflix.com/watch/%1").arg(match.captured(1));
+        return QStringLiteral("https://www.netflix.com/watch/%1").arg(id);
     }
     if (adapter.kind == QLatin1String("youtube")) {
         QUrlQuery query(url);
