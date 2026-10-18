@@ -158,6 +158,9 @@ signals:
     void pageChanged();
     void menuChanged();
     void settingsChanged();
+    // index: 0 resolução, 1 marca, 2 estado da TV, 3 força, 4 volume, 5 mudo, 6 HDMI.
+    // verb: 0 ativa, -1 esquerda, 1 direita.
+    void settingsCommand(int index, int verb);
     void brandingChanged();
     void savedChanged();
     void volumeChanged();

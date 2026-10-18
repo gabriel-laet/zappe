@@ -1,7 +1,9 @@
 {
-  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/samsung.json. Token is written on Device Connect pair; never commit a live token. ATONGX Power (116) is ignored and does not wake the TV.",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/samsung.json. Never commit a token or the TV MAC. Empty mac skips Wake-on-LAN. Empty cec tries /dev/cec0; set cec to \"off\" to skip it. Power (evdev 116) toggles the set and stays grabbed so logind cannot power off the mini-PC.",
   "host": "192.168.3.6",
   "port": 8001,
   "securePort": 8002,
-  "name": "Zappe"
+  "name": "Zappe",
+  "mac": "",
+  "cec": ""
 }

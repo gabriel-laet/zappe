@@ -25,7 +25,7 @@ Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY`
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
 | TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
 | Controle | evdev do ATONGX. `event4` (air mouse) com grab exclusivo. |
-| Volume | Samsung UN43TU7020 via Device Connect. |
+| Samsung | Power, volume, mudo, HDMI e estado da UN43TU7020. |
 | Voz | Whisper pt-BR, modelo base e, se não houver, tiny. |
 | Áudio | PipeWire `output:hdmi-stereo` no card `alsa_card.pci-0000_00_1f.3`. |
 | Update | `zappe-update` recompila com CMake e reinicia `zappe-kiosk.service`. |
@@ -159,7 +159,7 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 
 | Tecla | Código | Ação |
 | --- | --- | --- |
-| Power | 116 | ignorada |
+| Power | 116 | liga/desliga a Samsung |
 | Play / Pause | 164 | play/pause |
 | Setas | 103, 108, 105, 106 | foco |
 | OK | 28 | ativar |
@@ -171,7 +171,9 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Del | 14 | voltar |
 | Mic | 582 | Whisper |
 
-O nó `event4` do air mouse recebe `EVIOCGRAB`. O cursor desse nó é descartado. Detalhe em [`docs/atongx-input.md`](docs/atongx-input.md).
+O nó `event4` do air mouse recebe `EVIOCGRAB`. O cursor desse nó é descartado. O nó da tecla Power também: o logind não desliga o mini-PC. Detalhe em [`docs/atongx-input.md`](docs/atongx-input.md) e [`docs/samsung-tv.md`](docs/samsung-tv.md).
+
+IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo sem segredo está em `packaging/appliance/examples/samsung.json`.
 
 ## TV aberta
 

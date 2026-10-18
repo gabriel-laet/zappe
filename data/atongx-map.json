@@ -1,17 +1,18 @@
 {
-  "version": 2,
+  "version": 3,
   "device": {
     "product": "XING WEI 2.4G USB USB Composite Device",
     "aliases": ["XING WEI", "ATONGX"],
     "usb": { "vendor": "2320", "product": "0912" },
     "airMouse": "event4",
     "airMouseGrab": "exclusive",
-    "note": "event4 é o air mouse. O app faz EVIOCGRAB exclusivo nesse nó e descarta REL/BTN para o cursor não andar. Power 116 é lido e ignorado."
+    "note": "event4 é o air mouse. O app faz EVIOCGRAB exclusivo nesse nó e descarta REL/BTN para o cursor não andar. Power 116 alterna a Samsung e o nó dessa tecla também fica com EVIOCGRAB, para o logind não desligar o mini-PC."
   },
   "bindings": [
     {
       "button": "Power",
-      "action": "ignore",
+      "action": "power",
+      "note": "Liga ou desliga a Samsung. O grab da tecla impede o logind de desligar o mini-PC.",
       "keys": [{ "name": "KEY_POWER", "code": 116 }]
     },
     {

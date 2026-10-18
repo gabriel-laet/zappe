@@ -7,6 +7,7 @@
 #include "keymap.h"
 #include "logins.h"
 #include "ota.h"
+#include "remote.h"
 #include "samsung.h"
 #include "voice.h"
 
@@ -29,8 +30,12 @@ int fail(const char *message)
 
 int runLogicSelfCheck()
 {
-    if (actionForEvdev(116) != RemoteAction::Ignore)
-        return fail("power 116 must be ignored");
+    if (actionForEvdev(116) != RemoteAction::Power)
+        return fail("power 116 toggles the TV");
+    if (!shouldGrabEvdevNode(false, true, false) || !shouldGrabEvdevNode(true, false, false))
+        return fail("power node and air mouse stay grabbed");
+    if (shouldGrabEvdevNode(false, true, true) || shouldGrabEvdevNode(false, false, false))
+        return fail("keyboard node is not grabbed");
     if (actionForEvdev(164) != RemoteAction::PlayPause)
         return fail("play");
     if (actionForEvdev(103) != RemoteAction::Up || actionForEvdev(108) != RemoteAction::Down
@@ -155,9 +160,82 @@ int runLogicSelfCheck()
     const QByteArray payload = samsungKeyPayload(TvKey::VolumeUp);
     if (!payload.contains("KEY_VOLUP") || !payload.contains("ms.remote.control"))
         return fail("samsung payload");
+    const QByteArray powerKey = samsungKeyPayload(TvKey::Power);
+    if (!powerKey.contains("KEY_POWER") || powerKey.contains("KEY_SOURCE"))
+        return fail("samsung power key");
+    if (!samsungKeyPayload(TvKey::Hdmi1).contains("KEY_HDMI1")
+        || !samsungKeyPayload(TvKey::Hdmi3).contains("KEY_HDMI3")
+        || samsungKeyPayload(TvKey::Hdmi2).contains("KEY_SOURCE"))
+        return fail("samsung hdmi key");
+    if (QString::fromLatin1(tvKeyCode(TvKey::Mute)) != QLatin1String("KEY_MUTE"))
+        return fail("samsung mute code");
     const QString ws = samsungWebsocketUrl(samsung, false);
     if (!ws.startsWith(QStringLiteral("ws://192.168.3.6:8001/")) || !ws.contains(QStringLiteral("name=")))
         return fail("samsung url");
+    if (parsePowerState(QStringLiteral("on")) != TvPower::On
+        || parsePowerState(QStringLiteral("STANDBY")) != TvPower::Standby
+        || parsePowerState(QStringLiteral("ready")) != TvPower::Standby
+        || parsePowerState(QStringLiteral("sleep")) != TvPower::Standby
+        || parsePowerState(QStringLiteral("nope")) != TvPower::Unknown)
+        return fail("power state");
+    const TvProbe probe = parseProbeJson(
+        QByteArrayLiteral("{\"device\":{\"PowerState\":\"on\",\"modelName\":\"UN43TU7020\"},\"name\":\"Sala\"}"));
+    if (probe.power != TvPower::On || probe.model != QLatin1String("UN43TU7020") || probe.name != QLatin1String("Sala"))
+        return fail("probe json");
+    if (parseProbeJson(QByteArrayLiteral("{\"PowerState\":\"standby\"}")).power != TvPower::Standby)
+        return fail("probe top-level power");
+    if (parseUpnpVolume(QByteArrayLiteral("<CurrentVolume>17</CurrentVolume>")) != 17
+        || parseUpnpVolume(QByteArrayLiteral("<u>nope</u>")) != -1)
+        return fail("upnp volume");
+    quint8 mac[6] = {};
+    if (!parseMac(QStringLiteral("02:11:22:33:44:55"), mac) || mac[0] != 0x02 || mac[5] != 0x55)
+        return fail("mac");
+    if (parseMac(QStringLiteral("02-11"), mac))
+        return fail("short mac");
+    const QByteArray magic = wolMagicPacket(mac);
+    if (magic.size() != 102)
+        return fail("wol length");
+    for (int i = 0; i < 6; ++i) {
+        if (static_cast<unsigned char>(magic.at(i)) != 0xFF)
+            return fail("wol prefix");
+    }
+    for (int copy = 0; copy < 16; ++copy) {
+        for (int i = 0; i < 6; ++i) {
+            if (static_cast<unsigned char>(magic.at(6 + copy * 6 + i)) != mac[i])
+                return fail("wol body");
+        }
+    }
+    const PowerPlan off = planPowerToggle(TvPower::On, true, true, true);
+    if (!off.turnOff || !off.deviceConnect || off.wakeOnLan || off.cec)
+        return fail("toggle off is device connect only");
+    const PowerPlan standby = planPowerToggle(TvPower::Standby, true, true, true);
+    if (standby.turnOff || !standby.deviceConnect || !standby.wakeOnLan || !standby.cec)
+        return fail("standby wakes with every method");
+    const PowerPlan away = planPowerToggle(TvPower::Unknown, false, true, false);
+    if (away.turnOff || !away.deviceConnect || !away.wakeOnLan || away.cec)
+        return fail("unreachable still tries wol");
+    const PowerPlan unknown = planPowerToggle(TvPower::Unknown, true, true, true);
+    if (unknown.turnOff || !unknown.deviceConnect || unknown.wakeOnLan || unknown.cec)
+        return fail("reachable unknown is key only");
+    const QStringList cec = cecWakeArgs(QStringLiteral("/dev/cec0"));
+    if (!cec.contains(QStringLiteral("--image-view-on")) || !cec.contains(QStringLiteral("/dev/cec0"))
+        || !cec.contains(QStringLiteral("--playback")))
+        return fail("cec args");
+    SamsungConfig cecOff;
+    cecOff.cec = QStringLiteral("off");
+    if (!cecDevicePath(cecOff).isEmpty() || cecDevicePath(SamsungConfig{}) != QLatin1String("/dev/cec0"))
+        return fail("cec path");
+    QFile samsungFile(dir.path() + QStringLiteral("/samsung.json"));
+    if (!samsungFile.open(QIODevice::WriteOnly))
+        return fail("samsung json");
+    samsungFile.write(QByteArrayLiteral(
+        "{\"host\":\"10.1.2.3\",\"mac\":\"AA-BB-CC-DD-EE-FF\",\"name\":\"Zappe\",\"cec\":\"off\"}"));
+    samsungFile.close();
+    const SamsungConfig stored = loadSamsungConfig(dir.path());
+    quint8 storedMac[6] = {};
+    if (stored.host != QLatin1String("10.1.2.3") || stored.cec != QLatin1String("off")
+        || !parseMac(stored.mac, storedMac) || storedMac[0] != 0xAA || storedMac[5] != 0xFF)
+        return fail("samsung.json mac");
 
     const ChromeLaunch chrome = chromeLaunch(dir.path());
     const QString joined = chrome.arguments.join(QLatin1Char(' '));
@@ -172,7 +250,7 @@ int runLogicSelfCheck()
     if (!fillScript(QStringLiteral("input[type='email']"), QStringLiteral("a@b.c")).contains(QStringLiteral("querySelector")))
         return fail("fill script");
 
-    std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, chrome)\n");
+    std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;
 }
 

@@ -405,8 +405,10 @@ void Guide::moveDetail(int dShelf, int dIndex)
 
 void Guide::moveSettings(int dShelf, int dIndex)
 {
+    // 0 resolução, 1 marca, 2 estado, 3 força, 4 volume, 5 mudo, 6 HDMI.
+    constexpr int kLast = 6;
     if (dShelf != 0) {
-        const int next = std::clamp(m_settingsIndex + dShelf, 0, 1);
+        const int next = std::clamp(m_settingsIndex + dShelf, 0, kLast);
         if (next != m_settingsIndex) {
             m_settingsIndex = next;
             emit settingsChanged();
@@ -415,8 +417,10 @@ void Guide::moveSettings(int dShelf, int dIndex)
     if (dIndex != 0) {
         if (m_settingsIndex == 0)
             nudgeResolution(dIndex);
+        else if (m_settingsIndex == 1)
+            setBrandingEnabled(dIndex > 0);
         else
-            setBrandingEnabled(dIndex > 0 ? true : false);
+            emit settingsCommand(m_settingsIndex, dIndex > 0 ? 1 : -1);
     }
 }
 
@@ -460,8 +464,10 @@ void Guide::activate()
     if (m_page == QLatin1String("settings") && !m_detailOpen) {
         if (m_settingsIndex == 0)
             nudgeResolution(m_resolution == QLatin1String("1080p") ? 1 : -1);
-        else
+        else if (m_settingsIndex == 1)
             setBrandingEnabled(!m_brandingOn);
+        else
+            emit settingsCommand(m_settingsIndex, 0);
         return;
     }
     if (m_detailOpen) {

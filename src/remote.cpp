@@ -83,6 +83,13 @@ bool bitSet(const unsigned long *bits, int code)
 
 } // namespace
 
+bool shouldGrabEvdevNode(bool airMouse, bool hasKeyPower, bool hasKeyUp)
+{
+    if (airMouse)
+        return true;
+    return hasKeyPower && !hasKeyUp;
+}
+
 bool hidDisabled()
 {
     const QString value = qEnvironmentVariable("ZAPPE_HID_DISABLE").trimmed().toLower();
@@ -119,13 +126,16 @@ protected:
                 std::fprintf(stderr, "zappe: sem leitura em %s\n", qPrintable(node.path));
                 continue;
             }
-            bool grab = node.grab;
-            if (!grab) {
+            bool hasPower = false;
+            bool hasUp = false;
+            if (!node.grab) {
                 unsigned long bits[(KEY_MAX + 1) / (sizeof(unsigned long) * 8) + 1] = {};
-                if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) >= 0 && bitSet(bits, KEY_POWER)
-                    && !bitSet(bits, KEY_UP))
-                    grab = true;
+                if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) >= 0) {
+                    hasPower = bitSet(bits, KEY_POWER);
+                    hasUp = bitSet(bits, KEY_UP);
+                }
             }
+            const bool grab = shouldGrabEvdevNode(node.grab, hasPower, hasUp);
             if (grab && ioctl(fd, EVIOCGRAB, 1) == 0)
                 std::fprintf(stderr, "zappe: grab exclusivo %s\n", qPrintable(node.path));
             else if (node.grab)
@@ -153,6 +163,9 @@ protected:
                             std::fprintf(stderr, "zappe: tecla %d ignorada\n", event.code);
                         continue;
                     }
+                    if (action == RemoteAction::Power)
+                        std::fprintf(stderr, "zappe: power da Samsung (tecla %d); o mini-PC continua ligado\n",
+                                     event.code);
                     QMetaObject::invokeMethod(m_owner, [owner = m_owner, action] {
                         emit owner->action(int(action));
                     }, Qt::QueuedConnection);

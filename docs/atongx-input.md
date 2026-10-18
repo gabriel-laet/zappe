@@ -4,7 +4,7 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 
 | Botão | Código | Ação |
 | --- | --- | --- |
-| Power | 116 | ignorado |
+| Power | 116 | liga/desliga a Samsung |
 | Play / Pause | 164 | play/pause no Chrome ou no mpv |
 | Cima, baixo, esquerda, direita | 103, 108, 105, 106 | foco no guia |
 | OK | 28 | ativar |
@@ -16,7 +16,7 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 | Del | 14 | voltar |
 | Mic | 582 | Whisper pt-BR |
 
-Power não desliga o mini-PC e não manda tecla de força para a TV.
+Power não desliga o mini-PC: o nó da tecla 116 fica com `EVIOCGRAB`, o logind não a recebe, e o app manda o toggle para a Samsung. Ver [`samsung-tv.md`](samsung-tv.md).
 
 ## Air mouse
 

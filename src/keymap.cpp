@@ -10,7 +10,7 @@ RemoteAction actionForEvdev(int code)
 {
     switch (code) {
     case 116:
-        return RemoteAction::Ignore;
+        return RemoteAction::Power;
     case 164:
         return RemoteAction::PlayPause;
     case 103:
@@ -78,6 +78,8 @@ const char *actionName(RemoteAction action)
         return "mute";
     case RemoteAction::Voice:
         return "voice";
+    case RemoteAction::Power:
+        return "power";
     case RemoteAction::Unmapped:
         break;
     }
