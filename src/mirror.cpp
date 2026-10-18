@@ -636,11 +636,77 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         + QStringLiteral(",maxCards:") + QString::number(adapter.limitCards) + QLatin1Char('}');
     return QStringLiteral("(() => { const cfg = ") + cfg + QStringLiteral(R"js(;
   const abs = (href) => { try { return new URL(href, location.href).href; } catch (e) { return href || ''; } };
+  const badgeOnly = (text) => {
+    const n = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return n === 'live' || n === 'ao vivo' || n === 'aovivo' || n === 'ao vivo agora';
+  };
   const label = (el) => {
     if (!el) return '';
     const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'))) || '';
     const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
-    return (aria || text).replace(/\s+/g, ' ').trim();
+    const ariaClean = String(aria).replace(/\s+/g, ' ').trim();
+    if (badgeOnly(ariaClean) && text && !badgeOnly(text)) return text;
+    return (ariaClean || text).replace(/\s+/g, ' ').trim();
+  };
+  const shelfTitle = (rowEl) => {
+    const pick = (root) => {
+      if (!root || !root.querySelectorAll) return '';
+      let nodes = [];
+      try {
+        nodes = [...root.querySelectorAll('#header #title, h2, #title-container #title, ' + (cfg.title || '#title'))];
+      } catch (e) { nodes = []; }
+      for (const el of nodes) {
+        try { if (cfg.card && el.closest && el.closest(cfg.card)) continue; } catch (e) {}
+        const text = label(el);
+        if (text && !badgeOnly(text)) return text;
+      }
+      return '';
+    };
+    return pick(rowEl) || pick(rowEl && rowEl.shadowRoot) || '';
+  };
+  const cardName = (card, link, img) => {
+    let titled = null;
+    try {
+      titled = card && card.querySelector && (card.querySelector('#video-title') || card.querySelector('a#video-title-link') || card.querySelector('h3'));
+    } catch (e) { titled = null; }
+    const fromTitle = label(titled);
+    if (fromTitle && !badgeOnly(fromTitle)) return fromTitle;
+    const fromLink = label(link);
+    if (fromLink && !badgeOnly(fromLink)) return fromLink;
+    const fromImg = label(img);
+    if (fromImg && !badgeOnly(fromImg)) return fromImg;
+    const fromCard = label(card);
+    if (fromCard && !badgeOnly(fromCard)) return fromCard;
+    return fromTitle || fromLink || fromImg || fromCard || '';
+  };
+  const hrefRank = (href) => {
+    const h = String(href || '');
+    if (h.indexOf('/v/') >= 0 || h.indexOf('watch?v=') >= 0 || h.indexOf('/watch/') >= 0) return 3;
+    if (h.indexOf('/t/') >= 0 || h.indexOf('/detail/') >= 0 || h.indexOf('/movie/') >= 0 || h.indexOf('/show/') >= 0 || h.indexOf('/episode/') >= 0) return 2;
+    if (h.indexOf('/ao-vivo') >= 0) return 1;
+    return 0;
+  };
+  const linksOf = (card) => {
+    const found = [];
+    const push = (el) => {
+      if (!el || found.indexOf(el) >= 0) return;
+      const href = el.getAttribute && el.getAttribute('href');
+      if (!href) return;
+      found.push(el);
+    };
+    try { if (card && card.matches && card.matches('a[href]')) push(card); } catch (e) {}
+    try {
+      const list = card && card.querySelectorAll ? card.querySelectorAll(cfg.link || 'a[href]') : [];
+      for (const el of list) push(el);
+    } catch (e) {}
+    if (!found.length) {
+      try {
+        const one = card && card.querySelector ? card.querySelector('a[href]') : null;
+        if (one) push(one);
+      } catch (e) {}
+    }
+    found.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
+    return found;
   };
   const pickSrc = (value) => {
     if (!value) return '';
@@ -675,24 +741,53 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     return url.indexOf('http') === 0 ? url : '';
   };
   const collectArt = (root, nodes, depth) => {
-    if (!root || depth > 3 || nodes.length >= 8) return;
+    if (!root || depth > 6 || nodes.length >= 8) return;
+    try {
+      if (root.querySelectorAll) {
+        const imgs = root.querySelectorAll('img, source, picture');
+        for (let i = 0; i < imgs.length && nodes.length < 8; i++) nodes.push(imgs[i]);
+      }
+    } catch (e) {}
     const queue = [root];
     let seen = 0;
-    while (queue.length && nodes.length < 8 && seen < 40) {
+    while (queue.length && nodes.length < 8 && seen < 80) {
       const el = queue.shift();
       if (!el) continue;
       seen++;
       try {
         const tag = String(el.tagName || '').toLowerCase();
         const style = (el.getAttribute && (el.getAttribute('style') || '')) || '';
-        if (tag === 'img' || tag === 'source' || style.indexOf('background') >= 0) nodes.push(el);
+        if (tag === 'img' || tag === 'source' || tag === 'picture' || style.indexOf('background') >= 0) nodes.push(el);
       } catch (e) {}
       try { if (el.shadowRoot) collectArt(el.shadowRoot, nodes, depth + 1); } catch (e) {}
       try {
         const kids = el.children || [];
-        for (let i = 0; i < kids.length && queue.length < 40; i++) queue.push(kids[i]);
+        for (let i = 0; i < kids.length && queue.length < 80; i++) queue.push(kids[i]);
       } catch (e) {}
     }
+  };
+  const shadowLinks = (root, depth, out) => {
+    if (!root || depth > 5 || out.length >= 80) return;
+    const take = () => {
+      try {
+        const list = root.querySelectorAll ? root.querySelectorAll('a[href]') : [];
+        for (let i = 0; i < list.length && out.length < 80; i++) out.push(list[i]);
+      } catch (e) {}
+    };
+    if (depth > 0) take();
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && out.length < 80 && seen < 60) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try { if (el.shadowRoot) shadowLinks(el.shadowRoot, depth + 1, out); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 60; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+    if (depth === 0) take();
   };
   const artIn = (root) => {
     if (!root) return '';
@@ -774,20 +869,43 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     for (const rowEl of document.querySelectorAll(cfg.row)) {
       if (shelves.length >= cfg.maxRows) break;
       const context = rowEl.getAttribute('data-list-context') || '';
-      const title = label(rowEl.querySelector(cfg.title)) || context;
+      const title = shelfTitle(rowEl) || label(rowEl.querySelector(cfg.title)) || context;
       const rows = [];
       const seen = new Set();
       for (const card of rowEl.querySelectorAll(cfg.card)) {
         if (rows.length >= cfg.maxCards) break;
         try {
-          const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
-          const img = card.querySelector(cfg.image);
-          const href = abs(link && link.getAttribute('href'));
-          const name = label(link) || label(img) || label(card);
-          if (!href || !name || seen.has(href)) continue;
-          seen.add(href);
-          rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+          const links = linksOf(card);
+          const list = links.length ? links : [null];
+          for (const link of list) {
+            if (rows.length >= cfg.maxCards) break;
+            const img = (link && link.querySelector && link.querySelector(cfg.image)) || (card.querySelector && card.querySelector(cfg.image));
+            const href = abs(link && link.getAttribute('href'));
+            const name = cardName(card, link, img);
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            let art = '';
+            try { art = artOf(card) || (link ? artOf(link) : ''); } catch (e) { art = ''; }
+            rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+          }
         } catch (e) {}
+      }
+      if (!rows.length) {
+        const extra = [];
+        try { shadowLinks(rowEl, 0, extra); } catch (e) {}
+        extra.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
+        for (const link of extra) {
+          if (rows.length >= cfg.maxCards) break;
+          try {
+            const href = abs(link.getAttribute('href'));
+            const name = cardName(link, link, link.querySelector && link.querySelector('img'));
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            let art = '';
+            try { art = artOf(link); } catch (e) { art = ''; }
+            rows.push({title: name, href: href, artwork: art, synopsis: '', progress: 0});
+          } catch (e) {}
+        }
       }
       if (!rows.length) continue;
       const key = (title || 'row') + ':' + rows[0].href;
@@ -803,12 +921,27 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         if (!link || (link.matches && !link.matches('a[href]'))) continue;
         const img = link.querySelector(cfg.image);
         const href = abs(link.getAttribute('href'));
-        const name = label(link) || label(img);
+        const name = cardName(link, link, img);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
         let art = '';
         try { art = artOf(link); } catch (e) { art = ''; }
         rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
+      }
+      if (!rows.length) {
+        const extra = [];
+        try { shadowLinks(document.body, 0, extra); } catch (e) {}
+        extra.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
+        for (const link of extra) {
+          if (rows.length >= cfg.maxCards) break;
+          try {
+            const href = abs(link.getAttribute('href'));
+            const name = cardName(link, link, link.querySelector && link.querySelector('img'));
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            rows.push({title: name, href: href, artwork: artOf(link), synopsis: '', progress: 0});
+          } catch (e) {}
+        }
       }
       if (rows.length)
         shelves.push({title: '', context: 'flatLinks', rows: rows});
@@ -1314,7 +1447,29 @@ QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles
     bits.push((el.style && el.style.backgroundImage) || '');
     return bits.join(' ');
   };
-  const nodes = [...document.querySelectorAll('img, source, [style*="background"]')];
+  const nodes = [];
+  const walkArt = (root, depth) => {
+    if (!root || depth > 6 || nodes.length >= 120) return;
+    try {
+      if (root.querySelectorAll) {
+        const list = root.querySelectorAll('img, source, picture, [style*="background"]');
+        for (let i = 0; i < list.length && nodes.length < 120; i++) nodes.push(list[i]);
+      }
+    } catch (e) {}
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && nodes.length < 120 && seen < 80) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try { if (el.shadowRoot) walkArt(el.shadowRoot, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 80; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+  };
+  walkArt(document.body, 0);
   const vw = window.innerWidth || 1920;
   const vh = window.innerHeight || 1080;
   const rects = [];
@@ -1345,7 +1500,19 @@ QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles
         const prefix = name === title || name.indexOf(title) === 0;
         const contains = title.length >= 6 && name.indexOf(title) >= 0;
         if (!prefix && !contains) continue;
-        el = (card.querySelector && card.querySelector('img, source')) || card;
+        let img = card.querySelector && card.querySelector('img, source, picture');
+        if (!img) {
+          for (const node of nodes) {
+            let p = node;
+            for (let d = 0; p && d < 8; d++) {
+              if (p === card) { img = node; break; }
+              const root = p.getRootNode && p.getRootNode();
+              p = p.parentElement || (root && root.host);
+            }
+            if (img) break;
+          }
+        }
+        el = img || card;
         break;
       }
     }
@@ -1405,6 +1572,31 @@ bool mirrorLiveHero(const QString &title, const QString &href)
     return name == QLatin1String("ao vivo") || name.startsWith(QStringLiteral("ao vivo:"));
 }
 
+bool mirrorBadgeTitle(const QString &title)
+{
+    const QString name = title.trimmed().toLower();
+    return name == QLatin1String("live") || name == QLatin1String("ao vivo") || name == QLatin1String("aovivo")
+           || name == QLatin1String("ao vivo agora");
+}
+
+QString mirrorYoutubeArtwork(const QString &href)
+{
+    const QUrl url(href.trimmed());
+    const QString id = QUrlQuery(url).queryItemValue(QStringLiteral("v"));
+    if (id.size() < 6 || id.size() > 32)
+        return {};
+    for (const QChar c : id) {
+        if (!c.isLetterOrNumber() && c != QLatin1Char('-') && c != QLatin1Char('_'))
+            return {};
+    }
+    return QStringLiteral("https://i.ytimg.com/vi/%1/hqdefault.jpg").arg(id);
+}
+
+bool coverHttpNeedsPage(int status)
+{
+    return status == 401 || status == 403;
+}
+
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
 {
     MirrorPage page;
@@ -1444,7 +1636,9 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
         if (content >= adapter.limitRows)
             break;
         const QJsonObject shelfObj = shelfValue.toObject();
-        const QString title = shelfObj.value(QStringLiteral("title")).toString().trimmed();
+        QString title = shelfObj.value(QStringLiteral("title")).toString().trimmed();
+        if (mirrorBadgeTitle(title))
+            title.clear();
         const QString context = shelfObj.value(QStringLiteral("context")).toString();
         const bool cont = continueRow(adapter, title, context);
         ShelfData shelf;
@@ -1468,6 +1662,10 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             row.href = href;
             const QString art = expandCoverUrl(rowObj.value(QStringLiteral("artwork")).toString());
             row.artworkSpec = coverUrlIsPlaceholder(art) ? QString() : art;
+            if (row.artworkSpec.isEmpty()
+                && (adapter.kind.compare(QStringLiteral("youtube"), Qt::CaseInsensitive) == 0
+                    || adapter.id.compare(QStringLiteral("youtube"), Qt::CaseInsensitive) == 0))
+                row.artworkSpec = mirrorYoutubeArtwork(href);
             row.synopsis = rowObj.value(QStringLiteral("synopsis")).toString().simplified();
             if (row.synopsis.compare(name, Qt::CaseInsensitive) == 0)
                 row.synopsis.clear();
@@ -2280,6 +2478,8 @@ void MirrorSession::acceptPage(const MirrorPage &page)
     m_coverFromClip = 0;
     m_coverFetched = 0;
     m_coverFetchGaveUp = true;
+    m_deniedCovers.clear();
+    m_deniedFetch = false;
     m_coverError.clear();
     m_coverSample.clear();
     m_coverPhase = 0;
@@ -2561,6 +2761,40 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
 {
     if (m_job == JobCovers) {
         const int gen = m_coverGen;
+        if (m_coverPhase == 4) {
+            QHash<QString, QByteArray> got;
+            if (ok) {
+                const QJsonDocument doc = QJsonDocument::fromJson(value.toUtf8());
+                if (doc.isArray()) {
+                    for (const QJsonValue &item : doc.array()) {
+                        const QJsonObject obj = item.toObject();
+                        if (!obj.value(QStringLiteral("ok")).toBool())
+                            continue;
+                        const QByteArray body = QByteArray::fromBase64(obj.value(QStringLiteral("b64")).toString().toLatin1());
+                        const QString url = obj.value(QStringLiteral("url")).toString();
+                        if (!url.isEmpty() && body.size() >= 32)
+                            got.insert(url, body);
+                    }
+                }
+            }
+            if (m_job != JobCovers || m_coverGen != gen)
+                return;
+            ++m_coverGen;
+            for (const CoverJob &job : m_coverBatch) {
+                const QByteArray body = got.value(expandCoverUrl(job.url));
+                if (body.size() < 32)
+                    continue;
+                const int cards = storeCover(job, body);
+                if (cards < 0)
+                    continue;
+                ++m_coverFromFetch;
+                std::fprintf(stderr, "zappe: espelho %s capa 403 pela aba cards %d\n", qPrintable(job.serviceId), cards);
+            }
+            m_coverBatch.clear();
+            m_deniedFetch = false;
+            finishCoverPass();
+            return;
+        }
         if (m_coverPhase == 2) {
             const QJsonObject root = QJsonDocument::fromJson(value.toUtf8()).object();
             const QJsonArray rects = root.value(QStringLiteral("rects")).toArray();
@@ -2771,7 +3005,6 @@ bool MirrorSession::applyPage(const MirrorPage &page)
             return false;
         }
     }
-    m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     if (shelves.isEmpty() && !page.needsLogin) {
         ShelfData empty;
         empty.id = QStringLiteral("mirror:%1:empty").arg(adapter->id);
@@ -2783,6 +3016,9 @@ bool MirrorSession::applyPage(const MirrorPage &page)
     }
     if (shelves.isEmpty())
         return false;
+    // Sem fileira publicada o relógio de «Atualizando…» continua. Um needsLogin
+    // vazio não pode cancelar esse relógio e deixar a tela presa.
+    m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     paintMissingCovers(shelves, m_cacheDir, QDateTime::currentDateTime());
     m_pages.insert(adapter->id, shelves);
     m_guide->replaceServiceShelves(adapter->id, shelves);
@@ -3015,6 +3251,13 @@ void MirrorSession::coverTimedOut(int gen)
     if (m_job != JobCovers || m_coverGen != gen)
         return;
     ++m_coverGen;
+    if (m_coverPhase == 4) {
+        m_coverBatch.clear();
+        m_deniedCovers.clear();
+        m_deniedFetch = false;
+        finishCoverPass();
+        return;
+    }
     if (m_coverError.isEmpty())
         m_coverError = QStringLiteral("sem resposta da aba");
     if (m_coverPhase == 1) {
@@ -3034,9 +3277,49 @@ void MirrorSession::coverTimedOut(int gen)
     finishCoverPass();
 }
 
+bool MirrorSession::startDeniedFetch()
+{
+    if (m_deniedFetch || m_deniedCovers.isEmpty() || m_player || m_job == JobPlay || !m_cdp || !m_cdp->connected())
+        return false;
+    QVector<CoverJob> batch;
+    while (!m_deniedCovers.isEmpty() && batch.size() < 6)
+        batch.append(m_deniedCovers.takeFirst());
+    if (batch.isEmpty())
+        return false;
+    m_deniedFetch = true;
+    m_coverClosed = false;
+    m_coverBatch = batch;
+    m_coverPhase = 4;
+    m_job = JobCovers;
+    m_busy = true;
+    QStringList urls;
+    for (const CoverJob &job : batch)
+        urls.append(expandCoverUrl(job.url));
+    const int gen = ++m_coverGen;
+    std::fprintf(stderr, "zappe: espelho %s capa 403 pela aba (%d)\n", qPrintable(m_current), int(batch.size()));
+    m_cdp->evaluate(mirrorCoverFetchScript(urls), true);
+    QTimer::singleShot(8000, this, [this, gen] { coverTimedOut(gen); });
+    return true;
+}
+
+void MirrorSession::noteDeniedCover(const CoverJob &job)
+{
+    if (job.url.isEmpty() || m_player || m_deniedCovers.size() >= 6)
+        return;
+    for (const CoverJob &have : m_deniedCovers) {
+        if (coverUrlsMatch(have.url, job.url))
+            return;
+    }
+    m_deniedCovers.append(job);
+    if (m_coverClosed && !m_busy && m_job != JobCovers && m_job != JobPlay && m_current == job.serviceId)
+        startDeniedFetch();
+}
+
 void MirrorSession::finishCoverPass()
 {
     if (m_coverClosed)
+        return;
+    if (!m_deniedCovers.isEmpty() && !m_deniedFetch && startDeniedFetch())
         return;
     m_coverClosed = true;
     m_coverPhase = 0;
@@ -3212,7 +3495,11 @@ void MirrorSession::pumpDirectCovers()
                     m_directCards += netCards;
                     if (m_directFile.isEmpty())
                         m_directFile = fileUrl(job.path);
-                } else if (m_directError.isEmpty()) {
+                } else {
+                    if (coverHttpNeedsPage(status))
+                        noteDeniedCover(job);
+                }
+                if (netCards <= 0 && m_directError.isEmpty()) {
                     const QString mime = type.section(QLatin1Char(';'), 0, 0).trimmed();
                     const QString shown = expandCoverUrl(job.url).left(220);
                     std::fprintf(stderr, "zappe: espelho %s capa direta falhou http %d %s %s\n", qPrintable(job.serviceId),

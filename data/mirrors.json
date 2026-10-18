@@ -176,7 +176,7 @@
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",
       "profileSelector": "[data-testid='user-menu'], .user-avatar",
-      "playPaths": ["/v/", "/ao-vivo", "/watch", "/play", "/video"],
+      "playPaths": ["/v/", "/t/", "/ao-vivo", "/watch", "/play", "/video"],
       "playerOk": "script",
       "playerSeek": "script",
       "playerClick": true,

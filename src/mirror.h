@@ -92,6 +92,12 @@ bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
 bool mirrorHoldLoading(int previousTitles, int incomingTitles);
 // Hero de canal ao vivo não entra na fileira do guia. O href sozinho não descarta.
 bool mirrorLiveHero(const QString &title, const QString &href);
+// «LIVE» / «Ao vivo» é selo do card, não o nome da fileira nem do título.
+bool mirrorBadgeTitle(const QString &title);
+// Miniatura pública do YouTube quando o DOM não trouxe URL de imagem.
+QString mirrorYoutubeArtwork(const QString &href);
+// 401/403: o CDN recusou o GET sem o cookie da aba. A página busca de novo.
+bool coverHttpNeedsPage(int status);
 // GIF 1×1 e pixel de rastreio não são capa.
 bool coverUrlIsPlaceholder(const QString &url);
 // YouTube não tem perfis. "Account menu" também não é um perfil.
@@ -213,6 +219,8 @@ private:
     void shootNextClip();
     void coverTimedOut(int gen);
     void finishCoverPass();
+    bool startDeniedFetch();
+    void noteDeniedCover(const CoverJob &job);
     void logCoverSummary();
     void dropCurrentCoverJobs();
     void startDirectCovers(const QVector<CoverJob> &jobs);
@@ -290,6 +298,8 @@ private:
     int m_shotIndex = 0;
     bool m_coverFetchGaveUp = false;
     bool m_coverClosed = false;
+    bool m_deniedFetch = false;
+    QVector<CoverJob> m_deniedCovers;
     QString m_coverError;
     QString m_coverSample;
     QVector<CoverJob> m_directJobs;

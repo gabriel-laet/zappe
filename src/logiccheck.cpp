@@ -683,6 +683,57 @@ int runLogicSelfCheck()
         || globoLive.shelves.at(0).rows.at(0).title != QLatin1String("Novela")
         || globoLive.shelves.at(0).rows.at(1).title != QLatin1String("Jornal Nacional"))
         return fail("globoplay live hero dropped");
+    if (!mirrorIsPlayable(*globoplay, QStringLiteral("https://globoplay.globo.com/novela-x/t/12345"))
+        || !globoplay->playPaths.contains(QStringLiteral("/t/")))
+        return fail("globoplay title path");
+    const MirrorPage globoTitles = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Novelas",
+        "rows": [
+          {"title": "Assistir ao vivo: Copa", "href": "https://globoplay.globo.com/ao-vivo/copa", "artwork": "https://example.test/live.jpg"},
+          {"title": "Novela das nove", "href": "https://globoplay.globo.com/novela-x/t/12345", "artwork": "https://example.test/novela.jpg"},
+          {"title": "Jornal Nacional", "href": "https://globoplay.globo.com/v/999", "artwork": "https://example.test/jornal.jpg"}
+        ]
+      }]
+    })json"),
+                                                         *globoplay);
+    if (globoTitles.shelves.isEmpty() || globoTitles.shelves.at(0).rows.size() != 2
+        || globoTitles.shelves.at(0).rows.at(0).title != QLatin1String("Novela das nove")
+        || !globoTitles.shelves.at(0).rows.at(0).href.contains(QStringLiteral("/t/12345"))
+        || globoTitles.shelves.at(0).rows.at(1).title != QLatin1String("Jornal Nacional"))
+        return fail("globoplay keeps title pages");
+    if (!mirrorBadgeTitle(QStringLiteral("LIVE")) || !mirrorBadgeTitle(QStringLiteral("Ao vivo"))
+        || mirrorBadgeTitle(QStringLiteral("Em alta")) || mirrorBadgeTitle(QStringLiteral("Ao vivo: Jornal")))
+        return fail("badge title");
+    const QString ytScript = mirrorExtractScript(*youtube);
+    if (ytScript.contains(QStringLiteral("querySelectorAll('*')")) || !ytScript.contains(QStringLiteral("badgeOnly"))
+        || !ytScript.contains(QStringLiteral("#video-title")) || !ytScript.contains(QStringLiteral("depth > 6"))
+        || !ytScript.contains(QStringLiteral("shadowRoot")))
+        return fail("extractor skips live badge");
+    const MirrorPage youtubeLive = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "LIVE",
+        "rows": [
+          {"title": "Show da noite", "href": "https://www.youtube.com/watch?v=abcdefghijk", "artwork": ""},
+          {"title": "Outro", "href": "https://www.youtube.com/watch?v=bbcdefghijk", "artwork": "https://i.ytimg.com/vi/bbcdefghijk/maxresdefault.jpg"}
+        ]
+      }]
+    })json"),
+                                                      *youtube);
+    if (youtubeLive.shelves.isEmpty() || youtubeLive.shelves.at(0).title != QLatin1String("Em alta")
+        || youtubeLive.shelves.at(0).rows.size() != 2
+        || youtubeLive.shelves.at(0).rows.at(0).artworkSpec
+               != QStringLiteral("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg")
+        || youtubeLive.shelves.at(0).rows.at(1).artworkSpec
+               != QStringLiteral("https://i.ytimg.com/vi/bbcdefghijk/maxresdefault.jpg")
+        || mirrorYoutubeArtwork(QStringLiteral("https://www.youtube.com/watch?v=ab")).contains(QStringLiteral("ytimg")))
+        return fail("youtube live row art");
+    if (!coverHttpNeedsPage(403) || !coverHttpNeedsPage(401) || coverHttpNeedsPage(404) || coverHttpNeedsPage(200)
+        || !mirrorCoverFetchScript({QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc.jpg")})
+                .contains(QStringLiteral("credentials: 'include'"))
+        || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
+                .contains(QStringLiteral("shadowRoot")))
+        return fail("prime 403 uses the page");
     NetworkSample primeSample;
     primeSample.url = QStringLiteral("https://www.primevideo.com/api/enrichItemMetadata");
     primeSample.body = QByteArray(R"json({
