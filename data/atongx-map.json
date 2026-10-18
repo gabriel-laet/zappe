@@ -46,10 +46,19 @@
       "keys": [{ "name": "KEY_ENTER", "code": 28 }]
     },
     {
-      "button": "Home",
+      "button": "Back",
       "action": "back",
-      "note": "No controle da sala o Home sai como KEY_BACK 158 e significa voltar.",
+      "note": "KEY_BACK 158 volta um nível. No catálogo de um streaming, volta para a grade.",
       "keys": [{ "name": "KEY_BACK", "code": 158 }]
+    },
+    {
+      "button": "Home",
+      "action": "home",
+      "note": "KEY_HOMEPAGE 172 e KEY_HOME 102. Em 1032fcb o Home na fileira Em alta do YouTube não voltava ao guia; só o Back (158) voltava. Home sempre cai na grade.",
+      "keys": [
+        { "name": "KEY_HOMEPAGE", "code": 172 },
+        { "name": "KEY_HOME", "code": 102 }
+      ]
     },
     {
       "button": "Menu",

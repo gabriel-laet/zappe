@@ -202,11 +202,11 @@ Window {
         Keys.onPressed: function (event) {
             // XF86Back é o keycode 166. Em algumas sessões o Qt não o mapeia
             // para Key_Back, e o mpv em foco ignora a tecla.
+            const homeKey = event.key === Qt.Key_Home || event.key === Qt.Key_HomePage
             const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Back
-                    || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home
-                    || event.key === Qt.Key_HomePage || event.nativeScanCode === 166
-                    || event.nativeScanCode === 172
-            if (backKey && event.isAutoRepeat) {
+                    || event.key === Qt.Key_Backspace || homeKey
+                    || event.nativeScanCode === 166 || event.nativeScanCode === 172
+            if ((backKey || homeKey) && event.isAutoRepeat) {
                 event.accepted = true
                 return
             }
@@ -237,6 +237,11 @@ Window {
                     guide.adjustVolume(-5)
                 else if (event.key === Qt.Key_VolumeMute)
                     guide.toggleMute()
+                event.accepted = true
+                return
+            }
+            if (homeKey) {
+                house.goHome()
                 event.accepted = true
                 return
             }
@@ -273,9 +278,11 @@ Window {
             case Qt.Key_Escape:
             case Qt.Key_Back:
             case Qt.Key_Backspace:
+                house.goBack()
+                break
             case Qt.Key_Home:
             case Qt.Key_HomePage:
-                house.goBack()
+                house.goHome()
                 break
             case Qt.Key_Menu:
             case Qt.Key_Multi_key:

@@ -69,8 +69,9 @@ int runLogicSelfCheck()
     if (actionForEvdev(115) != RemoteAction::VolumeUp || actionForEvdev(114) != RemoteAction::VolumeDown
         || actionForEvdev(113) != RemoteAction::Mute || actionForEvdev(582) != RemoteAction::Voice)
         return fail("volume/mic");
-    if (actionForEvdev(172) != RemoteAction::Unmapped)
-        return fail("old homepage code is not home");
+    if (actionForEvdev(172) != RemoteAction::Home || actionForEvdev(102) != RemoteAction::Home
+        || actionForEvdev(158) == RemoteAction::Home)
+        return fail("home key leaves the catalog");
 
     QFile mapFile(QStringLiteral(":/zappe/data/atongx-map.json"));
     if (!mapFile.open(QIODevice::ReadOnly))

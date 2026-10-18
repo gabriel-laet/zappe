@@ -8,7 +8,8 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 | Play / Pause | 164 | play/pause no Chrome ou no mpv |
 | Cima, baixo, esquerda, direita | 103, 108, 105, 106 | foco no guia |
 | OK | 28 | ativar |
-| Home | 158 | voltar (não fecha o app) |
+| Back | 158 | voltar (não fecha o app) |
+| Home | 172, 102 | volta para a grade |
 | Menu | 127 | menu lateral |
 | Page Up / Down | 104, 109 | fileira anterior / seguinte |
 | Volume + / − | 115, 114 | Samsung |
@@ -18,11 +19,11 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 
 Power não desliga o mini-PC: o nó da tecla 116 fica com `EVIOCGRAB`, o logind não a recebe, e o app manda o toggle para a Samsung. Ver [`samsung-tv.md`](samsung-tv.md).
 
-Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player, o app segura o teclado e qualquer nó que emita `KEY_BACK` (158) ou backspace (14), e manda as outras teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK como Espaço, play/pause). Voltar fecha o Chrome (`Browser.close`) e devolve o guia; não manda `BrowserBack` para a página. Sem esse grab, o X entrega `XF86Back` ao Chrome focado e a kiosk fica numa `about:blank` branca. Com a TV aberta, o app segura o teclado do controle: Back (158) e Escape (evdev 1) fecham o mpv mesmo com ele em foco, e o guia volta quando o processo termina. O keycode X11 166 (`XF86Back`) também é capturado enquanto o canal está no ar, então a tecla injetada com `xdotool` não fica só no mpv. O `input.conf` do mpv trata `ESC`, `BACK` e `GO_BACK` como quit — o mpv não reconhece o nome `XF86Back`. A tecla não pode encerrar o processo do app: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
+Back (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. Home é outra tecla: `KEY_HOMEPAGE` 172 e `KEY_HOME` 102. Em `1032fcb` o Home na fileira «Em alta» do YouTube não saía do catálogo, porque essas teclas estavam sem ação; só o Back voltava. Home fecha o menu e cai na grade, também se o menu já estiver em Ajustes. No player, o app segura o teclado e qualquer nó que emita `KEY_BACK` (158) ou backspace (14), e manda as outras teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK como Espaço, play/pause). Voltar fecha o Chrome (`Browser.close`) e devolve o guia; não manda `BrowserBack` para a página. Sem esse grab, o X entrega `XF86Back` ao Chrome focado e a kiosk fica numa `about:blank` branca. Com a TV aberta, o app segura o teclado do controle: Back (158) e Escape (evdev 1) fecham o mpv mesmo com ele em foco, e o guia volta quando o processo termina. O keycode X11 166 (`XF86Back`) também é capturado enquanto o canal está no ar, então a tecla injetada com `xdotool` não fica só no mpv. O `input.conf` do mpv trata `ESC`, `BACK` e `GO_BACK` como quit — o mpv não reconhece o nome `XF86Back`. A tecla não pode encerrar o processo do app: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
 
 ## Voltar pelo xdotool
 
-O botão Home do controle é `KEY_BACK`, código evdev **158**. O Del é evdev 14 e faz a mesma ação. Escape é evdev 1: não é o botão Home do controle, mas enquanto o teclado está exclusivo (Chrome ou mpv) o app trata essa tecla como Voltar, para o player em foco não engolir o Escape.
+O botão Back do controle é `KEY_BACK`, código evdev **158**. O Del é evdev 14 e faz a mesma ação. O Home é `KEY_HOMEPAGE` **172** e, no teclado, `KEY_HOME` **102**: os dois voltam para a grade, não só um passo. Escape é evdev 1: não é o botão Home, mas enquanto o teclado está exclusivo (Chrome ou mpv) o app trata essa tecla como Voltar, para o player em foco não engolir o Escape.
 
 No X11, evdev 158 vira o keycode **166** e o keysym **`XF86Back`**. O Qt lê isso como `Qt.Key_Back`. O guia trata essa tecla como `goBack()`: numa view de streaming, fecha o serviço e volta para a lista de apps.
 

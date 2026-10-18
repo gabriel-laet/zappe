@@ -684,6 +684,14 @@ void Guide::leaveToGuide()
     ensureFocusableShelf();
 }
 
+void Guide::home()
+{
+    if (!coalesce(QStringLiteral("home")))
+        return;
+    // Home não dá um passo. Em «Em alta» ou em Ajustes, cai na grade.
+    leaveToGuide();
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))

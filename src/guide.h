@@ -161,6 +161,7 @@ public:
     Q_INVOKABLE void move(int dShelf, int dIndex);
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
+    Q_INVOKABLE void home();
     Q_INVOKABLE void toggleMenu();
     Q_INVOKABLE void adjustVolume(int delta);
     Q_INVOKABLE void toggleMute();

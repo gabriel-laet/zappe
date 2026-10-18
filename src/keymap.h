@@ -7,7 +7,8 @@ namespace zappe {
 
 // Contrato do controle ATONGX na sala. Power 116 alterna a Samsung.
 // O nó dessa tecla continua com EVIOCGRAB: o logind não desliga o mini-PC.
-// Home do controle chega como KEY_BACK 158 e significa voltar.
+// Back do controle é KEY_BACK 158. Home é KEY_HOMEPAGE 172 e KEY_HOME 102:
+// os dois saem do catálogo e voltam para a grade. 158 sozinho não é o Home.
 enum class RemoteAction {
     Unmapped = 0,
     Ignore,
@@ -17,6 +18,7 @@ enum class RemoteAction {
     Right,
     Ok,
     Back,
+    Home,
     Menu,
     PlayPause,
     PageUp,

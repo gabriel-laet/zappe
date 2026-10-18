@@ -294,6 +294,43 @@ int runSelfCheck()
             const QByteArray msg = QStringLiteral("back from %1").arg(id).toUtf8();
             return fail(msg.constData());
         }
+        guide.openMirror(id);
+        if (id == QLatin1String("youtube")) {
+            ShelfData alta;
+            alta.id = QStringLiteral("mirror:youtube:1");
+            alta.skillId = QStringLiteral("mirror:youtube");
+            alta.title = QStringLiteral("Em alta");
+            alta.status = QStringLiteral("ok");
+            RowData clip;
+            clip.title = QStringLiteral("Clip do dia");
+            clip.href = QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk");
+            clip.service = QStringLiteral("youtube");
+            alta.rows.append(clip);
+            guide.replaceServiceShelves(QStringLiteral("youtube"), {alta});
+            int altaShelf = -1;
+            for (int i = 0; i < guide.shelfCount(); ++i) {
+                const ShelfData *shelf = guide.shelves()->shelfAt(i);
+                if (shelf && shelf->title == QLatin1String("Em alta") && guide.shelfShown(i))
+                    altaShelf = i;
+            }
+            if (altaShelf < 0)
+                return fail("youtube em alta shelf");
+            guide.setInitial(altaShelf, 0, false);
+            if (guide.focusTitle() != QLatin1String("Clip do dia") || guide.page() != QLatin1String("streaming"))
+                return fail("focus on youtube em alta");
+            guide.toggleMenu();
+            guide.move(1, 0);
+            if (!guide.menuOpen() || guide.page() != QLatin1String("settings"))
+                return fail("home from em alta opened settings");
+        }
+        guide.home();
+        if (guide.menuOpen() || guide.page() != QLatin1String("home") || guide.menuIndex() != 0
+            || !guide.mirrorService().isEmpty() || guide.focusTitle().trimmed().isEmpty()
+            || guide.focusHref().trimmed().isEmpty() || !guide.shelfShown(guide.shelf())
+            || guide.focusTitle() == QLatin1String("Clip do dia")) {
+            const QByteArray msg = QStringLiteral("home key from %1").arg(id).toUtf8();
+            return fail(msg.constData());
+        }
     }
     guide.adjustVolume(5);
     if (guide.volume() != 45 || !guide.volumeHud())

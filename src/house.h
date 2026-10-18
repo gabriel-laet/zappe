@@ -61,6 +61,7 @@ public:
     Q_INVOKABLE void cancelPrompt();
     Q_INVOKABLE void stopPlayback();
     Q_INVOKABLE void goBack();
+    Q_INVOKABLE void goHome();
     Q_INVOKABLE void cancelLoading();
     Q_INVOKABLE void retryLoading();
     QObject *tv() const;

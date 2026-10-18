@@ -416,6 +416,30 @@ void House::chromeBack()
         m_login->historyBack();
 }
 
+void House::goHome()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_lastBack < 150)
+        return;
+    m_lastBack = now;
+    if (m_loading) {
+        cancelLoading();
+        return;
+    }
+    if (m_promptOpen) {
+        cancelPrompt();
+        return;
+    }
+    if (m_player)
+        leavePlayer();
+    if (m_ota && m_ota->playing())
+        stopPlayback();
+    else if (m_playing)
+        stopPlayback();
+    if (m_guide)
+        m_guide->home();
+}
+
 void House::goBack()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
@@ -607,9 +631,7 @@ void House::handleVoice(const QString &transcript)
     }
     switch (intent.kind) {
     case VoiceKind::Home:
-        stopPlayback();
-        if (m_guide)
-            m_guide->back();
+        goHome();
         break;
     case VoiceKind::Back:
         goBack();
@@ -685,6 +707,8 @@ void House::onRemote(int remoteAction)
     if (m_loading) {
         if (action == RemoteAction::Back)
             cancelLoading();
+        else if (action == RemoteAction::Home)
+            goHome();
         else if (action == RemoteAction::Ok && m_loadingFailed)
             retryLoading();
         else if (action == RemoteAction::VolumeUp)
@@ -698,6 +722,8 @@ void House::onRemote(int remoteAction)
     if (m_promptOpen) {
         if (action == RemoteAction::Back)
             cancelPrompt();
+        else if (action == RemoteAction::Home)
+            goHome();
         else if (action == RemoteAction::Ok)
             submitPrompt(m_draft);
         return;
@@ -747,6 +773,9 @@ void House::onRemote(int remoteAction)
         break;
     case RemoteAction::Back:
         goBack();
+        break;
+    case RemoteAction::Home:
+        goHome();
         break;
     case RemoteAction::Menu:
         if (m_playing)

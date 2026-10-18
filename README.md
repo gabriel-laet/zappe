@@ -186,7 +186,8 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Play / Pause | 164 | play/pause |
 | Setas | 103, 108, 105, 106 | foco |
 | OK | 28 | ativar |
-| Home | 158 | voltar (não fecha o app) |
+| Back | 158 | voltar (não fecha o app) |
+| Home | 172, 102 | volta para a grade |
 | Menu | 127 | menu |
 | Page Up / Down | 104, 109 | troca de fileira |
 | Volume | 115, 114 | Samsung |

@@ -27,6 +27,9 @@ RemoteAction actionForEvdev(int code)
     case 14:
     case 1:
         return RemoteAction::Back;
+    case 172:
+    case 102:
+        return RemoteAction::Home;
     case 127:
         return RemoteAction::Menu;
     case 104:
@@ -63,6 +66,8 @@ const char *actionName(RemoteAction action)
         return "ok";
     case RemoteAction::Back:
         return "back";
+    case RemoteAction::Home:
+        return "home";
     case RemoteAction::Menu:
         return "menu";
     case RemoteAction::PlayPause:
