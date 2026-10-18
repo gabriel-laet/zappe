@@ -13,6 +13,7 @@ struct RowData {
     QString href;
     QString skillId;
     QString artworkSpec;
+    QString synopsis;
     QString artwork;
     QString ambient;
     QString color;
@@ -28,6 +29,8 @@ struct ShelfData {
     QString status;
     QString message;
     bool live = false;
+    // Fileira lida agora do espelho. O catálogo em disco nunca marca isso.
+    bool session = false;
     QVector<RowData> rows;
 };
 

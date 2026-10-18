@@ -12,12 +12,7 @@ Item {
 
     Behavior on x {
         enabled: menu.motion
-        SpringAnimation {
-            spring: 2.15
-            damping: 0.78
-            mass: 0.9
-            epsilon: 0.5
-        }
+        NumberAnimation { duration: Motion.screenMs; easing.type: Motion.ease }
     }
 
     readonly property var labels: ["Início", "Ao vivo", "Streaming", "Ajustes"]
@@ -56,12 +51,7 @@ Item {
         y: 128 + guide.menuIndex * 96
         Behavior on y {
             enabled: menu.motion
-            SpringAnimation {
-                spring: 2.8
-                damping: 0.7
-                mass: 0.75
-                epsilon: 0.4
-            }
+            NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
         }
     }
 
@@ -82,7 +72,7 @@ Item {
                     height: guide.menuIndex === index ? 28 : 0
                     radius: 2
                     color: guide.accent
-                    Behavior on height { NumberAnimation { duration: 160 } }
+                    Behavior on height { NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease } }
                 }
                 Column {
                     x: 28

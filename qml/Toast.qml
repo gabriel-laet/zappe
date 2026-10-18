@@ -9,8 +9,8 @@ Item {
     z: 13
     opacity: guide.toastOn ? 1 : 0
     visible: opacity > 0.01
-    Behavior on opacity { NumberAnimation { duration: 160 } }
-    Behavior on anchors.bottomMargin { NumberAnimation { duration: 180 } }
+    Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
+    Behavior on anchors.bottomMargin { NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease } }
 
     Rectangle {
         anchors.horizontalCenter: parent.horizontalCenter

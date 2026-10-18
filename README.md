@@ -9,17 +9,19 @@ O nome padrão é **Zappe**. Marca, logo e splash vêm de um arquivo na máquina
 ```text
 zappe-kiosk.service   (systemd de sistema, tty1, seat0)
   └─ gamescope 1920×1080
-       ├─ zappe          guia Qt Quick
-       └─ google-chrome  janela fora da tela (kiosk só no Play) --remote-debugging-port=9222
-            perfil ~/.local/share/zappe/chrome-profile
+       └─ zappe          guia Qt Quick
+            ├─ Xvfb :99
+            │    └─ google-chrome   catálogo (não entra no gamescope)
+            └─ no Play: google-chrome --kiosk neste gamescope
+                 perfil ~/.local/share/zappe/chrome-profile
 ```
 
-Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY` / `DISPLAY` do gamescope.
+Não há segundo gamescope. O gamescope ignora posição de janela e mostra o que tem foco, então o Chrome do catálogo não pode nascer nesse display. O app abre um Xvfb (`:99`, ou `ZAPPE_CATALOG_DISPLAY`) e aponta só esse Chrome para lá, com user-agent normal. No Play o app fecha essa instância — o perfil não aceita duas ao mesmo tempo — e sobe o Chrome `--kiosk` no display do gamescope. Ao sair do vídeo, o catálogo volta para o Xvfb.
 
 | Peça | Função |
 | --- | --- |
 | Guia | Qt Quick. Fileiras, ficha, menu, ajustes. |
-| Chrome | Um perfil, porta CDP 9222. Janela fora da tela no guia; kiosk só no Play. |
+| Chrome | Um perfil, porta CDP 9222. Catálogo num Xvfb; kiosk no gamescope só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
 | TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
@@ -40,6 +42,7 @@ sudo pacman -S --needed \
   base-devel cmake ninja pkgconf \
   qt6-base qt6-declarative qt6-websockets qt6-wayland qt6-5compat \
   mesa gamescope \
+  xorg-server-xvfb \
   google-chrome \
   pipewire pipewire-pulse \
   alsa-utils
@@ -132,21 +135,27 @@ pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:hdmi-stereo
 
 ## Chrome e roteiros de login
 
-Fora do Play o Chrome é uma janela real, parada em `--window-position=-3000,-3000`, com o áudio mudo. `--headless=new` anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo nem disparam os feeds JSON medidos na TV. O user-agent é o de um Chrome normal, com `--disable-blink-features=AutomationControlled`. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`. O guia pede o foco de volta a cada segundo; o gamescope mostra a janela focada. No Play a mesma tela entra com `--kiosk`.
+Fora do Play o Chrome é uma janela real num Xvfb, não no gamescope. `--headless=new` anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo. Posição `-3000,-3000` também não serve: o gamescope ignora a posição, dá foco à janela e ela cobre o guia, com abas e o balão “Restore pages?”. O user-agent é o de um Chrome normal, com `--ozone-platform=x11`, `--disable-gpu` (não disputa o DRM com o gamescope), `--disable-blink-features=AutomationControlled` e `--hide-crash-restore-bubble`. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`.
 
 ```bash
+Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac
+DISPLAY=:99 WAYLAND_DISPLAY= \
 google-chrome-stable \
   --user-data-dir="$HOME/.local/share/zappe/chrome-profile" \
   --remote-debugging-port=9222 \
   --remote-allow-origins=* \
   --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36" \
   --disable-blink-features=AutomationControlled \
+  --ozone-platform=x11 \
+  --disable-gpu \
+  --hide-crash-restore-bubble \
   --ozone-override-screen-size=1920,1080 \
   --window-size=1920,1080 \
-  --window-position=-3000,-3000 \
   --mute-audio \
   about:blank
 ```
+
+No Play o app encerra esse processo e sobe outro com `--kiosk`, no `DISPLAY` / `WAYLAND_DISPLAY` do gamescope, no mesmo perfil. São sempre uma instância de cada vez.
 
 `data/logins.json` descreve cada streaming: `homeUrl`, `readySelector` e passos `navigate`, `click` e `ask`. Um `ask` pede `email`, `password`, `code` ou `profile`.
 
@@ -165,7 +174,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player do espelho, fecha o Chrome e o guia volta para a frente. Na TV aberta, volta para o guia. A tecla do controle é `KEY_BACK` (evdev 158, `XF86Back`), não Escape. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
+Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player do espelho, fecha o Chrome e o guia volta para a frente, mesmo com o Chrome em foco. Na TV aberta, volta para o guia. A tecla do controle é `KEY_BACK` (evdev 158, `XF86Back`), não Escape. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
 
 ## Controle
 
@@ -195,7 +204,7 @@ Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/
 
 OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar.
 
-O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê as respostas JSON do serviço; o DOM só entra se a rede não trouxer títulos. O Qt desenha fileiras, capas, continuar assistindo, perfis e busca. Só o Play abre a URL de reprodução e traz o Chrome para a frente. Se o adaptador quebra e existe `~/.local/share/zappe/llm.json` com `url`, o app pede um reparo, valida nas amostras capturadas e versiona o resultado em `adapters/`. Sem essa URL, nada chama IA. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
+O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê as respostas JSON do serviço; o DOM só entra se a rede não trouxer títulos. O Qt desenha fileiras, capas, continuar assistindo, perfis e busca. A capa prefere a imagem que o Chrome já baixou e, em seguida, um GET direto do processo do app (user-agent de Chrome e `Referer` da home do serviço). O arquivo vira `file://` no card. O card visível ainda pode virar um recorte. O log é uma linha de artes e uma linha `capas N/M direto`. A ficha de um título do espelho mostra o nome, a capa e a sinopse quando o DOM tem uma; não inventa episódios nem avisa que o título está fora do catálogo local. Abrir um streaming não mostra as fileiras do catálogo local. Foco, scroll e troca de tela usam as durações de `qml/Motion.qml` (OutCubic, sem spring). Só o Play abre a URL de reprodução e traz o Chrome para a frente. Se o adaptador quebra e existe `~/.local/share/zappe/llm.json` com `url`, o app pede um reparo, valida nas amostras capturadas e versiona o resultado em `adapters/`. Sem essa URL, nada chama IA. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
 
 Uma fileira antiga do harvest com `status` `error`, `teach` ou `harvesting`, ou com texto de AT-SPI (`no Chrome/Chromium application on the AT-SPI bus`), sai do catálogo e não aparece no guia. `Continue watching` com títulos de verdade continua.
 

@@ -60,12 +60,7 @@ Item {
         transformOrigin: Item.Center
         scale: card.focused ? guide.focusScale * (guide.cardDown ? 0.92 : 1) : 1
         Behavior on scale {
-            SpringAnimation {
-                spring: 2.4
-                damping: 0.72
-                mass: 0.85
-                epsilon: 0.0008
-            }
+            NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
         }
         transform: [
             Rotation {
@@ -74,24 +69,14 @@ Item {
                 axis { x: 0; y: 1; z: 0 }
                 angle: card.tilt
                 Behavior on angle {
-                    SpringAnimation {
-                        spring: 2.5
-                        damping: 0.78
-                        mass: 0.7
-                        epsilon: 0.04
-                    }
+                    NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                 }
             },
             Translate {
                 x: card.travel * (card.focused ? -12 : -8)
                 y: card.focused ? -10 : 0
                 Behavior on y {
-                    SpringAnimation {
-                        spring: 2.2
-                        damping: 0.74
-                        mass: 0.8
-                        epsilon: 0.2
-                    }
+                    NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                 }
             }
         ]
@@ -107,9 +92,9 @@ Item {
             smooth: true
             opacity: card.focused ? 0.95 : 0.4
             z: -2
-            Behavior on opacity { NumberAnimation { duration: 180 } }
+            Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
             Behavior on width {
-                SpringAnimation { spring: 2.2; damping: 0.8; epsilon: 0.5 }
+                NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
             }
         }
 
@@ -122,7 +107,7 @@ Item {
             smooth: true
             opacity: card.focused ? 0.92 : 0
             z: -3
-            Behavior on opacity { NumberAnimation { duration: 220 } }
+            Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
         }
 
         Item {
@@ -254,7 +239,7 @@ Item {
                 border.color: "#f5f5f7"
                 opacity: card.focused ? 0.95 : 0
                 antialiasing: true
-                Behavior on opacity { NumberAnimation { duration: 160 } }
+                Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
             }
         }
     }

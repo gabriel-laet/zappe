@@ -130,11 +130,13 @@ protected:
             }
             bool hasPower = false;
             bool hasUp = false;
+            bool hasBack = false;
             if (!node.grab) {
                 unsigned long bits[(KEY_MAX + 1) / (sizeof(unsigned long) * 8) + 1] = {};
                 if (ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(bits)), bits) >= 0) {
                     hasPower = bitSet(bits, KEY_POWER);
                     hasUp = bitSet(bits, KEY_UP);
+                    hasBack = bitSet(bits, KEY_BACK) || bitSet(bits, KEY_BACKSPACE);
                 }
             }
             const bool grab = shouldGrabEvdevNode(node.grab, hasPower, hasUp);
@@ -142,7 +144,9 @@ protected:
                 std::fprintf(stderr, "zappe: grab exclusivo %s\n", qPrintable(node.path));
             else if (node.grab)
                 std::fprintf(stderr, "zappe: não consegui grab em %s\n", qPrintable(node.path));
-            if (!grab && hasUp)
+            // KEY_BACK sem KEY_UP não entra no grab inicial. Com o Chrome focado,
+            // o X entrega XF86Back para a kiosk e ela vai para about:blank.
+            if (!grab && (hasUp || hasBack))
                 keyboardFds.append(fd);
             fds.append(fd);
             pollfd slot{};

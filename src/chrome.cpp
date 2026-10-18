@@ -1,12 +1,14 @@
 #include "chrome.h"
 
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 #include <QUrl>
 
@@ -20,12 +22,10 @@ QString chromeCatalogUserAgent()
                           "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36");
 }
 
-QString findChromeBinary()
+QString findOnPath(const QStringList &names)
 {
-    if (const QString explicitBin = qEnvironmentVariable("CHROME_PATH"); !explicitBin.isEmpty() && QFile::exists(explicitBin))
-        return explicitBin;
-    const QStringList names = {QStringLiteral("google-chrome-stable"), QStringLiteral("google-chrome"),
-                               QStringLiteral("chromium"), QStringLiteral("chromium-browser")};
+    if (names.isEmpty())
+        return {};
     const QString path = qEnvironmentVariable("PATH");
     for (const QString &dir : path.split(QLatin1Char(':'), Qt::SkipEmptyParts)) {
         for (const QString &name : names) {
@@ -35,6 +35,68 @@ QString findChromeBinary()
         }
     }
     return {};
+}
+
+QString findXvfbBinary()
+{
+    if (const QString explicitBin = qEnvironmentVariable("XVFB_PATH"); !explicitBin.isEmpty() && QFile::exists(explicitBin))
+        return explicitBin;
+    return findOnPath({QStringLiteral("Xvfb")});
+}
+
+QString bareDisplay(const QString &display)
+{
+    QString number = display.trimmed();
+    if (number.startsWith(QLatin1Char(':')))
+        number = number.mid(1);
+    return number.section(QLatin1Char('.'), 0, 0);
+}
+
+QString chromeCatalogDisplay(const QString &guideDisplay)
+{
+    QString chosen = qEnvironmentVariable("ZAPPE_CATALOG_DISPLAY").trimmed();
+    if (chosen.isEmpty())
+        chosen = QStringLiteral("99");
+    chosen = bareDisplay(chosen);
+    const QString guide = bareDisplay(guideDisplay);
+    if (!guide.isEmpty() && chosen == guide) {
+        bool ok = false;
+        const int number = chosen.toInt(&ok);
+        chosen = QString::number(ok && number != 98 ? 98 : 97);
+    }
+    if (chosen.isEmpty())
+        chosen = QStringLiteral("99");
+    return QStringLiteral(":") + chosen;
+}
+
+QString x11SocketPath(const QString &display)
+{
+    return QStringLiteral("/tmp/.X11-unix/X") + bareDisplay(display);
+}
+
+QProcessEnvironment chromeFaceEnvironment(ChromeFace face, const QProcessEnvironment &base, const QString &guideDisplay,
+                                          const QString &guideWayland, const QString &catalogDisplay)
+{
+    QProcessEnvironment env = base;
+    if (face == ChromeFace::Player) {
+        if (!guideDisplay.isEmpty())
+            env.insert(QStringLiteral("DISPLAY"), guideDisplay);
+        if (!guideWayland.isEmpty())
+            env.insert(QStringLiteral("WAYLAND_DISPLAY"), guideWayland);
+        return env;
+    }
+    env.insert(QStringLiteral("DISPLAY"), catalogDisplay);
+    env.remove(QStringLiteral("WAYLAND_DISPLAY"));
+    env.remove(QStringLiteral("WAYLAND_SOCKET"));
+    return env;
+}
+
+QString findChromeBinary()
+{
+    if (const QString explicitBin = qEnvironmentVariable("CHROME_PATH"); !explicitBin.isEmpty() && QFile::exists(explicitBin))
+        return explicitBin;
+    return findOnPath({QStringLiteral("google-chrome-stable"), QStringLiteral("google-chrome"), QStringLiteral("chromium"),
+                       QStringLiteral("chromium-browser")});
 }
 
 ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face)
@@ -59,19 +121,21 @@ ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face)
                         QStringLiteral("--disable-background-timer-throttling"),
                         QStringLiteral("--disable-renderer-backgrounding"),
                         QStringLiteral("--disable-backgrounding-occluded-windows"),
+                        QStringLiteral("--hide-crash-restore-bubble"),
                         // Sem isto o headless injeta 800,600 e briga com a janela.
                         QStringLiteral("--ozone-override-screen-size=1920,1080"),
                         QStringLiteral("--window-size=1920,1080")};
     if (face == ChromeFace::Player) {
-        // Tela cheia só no Play. No gamescope, minimizar não tira a janela da frente.
+        // Tela cheia no display do gamescope. O catálogo já foi fechado: o perfil tem lock.
         launch.arguments.append(QStringLiteral("--kiosk"));
     } else {
-        // --headless=new anuncia HeadlessChrome e a Netflix/YouTube não montam o catálogo
-        // (sem grade, sem o feed browse/graphql). Janela real, fora da tela, sem foco.
-        // O gamescope mostra a janela focada; o guia pede o foco de volta.
+        // --headless=new anuncia HeadlessChrome e a Netflix/YouTube não montam o catálogo.
+        // A janela fica num Xvfb, não no gamescope: posição negativa o gamescope ignora
+        // e a janela cobre o guia. Sem GPU real, para não disputar o DRM com o gamescope.
         launch.arguments.append(QStringLiteral("--user-agent=") + chromeCatalogUserAgent());
         launch.arguments.append(QStringLiteral("--disable-blink-features=AutomationControlled"));
-        launch.arguments.append(QStringLiteral("--window-position=-3000,-3000"));
+        launch.arguments.append(QStringLiteral("--ozone-platform=x11"));
+        launch.arguments.append(QStringLiteral("--disable-gpu"));
         launch.arguments.append(QStringLiteral("--mute-audio"));
     }
     launch.arguments.append(QStringLiteral("about:blank"));
@@ -88,20 +152,79 @@ bool ChromeSession::running() const
     return m_process && m_process->state() != QProcess::NotRunning;
 }
 
+void ChromeSession::rememberGuideDisplay()
+{
+    if (m_guideCaptured)
+        return;
+    m_guideCaptured = true;
+    m_guideDisplay = qEnvironmentVariable("DISPLAY");
+    m_guideWayland = qEnvironmentVariable("WAYLAND_DISPLAY");
+}
+
+bool ChromeSession::ensurePrivateDisplay()
+{
+    m_catalogDisplay = chromeCatalogDisplay(m_guideDisplay);
+    if (!bareDisplay(m_guideDisplay).isEmpty() && bareDisplay(m_catalogDisplay) == bareDisplay(m_guideDisplay)) {
+        emit failed(QStringLiteral("Display do catálogo coincide com o do guia."));
+        return false;
+    }
+    const QString socket = x11SocketPath(m_catalogDisplay);
+    if (QFile::exists(socket)) {
+        std::fprintf(stderr, "zappe: xvfb %s já está no ar\n", qPrintable(m_catalogDisplay));
+        return true;
+    }
+    const QString binary = findXvfbBinary();
+    if (binary.isEmpty()) {
+        emit failed(QStringLiteral("Xvfb não encontrado. Instale xorg-server-xvfb."));
+        return false;
+    }
+    if (!m_xvfb)
+        m_xvfb = new QProcess(this);
+    if (m_xvfb->state() == QProcess::NotRunning) {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.remove(QStringLiteral("DISPLAY"));
+        env.remove(QStringLiteral("WAYLAND_DISPLAY"));
+        m_xvfb->setProcessEnvironment(env);
+        m_xvfb->setProcessChannelMode(QProcess::ForwardedChannels);
+        m_xvfb->setProgram(binary);
+        m_xvfb->setArguments({m_catalogDisplay, QStringLiteral("-screen"), QStringLiteral("0"), QStringLiteral("1920x1080x24"),
+                              QStringLiteral("-nolisten"), QStringLiteral("tcp"), QStringLiteral("-ac")});
+        std::fprintf(stderr, "zappe: xvfb %s %s\n", qPrintable(binary), qPrintable(m_catalogDisplay));
+        m_xvfb->start();
+    }
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 3000) {
+        if (QFile::exists(socket))
+            return true;
+        if (m_xvfb->state() == QProcess::NotRunning)
+            break;
+        QThread::msleep(50);
+    }
+    std::fprintf(stderr, "zappe: xvfb %s não abriu %s\n", qPrintable(m_catalogDisplay), qPrintable(socket));
+    emit failed(QStringLiteral("Xvfb não abriu o display do catálogo."));
+    return false;
+}
+
 void ChromeSession::startProcess()
 {
     if (m_dataDir.isEmpty())
         return;
+    rememberGuideDisplay();
     m_launch = chromeLaunch(m_dataDir, m_face);
     if (m_launch.binary.isEmpty()) {
         emit failed(QStringLiteral("Google Chrome não encontrado (google-chrome-stable)."));
         return;
     }
+    if (m_face == ChromeFace::Hidden && !ensurePrivateDisplay())
+        return;
     QDir().mkpath(m_launch.profileDir);
     ++m_probeGen;
     m_devtoolsReady = false;
     auto *process = new QProcess(this);
     process->setProcessChannelMode(QProcess::ForwardedChannels);
+    process->setProcessEnvironment(
+        chromeFaceEnvironment(m_face, QProcessEnvironment::systemEnvironment(), m_guideDisplay, m_guideWayland, m_catalogDisplay));
     process->setProgram(m_launch.binary);
     process->setArguments(m_launch.arguments);
     connect(process, &QProcess::started, this, [this] { probeDevTools(0); });
@@ -124,8 +247,14 @@ void ChromeSession::startProcess()
                 startProcess();
         });
     });
-    std::fprintf(stderr, "zappe: chrome %s port %d %s\n", qPrintable(m_launch.binary), m_launch.port,
-                 m_face == ChromeFace::Player ? "player" : "oculto");
+    if (m_face == ChromeFace::Player) {
+        std::fprintf(stderr, "zappe: chrome %s port %d player no gamescope DISPLAY=%s WAYLAND_DISPLAY=%s\n",
+                     qPrintable(m_launch.binary), m_launch.port, qPrintable(m_guideDisplay), qPrintable(m_guideWayland));
+    } else {
+        std::fprintf(stderr, "zappe: chrome %s port %d catálogo em DISPLAY=%s (guia DISPLAY=%s WAYLAND_DISPLAY=%s)\n",
+                     qPrintable(m_launch.binary), m_launch.port, qPrintable(m_catalogDisplay), qPrintable(m_guideDisplay),
+                     qPrintable(m_guideWayland));
+    }
     m_process = process;
     process->start();
 }

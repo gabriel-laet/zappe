@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 
 class QQuickWindow;
 
@@ -43,6 +44,8 @@ class Guide : public QObject {
     Q_PROPERTY(QString focusHref READ focusHref NOTIFY focusChanged)
     Q_PROPERTY(qreal focusProgress READ focusProgress NOTIFY focusChanged)
     Q_PROPERTY(bool focusLive READ focusLive NOTIFY focusChanged)
+    Q_PROPERTY(bool focusMirrored READ focusMirrored NOTIFY focusChanged)
+    Q_PROPERTY(QString focusSynopsis READ focusSynopsis NOTIFY focusChanged)
 
     Q_PROPERTY(QString brandName READ brandName NOTIFY brandingChanged)
     Q_PROPERTY(QString accent READ accent NOTIFY brandingChanged)
@@ -116,6 +119,8 @@ public:
     QString focusHref() const { return m_focusHref; }
     qreal focusProgress() const { return m_focusProgress; }
     bool focusLive() const { return m_focusLive; }
+    bool focusMirrored() const { return m_focusMirrored; }
+    QString focusSynopsis() const { return m_focusSynopsis; }
 
     QString brandName() const { return m_brand.name; }
     QString accent() const { return m_brand.accent; }
@@ -158,6 +163,7 @@ public:
 
     void openMirror(const QString &serviceId);
     void closeMirror();
+    void setMirrorServiceIds(const QStringList &ids);
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
 
 signals:
@@ -201,6 +207,7 @@ private:
     void setBrandingEnabled(bool on);
     void pulseCard();
     void publishShelves(bool resetFocus);
+    bool localMirrorStandIn(const ShelfData *shelf) const;
     void revealVolume();
     void showToast(const QString &text);
     bool coalesce(const QString &key);
@@ -225,6 +232,7 @@ private:
     QVector<ShelfData> m_baseShelves;
     QVector<ShelfData> m_mirrorShelves;
     QString m_mirrorService;
+    QSet<QString> m_mirrorIds;
     int m_layoutEpoch = 0;
 
     int m_shelf = 0;
@@ -271,6 +279,8 @@ private:
     QString m_focusHref;
     qreal m_focusProgress = 0;
     bool m_focusLive = false;
+    bool m_focusMirrored = false;
+    QString m_focusSynopsis;
 };
 
 QString cacheDir();

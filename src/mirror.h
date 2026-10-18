@@ -82,6 +82,21 @@ QString mirrorTransportScript(const QString &action);
 QString mirrorSearchUrl(const MirrorAdapter &adapter, const QString &query);
 QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href);
 bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href);
+// Home, busca e refresh do catálogo não podem abrir /watch nem watch?v=.
+bool mirrorUrlIsPlayback(const QString &url);
+// OK numa fileira local do serviço abre o espelho, em vez da ficha morta.
+QString mirrorRowService(const QString &service, const QString &href);
+// Leitura nova muito menor que a anterior: fica a página mais rica.
+bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
+QString mirrorCoverFetchScript(const QStringList &urls);
+QString mirrorCoverClipScript(const QStringList &urls);
+// Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
+QString coverMatchKey(const QString &url);
+bool coverUrlsMatch(const QString &wanted, const QString &loaded);
+// Referer do serviço (https://www.netflix.com/...), não o host do CDN.
+QString coverDownloadReferer(const QString &homeUrl);
+// TypeError de CORS/rede: repetir o fetch não traz a imagem.
+bool coverFetchIsBlocked(const QString &error);
 
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter);
 MirrorPage parseMirrorFeeds(const QVector<NetworkSample> &samples, const MirrorAdapter &adapter);
@@ -104,6 +119,22 @@ struct CoverJob {
     QString serviceId;
     QString url;
     QString path;
+    QString referer;
+};
+
+struct HeldImage {
+    QString url;
+    QString key;
+    QString file;
+    QByteArray body;
+};
+
+struct CoverShot {
+    CoverJob job;
+    int x = 0;
+    int y = 0;
+    int w = 0;
+    int h = 0;
 };
 
 QVector<CoverJob> coverJobs(const QVector<ShelfData> &shelves, const QString &cacheDir, const QDateTime &now);
@@ -146,8 +177,25 @@ private:
     void beginRepair();
     void postLearn(const QByteArray &png);
     void finishEmpty();
-    void applyPage(const MirrorPage &page);
+    bool applyPage(const MirrorPage &page);
     void downloadNext();
+    void noteArtwork(const MirrorPage &page);
+    int takeHeldCovers();
+    QByteArray heldImage(const QString &url) const;
+    void rememberImage(const QString &url, const QByteArray &body);
+    bool fetchNextCoverBatch();
+    bool startCoverClips();
+    void shootNextClip();
+    void coverTimedOut(int gen);
+    void finishCoverPass();
+    void logCoverSummary();
+    void dropCurrentCoverJobs();
+    void startDirectCovers(const QVector<CoverJob> &jobs);
+    void pumpDirectCovers();
+    void logDirectCovers();
+    void finishAccept();
+    void storeCover(const CoverJob &job, const QByteArray &body);
+    void onFrame(const QString &url);
     void showLoading(const QString &serviceId);
     void showError(const QString &serviceId, const QString &detail);
     void armWatch(const QString &serviceId);
@@ -167,8 +215,16 @@ private:
     QString m_navUrl;
     QStringList m_extraLeft;
     QVector<CoverJob> m_covers;
+    QVector<CoverJob> m_coverBatch;
+    QVector<CoverJob> m_clipJobs;
+    QVector<CoverShot> m_shots;
+    QVector<HeldImage> m_images;
     QVector<NetworkSample> m_samples;
     QHash<QString, QString> m_inflight;
+    QHash<QString, QString> m_imageInflight;
+    QSet<QString> m_coverAttempted;
+    QSet<QString> m_artLogged;
+    QSet<QString> m_coverLogged;
     QHash<QString, QVector<ShelfData>> m_pages;
     QSet<QString> m_learned;
     QSet<QString> m_rolled;
@@ -191,7 +247,28 @@ private:
     bool m_learnPosted = false;
     bool m_mergePage = false;
     bool m_holdNav = false;
+    bool m_resumeExtra = false;
+    bool m_forceReload = false;
+    bool m_sawPlayback = false;
     int m_epoch = 0;
+    int m_playNavTries = 0;
+    int m_coverGen = 0;
+    int m_coverPhase = 0;
+    int m_coverFetched = 0;
+    int m_coverFromNet = 0;
+    int m_coverFromFetch = 0;
+    int m_coverFromClip = 0;
+    int m_shotIndex = 0;
+    bool m_coverFetchGaveUp = false;
+    bool m_coverClosed = false;
+    QString m_coverError;
+    QString m_coverSample;
+    QVector<CoverJob> m_directJobs;
+    int m_directActive = 0;
+    int m_directSaved = 0;
+    int m_directTotal = 0;
+    QString m_directError;
+    QString m_directFile;
 };
 
 } // namespace zappe

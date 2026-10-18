@@ -7,8 +7,8 @@ Item {
     opacity: guide.detailOpen ? 1 : 0
     Behavior on opacity {
         NumberAnimation {
-            duration: 280
-            easing.type: Easing.OutCubic
+            duration: Motion.screenMs
+            easing.type: Motion.ease
         }
     }
 
@@ -63,9 +63,10 @@ Item {
         }
         Text {
             width: 720
+            visible: guide.focusLive || !guide.focusMirrored || guide.focusSynopsis.length > 0
             text: guide.focusLive
                   ? "Canal no ar. A prévia é um desenho, sem vídeo."
-                  : "No catálogo local. Este guia só navega."
+                  : (guide.focusMirrored ? guide.focusSynopsis : "No catálogo local. Este guia só navega.")
             color: "#d1d1d6"
             font.family: guide.uiFont
             font.pixelSize: 22
@@ -120,6 +121,7 @@ Item {
 
             Rectangle {
                 id: trailer
+                visible: !guide.focusMirrored
                 width: 176
                 height: 64
                 radius: 32
@@ -179,12 +181,7 @@ Item {
                             x: guide.saved ? 26 : 4
                             color: guide.saved ? guide.accent : "#f5f5f7"
                             Behavior on x {
-                                SpringAnimation {
-                                    spring: 3.4
-                                    damping: 0.58
-                                    mass: 0.55
-                                    epsilon: 0.15
-                                }
+                                NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                             }
                         }
                     }
@@ -207,6 +204,7 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 36
         spacing: 14
+        visible: !guide.focusMirrored
 
         Text {
             leftPadding: 88
@@ -230,12 +228,7 @@ Item {
 
             property real scrollX: 0
             Behavior on scrollX {
-                SpringAnimation {
-                    spring: 2.1
-                    damping: 0.75
-                    mass: 0.85
-                    epsilon: 0.6
-                }
+                NumberAnimation { duration: Motion.scrollMs; easing.type: Motion.ease }
             }
             onScrollXChanged: contentX = scrollX
 
@@ -263,7 +256,7 @@ Item {
                             border.color: "#f5f5f7"
                             clip: true
                             Behavior on scale {
-                                SpringAnimation { spring: 2.6; damping: 0.7; epsilon: 0.001 }
+                                NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                             }
 
                             Rectangle {
@@ -363,17 +356,17 @@ Item {
 
     SequentialAnimation {
         id: watchPulse
-        NumberAnimation { target: watch; property: "watchScale"; to: 0.94; duration: 80 }
-        NumberAnimation { target: watch; property: "watchScale"; to: 1; duration: 200; easing.type: Easing.OutBack }
+        NumberAnimation { target: watch; property: "watchScale"; to: 0.94; duration: Motion.pressMs }
+        NumberAnimation { target: watch; property: "watchScale"; to: 1; duration: Motion.releaseMs; easing.type: Motion.ease }
     }
     SequentialAnimation {
         id: trailerPulse
-        NumberAnimation { target: trailer; property: "trailerScale"; to: 0.94; duration: 80 }
-        NumberAnimation { target: trailer; property: "trailerScale"; to: 1; duration: 200; easing.type: Easing.OutBack }
+        NumberAnimation { target: trailer; property: "trailerScale"; to: 0.94; duration: Motion.pressMs }
+        NumberAnimation { target: trailer; property: "trailerScale"; to: 1; duration: Motion.releaseMs; easing.type: Motion.ease }
     }
     SequentialAnimation {
         id: minePulse
-        NumberAnimation { target: mine; property: "mineScale"; to: 0.94; duration: 80 }
-        NumberAnimation { target: mine; property: "mineScale"; to: 1; duration: 200; easing.type: Easing.OutBack }
+        NumberAnimation { target: mine; property: "mineScale"; to: 0.94; duration: Motion.pressMs }
+        NumberAnimation { target: mine; property: "mineScale"; to: 1; duration: Motion.releaseMs; easing.type: Motion.ease }
     }
 }

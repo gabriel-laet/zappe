@@ -1,6 +1,8 @@
 # Espelho dos streamings
 
-O Chrome não aparece para navegar. Fora do Play ele é uma janela real fora da tela (`--window-position=-3000,-3000`, áudio mudo), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`), com `--window-size=1920,1080` e `--ozone-override-screen-size=1920,1080`. Não usa `--headless=new`: esse modo anuncia `HeadlessChrome`, a Netflix logada fica sem card depois de mais de 10 segundos, e o YouTube não dispara `youtubei/v1/browse`. O user-agent é o de um Chrome de janela, com `--disable-blink-features=AutomationControlled`. O guia pede o foco de volta; o gamescope mostra a janela focada. O Chrome só vem para a frente no Play, em `--kiosk`.
+O Chrome não aparece para navegar. Fora do Play ele é uma janela real num Xvfb (`:99`, ou `ZAPPE_CATALOG_DISPLAY`), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`), com `--window-size=1920,1080` e `--ozone-override-screen-size=1920,1080`. O processo não herda o `WAYLAND_DISPLAY` do gamescope e usa `--ozone-platform=x11`. `--disable-gpu` evita disputar o DRM com o gamescope. Não usa `--headless=new`: esse modo anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo. Também não usa janela fora da tela no gamescope: o compositor ignora a posição, dá foco e a janela cobre o guia, com abas, barra de endereço e o balão “Restore pages?”. `--hide-crash-restore-bubble` entra em toda invocação. O user-agent é o de um Chrome de janela, com `--disable-blink-features=AutomationControlled`.
+
+O perfil do Chrome tem lock. No Play o app fecha o Chrome do Xvfb e sobe outro com `--kiosk` no `DISPLAY` e no `WAYLAND_DISPLAY` do gamescope. Ao sair do vídeo, o kiosk fecha e o catálogo volta para o Xvfb. Não dá para mover a janela de um display para o outro pelo CDP. O Xvfb fica no ar entre um Play e o seguinte. Sem o binário `Xvfb` (`xorg-server-xvfb` no Arch) o catálogo não abre, em vez de cair no gamescope.
 
 Cada streaming tem a própria aba. A fila é serial: o próximo serviço só começa depois que o atual contou os títulos do feed e, se o feed veio vazio, do DOM. `PUT /json/new?about:blank` cria o target, o websocket dessa aba recebe `Page.enable` e `Network.enable`, e só então `Page.navigate` abre a home. O histórico do YouTube reusa a aba do YouTube. Login e uma URL aberta na hora ganham outra aba e não navegam a do catálogo. A espera de cada home chega a 8 segundos enquanto ainda há resposta de feed em voo.
 
@@ -10,14 +12,14 @@ O processo do Chrome fica pronto antes da porta de depuração. O app espera `/j
 
 `data/mirrors.json` descreve cada serviço com o que a TV mostrou em outubro de 2026: URL da home, URL de busca (`{q}`), `feeds` dos endpoints JSON/GraphQL e os seletores de DOM que ainda existem. Um serviço novo entra nesse JSON com `kind` `generic`. Netflix (`kind` `netflix`) e YouTube (`kind` `youtube`) também normalizam a URL de reprodução no código:
 
-- `/title/80100172` na Netflix vira `https://www.netflix.com/watch/80100172`
+- `/title/80100172` e `/browse?jbv=80100172` na Netflix viram `https://www.netflix.com/watch/80100172`
 - `youtu.be/…` e `/shorts/…` viram `https://www.youtube.com/watch?v=…`
 
-A home do YouTube desta conta vem vazia. O guia lê inscrições (`/feed/subscriptions`) e o histórico (`/feed/history`), que entra como continuar assistindo. A busca continua em `/results`.
+A home do YouTube é `https://www.youtube.com/`. `/feed/subscriptions` nesta conta não tem `ytd-rich-item-renderer`. O histórico (`/feed/history`) entra em seguida, como continuar assistindo. A busca continua em `/results`.
 
-Prime Video, HBO Max, Apple TV, Disney+ e Globoplay usam o extrator genérico, com os caminhos de Play do próprio serviço (`/detail/` no Prime, `/video/watch` e `/show/` na Max, `/episode/` na Apple, `/play/` na Disney, `/v/` e `/ao-vivo/` no Globoplay). No Prime, título com “Watch with”, Paramount+, Cinemax, MGM+, Starz e canais parecidos sai da fileira. Onde o card não é a URL de vídeo, `playClick` aperta o botão Assistir/Retomar da página.
+Prime Video, HBO Max, Apple TV, Disney+ e Globoplay usam o extrator genérico, com os caminhos de Play do próprio serviço (`/detail/` no Prime, `/video/watch` e `/show/` na Max, `/episode/` na Apple, `/browse/entity` na Disney, `/v/` e `/ao-vivo/` no Globoplay). No Prime, título com “Watch with”, Paramount+, Cinemax, MGM+, Starz e canais parecidos sai da fileira. Onde o card não é a URL de vídeo, `playClick` aperta o botão Assistir/Retomar da página.
 
-Seletores vistos na TV: Netflix usa `h2` e `[class*=card]` com `a[href*='/title/']` (`.lolomoRow` não está mais na UI). Prime usa `[data-testid*=carousel]` e `[data-testid*=card]`. Max usa `[data-testid*=tile]`. Apple usa `[class*=shelf]` e `h2`. Disney usa `[data-testid*=tile]` e `a[href*='/play/']`. Globoplay usa `[class*=carousel]` e `[class*=card]`.
+Seletores medidos na TV com o catálogo logado: a capa da Netflix é `a[href^="/browse?jbv=<id>"]`, com o nome em `aria-label` e um `img` dentro (cerca de 105 links). `.title-card-container`, `.slider-item`, `.lolomoRow` e `a[href*="/watch/"]` não aparecem. A Disney usa `[data-testid="set-item"]` e `a[href*="/browse/entity"]` (75 de cada). Prime, Max, Apple e Globoplay já devolviam títulos pelo DOM (34, 33, 27 e 43). Netflix, YouTube e Disney devolviam 0 com os seletores antigos. O feed JSON, nessa passagem, veio com 0 títulos nos sete serviços; o DOM é o que preenche o guia. Se a fileira do seletor não existe, o script ainda lê os links do `linkSelector` direto no documento.
 
 Endpoints: `www.netflix.com/graphql`; `youtubei/v1/browse`, `/guide` e `/search`; `primevideo.com/api/enrichItemMetadata`; `api.hbomax.com/cms/routes` e `/cms/collections`; `disney.api.edge.bamgrid.com/explore`; `multicloud-jarvis.globo.com/graphql` e `multicloud-mystique.globo.com`. O catálogo da Apple TV veio no HTML, não num JSON estável.
 
@@ -62,7 +64,9 @@ O arquivo vigente é `~/.local/share/zappe/adapters/<id>.json`. Ele substitui o 
 
 No player o nó do teclado fica exclusivo. Setas, OK e play/pause saem como `Input.dispatchKeyEvent` (`rawKeyDown`, `keyDown`, `keyUp`). OK e play/pause são Espaço (32): Enter pausa em uns serviços e não faz nada em outros. A seta esquerda é `ArrowLeft` (37), dez segundos para trás na maior parte. Na Disney+ as setas são irregulares, então ←/→ mudam `video.currentTime` em 10s. No Globoplay ao vivo as teclas não chegam sem foco: o app clica no `<video>` e controla play/pause e o tempo por script. O vídeo escolhido é o que tem DRM (`mediaKeys`); no Prime o trailer mudo fica de fora.
 
-Voltar no player não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Em seguida o Chrome sobe de novo fora da tela para continuar lendo os catálogos. A janela kiosk existe só enquanto o vídeo está aberto: no gamescope, minimizar não tira a tela branca de `about:blank`.
+Voltar no player não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Enquanto o kiosk está aberto, o app também segura qualquer nó evdev que emita `KEY_BACK` ou backspace, não só o teclado com setas. Sem isso o X entrega `XF86Back` para o Chrome focado e a kiosk cai numa `about:blank` branca. Se o frame principal voltar para `about:blank` depois do vídeo ter aberto, o app fecha o kiosk e devolve o guia. Em seguida o Chrome do catálogo sobe de novo no Xvfb. A janela kiosk existe só enquanto o vídeo está aberto, e só no display do gamescope.
+
+O catálogo (Xvfb) não navega para URL de playback (`/watch`, `/player`, `watch?v=`). Esse navigate só roda quando o Chrome já está na face de player, no gamescope. A queda do CDP do Xvfb, no meio do `present()`, não reanexa no processo que está morrendo: espera o `ready()` do kiosk novo.
 
 Numa view de streaming (as fileiras no Qt, antes do Play), Voltar do controle é `KEY_BACK` (evdev 158), keysym `XF86Back`. Escape não é essa tecla. `xdotool key Escape` cai na janela que estiver focada; se for o Chrome, o site consome a tecla e o guia não fecha. O alvo é a janela do app, cujo título é o nome da marca (o padrão é Zappe):
 
@@ -73,7 +77,17 @@ xdotool key --window "$WID" XF86Back
 
 ## Capas e atualização
 
-Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. Arquivo com menos de 12 horas é reusado. O que falta baixa em segundo plano; até lá o guia usa uma capa gerada. A varredura dos serviços recomeça a cada 20 minutos e não roda enquanto o player está aberto.
+Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. O extrator prefere `currentSrc` (a imagem que o browser de fato carregou) e, se ela for `blob:` ou vazia, cai para `src`, `srcset`, `data-src` e `background-image`. Arquivo com menos de 12 horas é reusado.
+
+Enquanto a página carrega, cada resposta `image/*` grande o bastante é guardada com `Network.getResponseBody`. A URL do card e a da rede casam sem a query. O caminho principal é o processo do app: `QNetworkAccessManager` baixa a URL com o user-agent de Chrome e `Referer` da home do serviço (`https://www.netflix.com/browse`, não o host do CDN). O JPEG vai para `covers/<sha1>.img` e o card recebe `file://` desse arquivo. Um recorte do card visível ainda cobre o que o GET não trouxer. Até a imagem chegar, o guia usa uma capa gerada.
+
+Na view de um streaming só entram as fileiras lidas agora daquele serviço. O catálogo local, mesmo com o mesmo nome de fileira, fica de fora.
+
+O log é uma linha por serviço (`artes N http, M sem url` e, se houve o que baixar, `capas N salvas (rede …, aba …, recorte …)`), com até três URLs de amostra e o primeiro erro. Não repete o lote.
+
+A varredura recomeça a cada 20 minutos e não roda enquanto o player está aberto. Se a mesma URL já está na aba, o app passa por `about:blank` antes de navegar de novo: no YouTube um `Page.navigate` repetido não recarrega e o DOM virtualizado devolve um título. Uma leitura sem merge muito menor que a anterior (a guardada tem pelo menos 4 e a nova tem menos da metade) fica de fora.
+
+OK num título local de um serviço do espelho, sem URL de playback, abre o loading daquele serviço em vez da ficha “No catálogo local”. A fileira local que só repete o serviço some da home quando o espelho existe. A fileira “Atualizando…” aparece antes da página do serviço. Um título que já tem URL de playback abre a ficha com o nome, a capa e a sinopse se o card trouxer uma. Essa ficha não lista episódios fictícios e não diz que o guia só navega. Assistir continua mandando o Play.
 
 `ZAPPE_MIRROR_DISABLE=1` não abre o Chrome. Sem o binário, o guia segue sem essas fileiras.
 

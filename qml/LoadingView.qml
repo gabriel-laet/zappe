@@ -104,7 +104,7 @@ Item {
                 radius: 4
                 color: guide.accent
                 Behavior on width {
-                    NumberAnimation { duration: 120 }
+                    NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                 }
             }
         }

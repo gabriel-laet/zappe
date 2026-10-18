@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Um gamescope só. A unit de sistema zappe-kiosk.service (tty1, seat0)
-# chama ~/bin/zappe-kiosk.sh, que chama este script. O Chrome nasce dentro
-# do mesmo gamescope. Não há segundo gamescope.
+# Um gamescope só, para o guia. A unit de sistema zappe-kiosk.service
+# (tty1, seat0) chama ~/bin/zappe-kiosk.sh, que chama este script.
+# O Chrome do catálogo não usa este display: o app abre um Xvfb e
+# aponta esse processo para lá. No Play o app fecha o Xvfb (o perfil
+# não abre duas instâncias) e sobe o Chrome --kiosk neste gamescope.
+# Não há segundo gamescope.
 #
 # O loop relança o app se ele sair. A unit também tem Restart=always.
 #

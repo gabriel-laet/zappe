@@ -24,12 +24,14 @@ set(QML_FILES
   qml/Toast.qml
   qml/LoginPrompt.qml
   qml/LoadingView.qml
+  qml/Motion.qml
 )
 
 foreach(qml ${QML_FILES})
   get_filename_component(qml_name ${qml} NAME)
   set_source_files_properties(${qml} PROPERTIES QT_RESOURCE_ALIAS ${qml_name})
 endforeach()
+set_source_files_properties(qml/Motion.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 qt_add_executable(zappe
   src/main.cpp

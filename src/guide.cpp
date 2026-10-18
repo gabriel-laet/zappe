@@ -216,7 +216,7 @@ int Guide::shelfCount() const
 bool Guide::shelfShown(int index) const
 {
     const ShelfData *shelf = m_shelves->shelfAt(index);
-    if (!shelf)
+    if (!shelf || localMirrorStandIn(shelf))
         return false;
     if (m_page == QLatin1String("settings"))
         return false;
@@ -224,7 +224,7 @@ bool Guide::shelfShown(int index) const
         return shelf->live;
     if (m_page == QLatin1String("streaming")) {
         if (!m_mirrorService.isEmpty())
-            return shelf->skillId == QStringLiteral("mirror:") + m_mirrorService;
+            return shelf->session && shelf->skillId == QStringLiteral("mirror:") + m_mirrorService;
         return !shelf->live;
     }
     if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
@@ -387,7 +387,7 @@ void Guide::moveShelves(int dShelf, int dIndex)
 void Guide::moveDetail(int dShelf, int dIndex)
 {
     bool changed = false;
-    if (dShelf > 0 && m_detailZone == 0) {
+    if (dShelf > 0 && m_detailZone == 0 && !m_focusMirrored) {
         m_detailZone = 1;
         changed = true;
     } else if (dShelf < 0 && m_detailZone == 1) {
@@ -395,12 +395,15 @@ void Guide::moveDetail(int dShelf, int dIndex)
         changed = true;
     }
     if (dIndex != 0 && m_detailZone == 0) {
-        const int next = std::clamp(m_detailButton + dIndex, 0, 2);
+        int next = m_detailButton + dIndex;
+        if (m_focusMirrored && next == 1)
+            next += dIndex > 0 ? 1 : -1;
+        next = std::clamp(next, 0, 2);
         if (next != m_detailButton) {
             m_detailButton = next;
             changed = true;
         }
-    } else if (dIndex != 0 && m_detailZone == 1) {
+    } else if (dIndex != 0 && m_detailZone == 1 && !m_focusMirrored) {
         const int next = std::clamp(m_episode + dIndex, 0, episodeCount() - 1);
         if (next != m_episode) {
             m_episode = next;
@@ -499,6 +502,13 @@ void Guide::activate()
         emit profileRequested(currentRow()->service, QUrl::fromPercentEncoding(encoded.toUtf8()));
         return;
     }
+    if (!m_focusLive) {
+        const QString service = mirrorRowService(currentRow()->service, currentRow()->href);
+        if (!service.isEmpty()) {
+            emit serviceRequested(service);
+            return;
+        }
+    }
     if (m_focusLive) {
         pulseCard();
         emit playRequested(m_focusTitle, m_focusService, m_focusHref);
@@ -530,11 +540,12 @@ void Guide::activateDetail()
         emit playRequested(m_focusTitle, m_focusService, m_focusHref);
         return;
     }
-    if (m_detailZone == 0 && m_detailButton == 1)
-        showToast(QStringLiteral("Trailer · ") + m_focusTitle);
-    else if (m_detailZone == 0 && m_detailButton == 2)
+    if (m_detailZone == 0 && m_detailButton == 1) {
+        if (!m_focusMirrored)
+            showToast(QStringLiteral("Trailer · ") + m_focusTitle);
+    } else if (m_detailZone == 0 && m_detailButton == 2)
         toggleSaved();
-    else
+    else if (!m_focusMirrored)
         showToast(episodeTitle(m_episode));
     emit activated();
 }
@@ -628,6 +639,30 @@ void Guide::publishShelves(bool resetFocus)
     emit focusChanged();
 }
 
+bool Guide::localMirrorStandIn(const ShelfData *shelf) const
+{
+    if (!shelf || shelf->id == QLatin1String("apps") || shelf->rows.isEmpty() || m_mirrorIds.isEmpty())
+        return false;
+    if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
+        return false;
+    for (const RowData &row : shelf->rows) {
+        if (!m_mirrorIds.contains(row.service.trimmed().toLower()))
+            return false;
+    }
+    return true;
+}
+
+void Guide::setMirrorServiceIds(const QStringList &ids)
+{
+    m_mirrorIds.clear();
+    for (const QString &id : ids)
+        m_mirrorIds.insert(id.trimmed().toLower());
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    clampFocusToPage();
+    emit focusChanged();
+}
+
 void Guide::openMirror(const QString &serviceId)
 {
     if (serviceId.isEmpty())
@@ -667,6 +702,7 @@ void Guide::replaceServiceShelves(const QString &serviceId, QVector<ShelfData> s
     }
     for (ShelfData &shelf : shelves) {
         shelf.skillId = skill;
+        shelf.session = true;
         if (shelf.status.isEmpty())
             shelf.status = QStringLiteral("ok");
         kept.append(shelf);
@@ -768,6 +804,8 @@ void Guide::syncFocusFields()
         m_focusHref.clear();
         m_focusProgress = 0;
         m_focusLive = shelf && shelf->live;
+        m_focusMirrored = false;
+        m_focusSynopsis.clear();
         refreshSaved();
         return;
     }
@@ -780,6 +818,10 @@ void Guide::syncFocusFields()
     m_focusHref = row->href;
     m_focusProgress = row->progress;
     m_focusLive = row->live;
+    m_focusSynopsis = row->synopsis;
+    m_focusMirrored = !row->live
+                      && (m_mirrorIds.contains(row->service) || row->href.startsWith(QStringLiteral("http://"))
+                          || row->href.startsWith(QStringLiteral("https://")));
     refreshSaved();
 }
 

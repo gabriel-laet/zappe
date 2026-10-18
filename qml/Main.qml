@@ -24,7 +24,7 @@ Window {
         z: 1
         color: "#000000"
         opacity: guide.menuOpen ? 0.28 : 0
-        Behavior on opacity { NumberAnimation { duration: 220 } }
+        Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
     }
 
     Item {
@@ -40,26 +40,21 @@ Window {
 
         Behavior on x {
             enabled: stage.motion
-            SpringAnimation {
-                spring: 2.05
-                damping: 0.8
-                mass: 0.9
-                epsilon: 0.5
-            }
+            NumberAnimation { duration: Motion.screenMs; easing.type: Motion.ease }
         }
         Behavior on scale {
             enabled: stage.motion
-            NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Motion.screenMs; easing.type: Motion.ease }
         }
-        Behavior on opacity { NumberAnimation { duration: 220 } }
+        Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
 
         HomeView {
             anchors.fill: parent
             opacity: win.splashOn ? 0 : 1
             Behavior on opacity {
                 NumberAnimation {
-                    duration: 420
-                    easing.type: Easing.OutCubic
+                    duration: Motion.screenMs
+                    easing.type: Motion.ease
                 }
             }
         }
@@ -85,7 +80,7 @@ Window {
             anchors.topMargin: 36
             height: 64
             opacity: win.splashOn ? 0 : 1
-            Behavior on opacity { NumberAnimation { duration: 220 } }
+            Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
 
             Row {
                 anchors.verticalCenter: parent.verticalCenter
@@ -159,8 +154,8 @@ Window {
         visible: opacity > 0
         Behavior on opacity {
             NumberAnimation {
-                duration: 420
-                easing.type: Easing.OutCubic
+                duration: Motion.screenMs
+                easing.type: Motion.ease
             }
         }
     }
