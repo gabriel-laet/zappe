@@ -165,6 +165,7 @@ public:
     void closeMirror();
     void setMirrorServiceIds(const QStringList &ids);
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
+    void noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color);
 
 signals:
     void focusChanged();

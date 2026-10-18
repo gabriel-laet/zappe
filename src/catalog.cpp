@@ -362,9 +362,10 @@ void decorateCatalog(CatalogFile &catalog, const QString &dataDir, const QString
     for (ShelfData &shelf : catalog.shelves) {
         for (RowData &row : shelf.rows) {
             const QString artwork = resolveArtwork(row.artworkSpec, catalog.path, dataDir);
-            const ArtPaths art = artwork.isEmpty()
-                                     ? makePoster(cacheDir, row.title, row.serviceLabel, row.wide)
-                                     : artFromFile(cacheDir, artwork, row.title, row.serviceLabel, row.wide);
+            const ArtPaths art = !artwork.isEmpty()
+                                     ? artFromFile(cacheDir, artwork, row.title, row.serviceLabel, row.wide)
+                                     : (row.live ? makeChannelCard(cacheDir, row.title)
+                                                 : makePoster(cacheDir, row.title, row.serviceLabel, row.wide));
             row.artwork = art.artwork;
             row.ambient = art.ambient;
             row.color = art.color;

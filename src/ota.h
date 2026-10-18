@@ -2,6 +2,7 @@
 
 #include "catalog.h"
 
+#include <QDateTime>
 #include <QObject>
 #include <QProcess>
 #include <QString>
@@ -25,6 +26,10 @@ bool mpvPlaybackStarted(const QByteArray &ipcLine);
 
 QVector<OtaChannel> listOtaChannels();
 void mergeLiveChannels(CatalogFile &catalog, const QVector<OtaChannel> &channels);
+QString otaFramePath(const QString &dataDir, const QString &channel);
+bool otaFrameIsFresh(const QString &path, const QDateTime &now);
+int otaFrameIntervalMs();
+void assignOtaFrame(RowData &row, const QString &dataDir, const QDateTime &now);
 
 class OtaPlayer : public QObject {
     Q_OBJECT
@@ -39,12 +44,16 @@ signals:
     void started(const QString &channel);
     void failed(const QString &message);
     void stopped();
+    void frameReady(const QString &channel, const QString &path);
 
 private:
     void pollPicture();
+    void armFrames();
+    void captureFrame();
 
     QProcess *m_process = nullptr;
     QTimer *m_pictureTimer = nullptr;
+    QTimer *m_frameTimer = nullptr;
     QLocalSocket *m_ipc = nullptr;
     QString m_channel;
     QString m_socket;

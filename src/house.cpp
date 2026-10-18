@@ -6,6 +6,7 @@
 #include "logins.h"
 #include "mirror.h"
 #include "ota.h"
+#include "posters.h"
 #include "remote.h"
 #include "samsung.h"
 #include "voice.h"
@@ -116,6 +117,12 @@ House::House(QObject *parent)
             failLoading(message);
         else if (!m_loading)
             toast(message);
+    });
+    connect(m_ota, &OtaPlayer::frameReady, this, [this](const QString &channel, const QString &path) {
+        if (!m_guide)
+            return;
+        const ArtPaths art = artFromFile(cacheDir(), path, channel, QStringLiteral("TV aberta"), true);
+        m_guide->noteLiveFrame(QStringLiteral("zappe://ota/") + channel, art.artwork, art.ambient, art.color);
     });
     connect(m_ota, &OtaPlayer::stopped, this, [this] {
         if (!m_chrome->running())

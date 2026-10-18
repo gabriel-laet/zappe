@@ -11,6 +11,7 @@
 #include "logins.h"
 #include "mirror.h"
 #include "ota.h"
+#include "posters.h"
 #include "remote.h"
 #include "samsung.h"
 #include "util.h"
@@ -19,6 +20,8 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -133,6 +136,42 @@ int runLogicSelfCheck()
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
     if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv")))
         return fail("ota pipeline");
+    if (otaFrameIntervalMs() != 3 * 60 * 1000)
+        return fail("ota frame interval");
+    QTemporaryDir frameDir;
+    if (!frameDir.isValid())
+        return fail("ota frame dir");
+    const QString framePath = otaFramePath(frameDir.path(), QStringLiteral("Globo HD"));
+    QDir().mkpath(QFileInfo(framePath).absolutePath());
+    QImage shot(32, 18, QImage::Format_RGB32);
+    shot.fill(Qt::red);
+    if (!shot.save(framePath, "JPG"))
+        return fail("ota frame save");
+    const QDateTime frameNow = QDateTime::currentDateTime();
+    if (!otaFrameIsFresh(framePath, frameNow))
+        return fail("fresh ota frame");
+    RowData liveRow;
+    liveRow.title = QStringLiteral("Globo HD");
+    liveRow.live = true;
+    assignOtaFrame(liveRow, frameDir.path(), frameNow);
+    if (liveRow.artworkSpec != framePath)
+        return fail("ota frame assigned");
+    QFile frameFile(framePath);
+    if (!frameFile.open(QIODevice::ReadWrite))
+        return fail("ota frame touch");
+    frameFile.setFileTime(frameNow.addDays(-2), QFileDevice::FileModificationTime);
+    frameFile.close();
+    if (otaFrameIsFresh(framePath, frameNow))
+        return fail("stale ota frame");
+    const QString artDir = frameDir.filePath(QStringLiteral("art"));
+    const ArtPaths card = makeChannelCard(artDir, QStringLiteral("Globo HD"));
+    const ArtPaths poster = makePoster(artDir, QStringLiteral("Globo HD"), QStringLiteral("TV aberta"), true);
+    const QImage cardImage(card.artwork);
+    const QImage posterImage(poster.artwork);
+    if (cardImage.isNull() || cardImage.size() != QSize(960, 540) || card.artwork == poster.artwork)
+        return fail("channel card");
+    if (cardImage.pixel(80, 80) == posterImage.pixel(80, 80) && cardImage.pixel(480, 270) == posterImage.pixel(480, 270))
+        return fail("channel card matches the generic poster");
 
     if (parseVoicePtBr(QStringLiteral("abrir Netflix")).service != QLatin1String("netflix"))
         return fail("voice netflix");
