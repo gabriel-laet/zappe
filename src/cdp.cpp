@@ -83,11 +83,7 @@ QVector<PlayerKeyEvent> playerKeyEvents(const QString &action)
         key = QStringLiteral("ArrowDown");
         code = key;
         vk = 40;
-    } else if (name == QLatin1String("ok")) {
-        key = QStringLiteral("Enter");
-        code = key;
-        vk = 13;
-    } else if (name == QLatin1String("play")) {
+    } else if (name == QLatin1String("ok") || name == QLatin1String("play")) {
         key = QStringLiteral(" ");
         code = QStringLiteral("Space");
         vk = 32;
@@ -268,6 +264,31 @@ void CdpClient::getResponseBody(const QString &requestId)
     m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Network.getResponseBody"), params)));
 }
 
+void CdpClient::closeBrowser()
+{
+    if (!m_socket || !m_connected)
+        return;
+    m_pendingClose = m_nextId++;
+    m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingClose, QStringLiteral("Browser.close"), QJsonObject())));
+}
+
+void CdpClient::dispatchMouseClick(int x, int y)
+{
+    if (!m_socket || !m_connected || x <= 0 || y <= 0)
+        return;
+    const QStringList types = {QStringLiteral("mousePressed"), QStringLiteral("mouseReleased")};
+    for (const QString &type : types) {
+        QJsonObject params;
+        params.insert(QStringLiteral("type"), type);
+        params.insert(QStringLiteral("x"), x);
+        params.insert(QStringLiteral("y"), y);
+        params.insert(QStringLiteral("button"), QStringLiteral("left"));
+        params.insert(QStringLiteral("clickCount"), 1);
+        const int id = m_nextId++;
+        m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchMouseEvent"), params)));
+    }
+}
+
 void CdpClient::captureScreenshot()
 {
     if (!m_socket || !m_connected)
@@ -343,8 +364,11 @@ void CdpClient::onMessage(const QString &message)
         emit screenshotReady(png, !png.isEmpty());
         return;
     }
-    if (id == m_pendingEnable) {
-        m_pendingEnable = 0;
+    if (id == m_pendingEnable || id == m_pendingClose) {
+        if (id == m_pendingEnable)
+            m_pendingEnable = 0;
+        if (id == m_pendingClose)
+            m_pendingClose = 0;
         return;
     }
     if (obj.contains(QStringLiteral("error"))) {

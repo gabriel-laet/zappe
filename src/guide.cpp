@@ -227,7 +227,7 @@ bool Guide::shelfShown(int index) const
         return !shelf->live;
     }
     if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
-        return shelf->id.endsWith(QStringLiteral(":continue")) || shelf->id.endsWith(QStringLiteral(":profiles"));
+        return shelf->id.contains(QStringLiteral(":continue")) || shelf->id.endsWith(QStringLiteral(":profiles"));
     return true;
 }
 

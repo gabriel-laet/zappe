@@ -43,7 +43,14 @@ struct MirrorAdapter {
     QString progressSelector;
     QString profileSelector;
     QStringList continueHints;
+    QStringList extraUrls;
+    QStringList rejectHints;
+    QStringList playPaths;
+    QString playClick;
+    QString playerOk;
+    QString playerSeek;
     QVector<MirrorFeed> feeds;
+    bool playerClick = false;
     int limitRows = 12;
     int limitCards = 18;
     int version = 0;
@@ -70,7 +77,8 @@ const MirrorAdapter *findMirrorAdapter(const QVector<MirrorAdapter> &adapters, c
 
 QString mirrorExtractScript(const MirrorAdapter &adapter);
 QString mirrorDomSnapshotScript();
-QString mirrorFocusPlayerScript();
+QString mirrorFocusPlayerScript(const MirrorAdapter &adapter);
+QString mirrorTransportScript(const QString &action);
 QString mirrorSearchUrl(const MirrorAdapter &adapter, const QString &query);
 QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href);
 bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href);
@@ -105,7 +113,7 @@ public:
     void refresh(const QString &serviceId);
     void search(const QString &serviceId, const QString &query);
     void chooseProfile(const QString &serviceId, const QString &name);
-    void play(const QString &href);
+    void play(const QString &serviceId, const QString &href);
     void leavePlayer();
     void dispatchAction(const QString &action);
     void focusPlayer();
@@ -146,7 +154,10 @@ private:
     QVector<MirrorAdapter> m_adapters;
     QStringList m_queue;
     QString m_current;
+    QString m_playerService;
     QString m_pendingUrl;
+    QString m_navUrl;
+    QStringList m_extraLeft;
     QVector<CoverJob> m_covers;
     QVector<NetworkSample> m_samples;
     QHash<QString, QString> m_inflight;
@@ -163,6 +174,7 @@ private:
     bool m_askedLogin = false;
     bool m_downloading = false;
     bool m_learnPosted = false;
+    bool m_mergePage = false;
     int m_epoch = 0;
 };
 

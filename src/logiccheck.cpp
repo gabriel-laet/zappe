@@ -247,11 +247,15 @@ int runLogicSelfCheck()
 
     const ChromeLaunch chrome = chromeLaunch(dir.path());
     const QString joined = chrome.arguments.join(QLatin1Char(' '));
+    const QString playerJoined = chromeLaunch(dir.path(), ChromeFace::Player).arguments.join(QLatin1Char(' '));
     if (chrome.port != 9222 && qEnvironmentVariable("ZAPPE_CDP_PORT").isEmpty())
         return fail("cdp port");
-    if (!joined.contains(QStringLiteral("--kiosk")) || !joined.contains(QStringLiteral("--remote-debugging-port="))
+    if (chrome.face != ChromeFace::Hidden || joined.contains(QStringLiteral("--kiosk"))
+        || !joined.contains(QStringLiteral("--headless=new")) || !joined.contains(QStringLiteral("--remote-debugging-port="))
         || !joined.contains(QStringLiteral("chrome-profile")) || joined.contains(QStringLiteral("gamescope")))
         return fail("chrome args");
+    if (!playerJoined.contains(QStringLiteral("--kiosk")) || playerJoined.contains(QStringLiteral("--headless")))
+        return fail("chrome player");
     if (!cdpCommand(7, QStringLiteral("Page.navigate"), QJsonObject{{QStringLiteral("url"), QStringLiteral("https://example")}})
              .contains("Page.navigate"))
         return fail("cdp command");
@@ -294,7 +298,7 @@ int runLogicSelfCheck()
         || prime->kind != QLatin1String("generic"))
         return fail("mirror kinds");
     const QString netflixScript = mirrorExtractScript(*netflix);
-    if (!netflixScript.contains(QStringLiteral("lolomoRow")) || !netflixScript.contains(QStringLiteral("continueWatching"))
+    if (!netflixScript.contains(QStringLiteral("data-list-context")) || !netflixScript.contains(QStringLiteral("continueWatching"))
         || !netflixScript.contains(QStringLiteral("JSON.stringify")))
         return fail("netflix extract");
     if (!mirrorExtractScript(*youtube).contains(QStringLiteral("ytd-rich-shelf-renderer")))
@@ -309,8 +313,20 @@ int runLogicSelfCheck()
         != QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
         return fail("youtube watch url");
     if (!mirrorIsPlayable(*prime, QStringLiteral("https://www.primevideo.com/watch/abc"))
+        || !mirrorIsPlayable(*prime, QStringLiteral("https://www.primevideo.com/detail/0ABC"))
         || mirrorIsPlayable(*prime, prime->homeUrl))
         return fail("generic playable");
+    if (!youtube->homeUrl.contains(QStringLiteral("/feed/subscriptions")) || youtube->extraUrls.isEmpty()
+        || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
+        return fail("youtube home");
+    const MirrorAdapter *disney = findMirrorAdapter(mirrors, QStringLiteral("disney"));
+    const MirrorAdapter *globoplay = findMirrorAdapter(mirrors, QStringLiteral("globoplay"));
+    if (!disney || disney->playerSeek != QLatin1String("script") || !globoplay || !globoplay->playerClick
+        || globoplay->playerOk != QLatin1String("script") || globoplay->playerSeek != QLatin1String("script"))
+        return fail("player transport");
+    if (!mirrorFocusPlayerScript(*prime).contains(QStringLiteral("mediaKeys"))
+        || !mirrorTransportScript(QStringLiteral("right")).contains(QStringLiteral("currentTime")))
+        return fail("player video");
     if (!mirrorSearchUrl(*netflix, QStringLiteral("dark")).contains(QStringLiteral("q=dark")))
         return fail("netflix search");
     if (mirrorChromeInFront(false) || !mirrorChromeInFront(true) || mirrorRefreshMs() != 20 * 60 * 1000)
@@ -338,8 +354,23 @@ int runLogicSelfCheck()
     }
     if (!page.ok || page.profiles.size() != 1 || !continued || continued->rows.size() != 2
         || continued->rows.at(0).href != QStringLiteral("https://www.netflix.com/watch/80100172")
-        || continued->rows.at(0).progress < 0.4 || !continued->rows.at(0).wide)
+        || continued->rows.at(0).progress < 0.4         || !continued->rows.at(0).wide)
         return fail("mirror page");
+    MirrorAdapter primeFilter = *prime;
+    primeFilter.limitCards = 8;
+    const MirrorPage paid = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Home",
+        "rows": [
+          {"title": "Dark", "href": "https://www.primevideo.com/detail/DARK1", "artwork": "https://example.test/dark.jpg"},
+          {"title": "Watch with Paramount+", "href": "https://www.primevideo.com/detail/PAID", "artwork": "https://example.test/paid.jpg"}
+        ]
+      }]
+    })json"),
+                                                   primeFilter);
+    if (!mirrorPageHasTitles(paid) || paid.shelves.isEmpty() || paid.shelves.at(0).rows.size() != 1
+        || paid.shelves.at(0).rows.at(0).title != QLatin1String("Dark"))
+        return fail("prime paid filter");
     const QString coverPath = coverCachePath(dir.path(), QStringLiteral("https://example.test/dark.jpg"));
     const QDateTime now = QDateTime::currentDateTime();
     if (coverIsFresh(coverPath, now, 3600))
@@ -355,10 +386,14 @@ int runLogicSelfCheck()
             return fail("fresh cover still queued");
     }
     const QVector<PlayerKeyEvent> left = playerKeyEvents(QStringLiteral("left"));
+    const QVector<PlayerKeyEvent> okKey = playerKeyEvents(QStringLiteral("ok"));
     const QVector<PlayerKeyEvent> backKey = playerKeyEvents(QStringLiteral("back"));
     if (left.size() != 3 || left.at(0).type != QLatin1String("rawKeyDown") || left.at(1).key != QLatin1String("ArrowLeft")
         || left.at(1).virtualKey != 37)
         return fail("player left key");
+    if (okKey.size() != 3 || okKey.at(1).key != QLatin1String(" ") || okKey.at(1).code != QLatin1String("Space")
+        || okKey.at(1).virtualKey != 32)
+        return fail("player ok key");
     if (backKey.size() != 3 || backKey.at(1).key != QLatin1String("BrowserBack") || backKey.at(1).virtualKey != 166)
         return fail("player back key");
     const VoiceIntent busca = parseVoicePtBr(QStringLiteral("buscar dark na netflix"));

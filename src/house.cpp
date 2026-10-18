@@ -269,7 +269,7 @@ void House::playRequested(const QString &title, const QString &service, const QS
         }
         m_player = true;
         m_chromeOwner = QStringLiteral("mirror");
-        m_mirror->play(mirrorPlayUrl(*adapter, href));
+        m_mirror->play(adapter->id, mirrorPlayUrl(*adapter, href));
         return;
     }
     if (adapter) {
@@ -281,7 +281,7 @@ void House::playRequested(const QString &title, const QString &service, const QS
         if (href.contains(QStringLiteral("/watch")) || href.contains(QStringLiteral("watch?v="))) {
             m_player = true;
             m_chromeOwner = QStringLiteral("mirror");
-            m_mirror->play(href);
+            m_mirror->play(QString(), href);
             return;
         }
     }
@@ -427,9 +427,9 @@ void House::goBack()
 void House::leavePlayer()
 {
     m_player = false;
+    showGuide();
     m_mirror->leavePlayer();
     setPlaying(false);
-    showGuide();
 }
 
 void House::showMirror(const QString &serviceId)

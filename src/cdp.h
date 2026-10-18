@@ -45,6 +45,8 @@ public:
     void enableNetwork();
     void getResponseBody(const QString &requestId);
     void captureScreenshot();
+    void closeBrowser();
+    void dispatchMouseClick(int x, int y);
     bool connected() const { return m_connected; }
 
 signals:
@@ -73,6 +75,7 @@ private:
     int m_pendingHistory = 0;
     int m_pendingShot = 0;
     int m_pendingEnable = 0;
+    int m_pendingClose = 0;
     int m_historyStage = 0;
     QHash<int, QString> m_pendingBodies;
     bool m_connected = false;

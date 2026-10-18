@@ -10,7 +10,7 @@ O nome padrão é **Zappe**. Marca, logo e splash vêm de um arquivo na máquina
 zappe-kiosk.service   (systemd de sistema, tty1, seat0)
   └─ gamescope 1920×1080
        ├─ zappe          guia Qt Quick
-       └─ google-chrome  --kiosk --remote-debugging-port=9222
+       └─ google-chrome  --headless=new (kiosk só no Play) --remote-debugging-port=9222
             perfil ~/.local/share/zappe/chrome-profile
 ```
 
@@ -19,7 +19,7 @@ Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY`
 | Peça | Função |
 | --- | --- |
 | Guia | Qt Quick. Fileiras, ficha, menu, ajustes. |
-| Chrome | Um perfil, kiosk, porta CDP 9222. |
+| Chrome | Um perfil, porta CDP 9222. Sem janela no guia; kiosk só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
 | TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |

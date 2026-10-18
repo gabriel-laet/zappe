@@ -53,6 +53,16 @@ bool continueRow(const MirrorAdapter &adapter, const QString &title, const QStri
     return false;
 }
 
+bool titleRejected(const MirrorAdapter &adapter, const QString &title)
+{
+    const QString lower = title.toLower();
+    for (const QString &hint : adapter.rejectHints) {
+        if (!hint.isEmpty() && lower.contains(hint.toLower()))
+            return true;
+    }
+    return false;
+}
+
 QStringList readStrings(const QJsonValue &value)
 {
     QStringList out;
@@ -246,8 +256,16 @@ bool walkFeed(const QJsonValue &value, const QString &parentShelf, const MirrorA
         nested = walkFeed(it.value(), childShelf, adapter, feed, out, depth + 1) || nested;
     if (nested)
         return true;
-    const QString title = firstText(obj, feed.titleKeys);
-    const QString hrefRaw = firstToken(obj, feed.hrefKeys);
+    QJsonObject view = obj;
+    if (obj.value(QStringLiteral("attributes")).isObject()) {
+        const QJsonObject attrs = obj.value(QStringLiteral("attributes")).toObject();
+        for (auto it = attrs.constBegin(); it != attrs.constEnd(); ++it) {
+            if (!view.contains(it.key()))
+                view.insert(it.key(), it.value());
+        }
+    }
+    const QString title = firstText(view, feed.titleKeys);
+    const QString hrefRaw = firstToken(view, feed.hrefKeys);
     if (title.size() < 2 || title.size() > 140 || hrefRaw.isEmpty())
         return false;
     const QString href = applyHref(adapter, feed, hrefRaw);
@@ -256,7 +274,7 @@ bool walkFeed(const QJsonValue &value, const QString &parentShelf, const MirrorA
     FeedItem item;
     item.title = title;
     item.href = href;
-    item.artwork = firstArt(obj, feed.artworkKeys);
+    item.artwork = firstArt(view, feed.artworkKeys);
     item.shelf = parentShelf.compare(title, Qt::CaseInsensitive) == 0 ? QString() : parentShelf;
     out.append(item);
     return true;
@@ -377,6 +395,13 @@ bool mirrorReadAdapter(const QJsonObject &obj, MirrorAdapter &adapter)
     adapter.progressSelector = opt(obj, "progressSelector");
     adapter.profileSelector = opt(obj, "profileSelector");
     adapter.continueHints = readStrings(obj.value(QStringLiteral("continueHints")));
+    adapter.extraUrls = readStrings(obj.value(QStringLiteral("extraUrls")));
+    adapter.rejectHints = readStrings(obj.value(QStringLiteral("rejectHints")));
+    adapter.playPaths = readStrings(obj.value(QStringLiteral("playPaths")));
+    adapter.playClick = opt(obj, "playClick");
+    adapter.playerOk = opt(obj, "playerOk");
+    adapter.playerSeek = opt(obj, "playerSeek");
+    adapter.playerClick = obj.value(QStringLiteral("playerClick")).toBool(false);
     adapter.version = obj.value(QStringLiteral("version")).toInt(0);
     if (obj.value(QStringLiteral("limitRows")).isDouble())
         adapter.limitRows = obj.value(QStringLiteral("limitRows")).toInt(adapter.limitRows);
@@ -408,6 +433,13 @@ QByteArray mirrorAdapterJson(const MirrorAdapter &adapter)
     obj.insert(QStringLiteral("progressSelector"), adapter.progressSelector);
     obj.insert(QStringLiteral("profileSelector"), adapter.profileSelector);
     obj.insert(QStringLiteral("continueHints"), stringArray(adapter.continueHints));
+    obj.insert(QStringLiteral("extraUrls"), stringArray(adapter.extraUrls));
+    obj.insert(QStringLiteral("rejectHints"), stringArray(adapter.rejectHints));
+    obj.insert(QStringLiteral("playPaths"), stringArray(adapter.playPaths));
+    obj.insert(QStringLiteral("playClick"), adapter.playClick);
+    obj.insert(QStringLiteral("playerOk"), adapter.playerOk);
+    obj.insert(QStringLiteral("playerSeek"), adapter.playerSeek);
+    obj.insert(QStringLiteral("playerClick"), adapter.playerClick);
     QJsonArray feeds;
     for (const MirrorFeed &feed : adapter.feeds) {
         QJsonObject item;
@@ -563,12 +595,54 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
 })())js");
 }
 
-QString mirrorFocusPlayerScript()
+QString mirrorFocusPlayerScript(const MirrorAdapter &adapter)
 {
-    return QStringLiteral("(() => { const video = document.querySelector('video');"
-                          " if (video) { try { video.focus(); } catch (e) {} }"
-                          " if (document.body) { try { document.body.focus(); } catch (e) {} }"
-                          " return 'ok'; })()");
+    const QString spec = jsString(adapter.playClick);
+    const QString click = adapter.playerClick ? QStringLiteral("true") : QStringLiteral("false");
+    return QStringLiteral("(() => { const spec = ") + spec + QStringLiteral("; const wantClick = ") + click
+           + QStringLiteral(R"js(;
+  if (spec.indexOf('text:') === 0) {
+    const re = new RegExp(spec.slice(5), 'i');
+    const el = [...document.querySelectorAll('button, a, [role=button]')].find(n => re.test(((n.innerText || n.getAttribute('aria-label') || '') + '')));
+    if (el) { try { el.click(); } catch (e) {} }
+  } else if (spec) {
+    const el = document.querySelector(spec);
+    if (el) { try { el.click(); } catch (e) {} }
+  }
+  const videos = [...document.querySelectorAll('video')];
+  const score = (v) => (v.mediaKeys ? 1000000 : 0) + (v.muted ? 0 : 10000) + (v.videoWidth || 0);
+  let video = null, best = -1;
+  for (const v of videos) { const s = score(v); if (s > best) { best = s; video = v; } }
+  if (!video) return JSON.stringify({x:0,y:0,click:false});
+  try { video.focus(); } catch (e) {}
+  const r = video.getBoundingClientRect();
+  const x = Math.round(r.left + Math.max(r.width, 2) / 2);
+  const y = Math.round(r.top + Math.max(r.height, 2) / 2);
+  if (wantClick) { try { video.click(); } catch (e) {} }
+  return JSON.stringify({x:x, y:y, click:wantClick});
+})())js");
+}
+
+QString mirrorTransportScript(const QString &action)
+{
+    return QStringLiteral("(() => { const act = ") + jsString(action)
+           + QStringLiteral(R"js(;
+  const videos = [...document.querySelectorAll('video')];
+  const score = (v) => (v.mediaKeys ? 1000000 : 0) + (v.muted ? 0 : 10000) + (v.videoWidth || 0);
+  let video = null, best = -1;
+  for (const v of videos) { const s = score(v); if (s > best) { best = s; video = v; } }
+  if (!video) return 'missing';
+  try { video.focus(); } catch (e) {}
+  if (act === 'ok' || act === 'play') {
+    if (video.paused) { const p = video.play(); if (p && p.catch) p.catch(() => {}); }
+    else video.pause();
+  } else if (act === 'left') {
+    video.currentTime = Math.max(0, (video.currentTime || 0) - 10);
+  } else if (act === 'right') {
+    video.currentTime = (video.currentTime || 0) + 10;
+  }
+  return 'ok';
+})())js");
 }
 
 QString mirrorSearchUrl(const MirrorAdapter &adapter, const QString &query)
@@ -615,10 +689,16 @@ QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href)
     if (url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))
         return {};
     const QString path = url.path().toLower();
-    const bool play = path.contains(QStringLiteral("/watch")) || path.contains(QStringLiteral("/play"))
-                      || path.contains(QStringLiteral("/player")) || path.contains(QStringLiteral("/video"))
-                      || path.contains(QStringLiteral("/v/"));
-    return play ? trimmed : QString();
+    QStringList hints = adapter.playPaths;
+    if (hints.isEmpty()) {
+        hints = {QStringLiteral("/watch"), QStringLiteral("/play"), QStringLiteral("/player"), QStringLiteral("/video"),
+                 QStringLiteral("/v/")};
+    }
+    for (const QString &hint : hints) {
+        if (!hint.isEmpty() && path.contains(hint.toLower()))
+            return trimmed;
+    }
+    return QString();
 }
 
 bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href)
@@ -677,7 +757,7 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             const QJsonObject rowObj = rowValue.toObject();
             const QString href = mirrorPlayUrl(adapter, rowObj.value(QStringLiteral("href")).toString());
             QString name = rowObj.value(QStringLiteral("title")).toString().trimmed();
-            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")))
+            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")) || titleRejected(adapter, name))
                 continue;
             RowData row;
             row.title = name;
@@ -989,45 +1069,66 @@ void MirrorSession::chooseProfile(const QString &serviceId, const QString &name)
     m_cdp->evaluate(profileScript(name.trimmed()));
 }
 
-void MirrorSession::play(const QString &href)
+void MirrorSession::play(const QString &serviceId, const QString &href)
 {
     ++m_epoch;
     m_player = true;
     m_busy = true;
     m_job = JobPlay;
+    m_playerService = serviceId;
     m_pendingUrl = href;
     m_queue.clear();
     m_samples.clear();
     m_inflight.clear();
-    if (!m_cdp || !m_cdp->connected())
-        return;
-    m_cdp->navigate(href);
+    if (m_chrome)
+        m_chrome->present(m_dataDir);
 }
 
 void MirrorSession::leavePlayer()
 {
     const bool was = m_player;
+    ++m_epoch;
     m_player = false;
     m_busy = false;
     m_job = JobNone;
     m_pendingUrl.clear();
     if (was && m_cdp && m_cdp->connected())
-        m_cdp->dispatchAction(QStringLiteral("back"));
+        m_cdp->closeBrowser();
+    if (m_chrome)
+        m_chrome->relaunchHidden();
     if (!m_current.isEmpty())
         m_queue.prepend(m_current);
-    QTimer::singleShot(1200, this, &MirrorSession::pump);
 }
 
 void MirrorSession::dispatchAction(const QString &action)
 {
-    if (m_cdp)
-        m_cdp->dispatchAction(action);
+    if (!m_cdp || !m_cdp->connected())
+        return;
+    const QString name = action.trimmed().toLower();
+    if (name == QLatin1String("back"))
+        return;
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_playerService);
+    const bool scriptSeek = adapter && adapter->playerSeek == QLatin1String("script");
+    const bool scriptOk = adapter && adapter->playerOk == QLatin1String("script");
+    const bool seek = name == QLatin1String("left") || name == QLatin1String("right");
+    const bool toggle = name == QLatin1String("ok") || name == QLatin1String("play");
+    if ((seek && scriptSeek) || (toggle && scriptOk)) {
+        m_cdp->evaluate(mirrorTransportScript(name));
+        return;
+    }
+    m_cdp->dispatchAction(name == QLatin1String("ok") ? QStringLiteral("play") : name);
 }
 
 void MirrorSession::focusPlayer()
 {
-    if (m_cdp && m_cdp->connected())
-        m_cdp->evaluate(mirrorFocusPlayerScript());
+    if (!m_cdp || !m_cdp->connected())
+        return;
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_playerService);
+    if (!adapter) {
+        m_cdp->evaluate(mirrorFocusPlayerScript(MirrorAdapter()));
+        return;
+    }
+    m_cdp->evaluate(mirrorFocusPlayerScript(*adapter));
 }
 
 void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
@@ -1040,6 +1141,9 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
     }
     ++m_epoch;
     m_current = serviceId;
+    m_navUrl = url;
+    if (job == JobSearch)
+        m_extraLeft.clear();
     m_job = job;
     m_busy = true;
     m_learnPosted = false;
@@ -1056,6 +1160,8 @@ void MirrorSession::pump()
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
     if (!adapter)
         return;
+    m_extraLeft = adapter->extraUrls;
+    m_mergePage = false;
     begin(serviceId, adapter->homeUrl, JobExtract);
 }
 
@@ -1104,16 +1210,43 @@ void MirrorSession::considerExtract()
     m_cdp->evaluate(mirrorExtractScript(*adapter));
 }
 
+void tagHistoryShelves(MirrorPage &page, const QString &url, const QString &serviceId)
+{
+    if (!url.contains(QStringLiteral("/feed/history")))
+        return;
+    int index = 0;
+    for (ShelfData &shelf : page.shelves) {
+        if (shelf.id.contains(QStringLiteral(":profiles")))
+            continue;
+        shelf.id = QStringLiteral("mirror:%1:continue").arg(serviceId);
+        if (index > 0)
+            shelf.id += QStringLiteral("-") + QString::number(index);
+        for (RowData &row : shelf.rows)
+            row.wide = true;
+        ++index;
+    }
+}
+
 void MirrorSession::acceptPage(const MirrorPage &page)
 {
+    const bool extract = m_job == JobExtract;
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_current);
     if (page.needsLogin && adapter && !m_askedLogin) {
         m_askedLogin = true;
         emit needsLogin(adapter->id);
     }
+    MirrorPage tagged = page;
+    tagHistoryShelves(tagged, m_navUrl, m_current);
+    applyPage(tagged);
+    if (extract && !tagged.needsLogin && !m_extraLeft.isEmpty() && !m_player && m_cdp && m_cdp->connected()) {
+        const QString next = m_extraLeft.takeFirst();
+        m_mergePage = true;
+        begin(m_current, next, JobExtract);
+        return;
+    }
+    m_mergePage = false;
     m_busy = false;
     m_job = JobNone;
-    applyPage(page);
     QTimer::singleShot(500, this, &MirrorSession::pump);
 }
 
@@ -1288,6 +1421,18 @@ void MirrorSession::onScreenshot(const QByteArray &png, bool ok)
 
 void MirrorSession::onEvaluated(const QString &value, bool ok)
 {
+    if (m_job == JobPlay) {
+        if (!ok || !m_cdp)
+            return;
+        const QJsonObject obj = QJsonDocument::fromJson(value.toUtf8()).object();
+        if (obj.value(QStringLiteral("click")).toBool()) {
+            const int x = obj.value(QStringLiteral("x")).toInt();
+            const int y = obj.value(QStringLiteral("y")).toInt();
+            if (x > 0 && y > 0)
+                m_cdp->dispatchMouseClick(x, y);
+        }
+        return;
+    }
     if (m_job == JobProfile) {
         m_busy = false;
         m_job = JobNone;
@@ -1343,6 +1488,15 @@ void MirrorSession::applyPage(const MirrorPage &page)
     if (!adapter)
         return;
     QVector<ShelfData> shelves = page.shelves;
+    if (m_mergePage) {
+        QVector<ShelfData> prior;
+        for (const ShelfData &shelf : m_pages.value(adapter->id)) {
+            if (shelf.status == QLatin1String("ok") && !shelf.rows.isEmpty())
+                prior.append(shelf);
+        }
+        prior += shelves;
+        shelves = prior;
+    }
     if (shelves.isEmpty() && !page.needsLogin) {
         ShelfData empty;
         empty.id = QStringLiteral("mirror:%1:empty").arg(adapter->id);

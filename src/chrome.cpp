@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QTimer>
 
 #include <cstdio>
 
@@ -26,11 +27,12 @@ QString findChromeBinary()
     return {};
 }
 
-ChromeLaunch chromeLaunch(const QString &dataDir)
+ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face)
 {
     ChromeLaunch launch;
     launch.binary = findChromeBinary();
     launch.profileDir = QDir(dataDir).filePath(QStringLiteral("chrome-profile"));
+    launch.face = face;
     if (const QString port = qEnvironmentVariable("ZAPPE_CDP_PORT"); !port.isEmpty())
         launch.port = port.toInt();
     if (launch.port <= 0)
@@ -38,7 +40,6 @@ ChromeLaunch chromeLaunch(const QString &dataDir)
     launch.arguments = {QStringLiteral("--user-data-dir=") + launch.profileDir,
                         QStringLiteral("--remote-debugging-port=") + QString::number(launch.port),
                         QStringLiteral("--remote-allow-origins=*"),
-                        QStringLiteral("--kiosk"),
                         QStringLiteral("--no-first-run"),
                         QStringLiteral("--no-default-browser-check"),
                         QStringLiteral("--disable-translate"),
@@ -47,8 +48,18 @@ ChromeLaunch chromeLaunch(const QString &dataDir)
                         QStringLiteral("--disable-features=TranslateUI"),
                         QStringLiteral("--disable-background-timer-throttling"),
                         QStringLiteral("--disable-renderer-backgrounding"),
-                        QStringLiteral("--disable-backgrounding-occluded-windows"),
-                        QStringLiteral("about:blank")};
+                        QStringLiteral("--disable-backgrounding-occluded-windows")};
+    if (face == ChromeFace::Player) {
+        // Tela cheia só no Play. No gamescope, minimizar não tira a janela da frente.
+        launch.arguments.append(QStringLiteral("--kiosk"));
+        launch.arguments.append(QStringLiteral("--window-size=1920,1080"));
+    } else {
+        // Sem janela: o kiosk em about:blank ficava branco por cima do guia.
+        launch.arguments.append(QStringLiteral("--headless=new"));
+        launch.arguments.append(QStringLiteral("--window-size=1920,1080"));
+        launch.arguments.append(QStringLiteral("--mute-audio"));
+    }
+    launch.arguments.append(QStringLiteral("about:blank"));
     return launch;
 }
 
@@ -62,13 +73,11 @@ bool ChromeSession::running() const
     return m_process && m_process->state() != QProcess::NotRunning;
 }
 
-void ChromeSession::ensure(const QString &dataDir)
+void ChromeSession::startProcess()
 {
-    if (running()) {
-        emit ready();
+    if (m_dataDir.isEmpty())
         return;
-    }
-    m_launch = chromeLaunch(dataDir);
+    m_launch = chromeLaunch(m_dataDir, m_face);
     if (m_launch.binary.isEmpty()) {
         emit failed(QStringLiteral("Google Chrome não encontrado (google-chrome-stable)."));
         return;
@@ -87,11 +96,60 @@ void ChromeSession::ensure(const QString &dataDir)
             m_process = nullptr;
         process->deleteLater();
         emit exited();
+        if (!m_relaunchHidden || m_dataDir.isEmpty())
+            return;
+        m_relaunchHidden = false;
+        m_face = ChromeFace::Hidden;
+        QTimer::singleShot(250, this, [this] {
+            if (!running())
+                startProcess();
+        });
     });
-    std::fprintf(stderr, "zappe: chrome %s port %d profile %s\n", qPrintable(m_launch.binary), m_launch.port,
-                 qPrintable(m_launch.profileDir));
+    std::fprintf(stderr, "zappe: chrome %s port %d %s\n", qPrintable(m_launch.binary), m_launch.port,
+                 m_face == ChromeFace::Player ? "player" : "oculto");
     m_process = process;
     process->start();
+}
+
+void ChromeSession::ensure(const QString &dataDir)
+{
+    m_dataDir = dataDir;
+    if (running()) {
+        emit ready();
+        return;
+    }
+    m_relaunchHidden = false;
+    m_face = ChromeFace::Hidden;
+    startProcess();
+}
+
+void ChromeSession::present(const QString &dataDir)
+{
+    m_dataDir = dataDir;
+    m_relaunchHidden = false;
+    if (running() && m_face == ChromeFace::Player) {
+        emit ready();
+        return;
+    }
+    if (running())
+        stop();
+    m_face = ChromeFace::Player;
+    startProcess();
+}
+
+void ChromeSession::relaunchHidden()
+{
+    m_relaunchHidden = true;
+    if (!running()) {
+        m_relaunchHidden = false;
+        m_face = ChromeFace::Hidden;
+        startProcess();
+        return;
+    }
+    QTimer::singleShot(2000, this, [this] {
+        if (m_relaunchHidden && running())
+            stop();
+    });
 }
 
 void ChromeSession::stop()
