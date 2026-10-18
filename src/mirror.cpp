@@ -623,18 +623,626 @@ const MirrorAdapter *findMirrorAdapter(const QVector<MirrorAdapter> &adapters, c
     return nullptr;
 }
 
-QString mirrorExtractScript(const MirrorAdapter &adapter)
+QString mirrorExtractCfg(const MirrorAdapter &adapter)
 {
     QStringList hints;
     for (const QString &hint : adapter.continueHints)
         hints.append(jsString(hint));
-    const QString cfg =
-        QStringLiteral("{row:%1,title:%2,card:%3,link:%4,image:%5,progress:%6,profile:%7,hints:[%8],maxRows:%9")
-            .arg(jsString(adapter.rowSelector), jsString(adapter.rowTitleSelector), jsString(adapter.cardSelector),
-                 jsString(adapter.linkSelector), jsString(adapter.imageSelector), jsString(adapter.progressSelector),
-                 jsString(adapter.profileSelector), hints.join(QLatin1Char(',')), QString::number(adapter.limitRows))
+    return QStringLiteral("{row:%1,title:%2,card:%3,link:%4,image:%5,progress:%6,profile:%7,hints:[%8],maxRows:%9")
+               .arg(jsString(adapter.rowSelector), jsString(adapter.rowTitleSelector), jsString(adapter.cardSelector),
+                    jsString(adapter.linkSelector), jsString(adapter.imageSelector), jsString(adapter.progressSelector),
+                    jsString(adapter.profileSelector), hints.join(QLatin1Char(',')), QString::number(adapter.limitRows))
         + QStringLiteral(",maxCards:") + QString::number(adapter.limitCards) + QLatin1Char('}');
-    return QStringLiteral("(() => { const cfg = ") + cfg + QStringLiteral(R"js(;
+}
+
+QString mirrorExtractWrapped(const QString &cfg, const QString &body)
+{
+    return QStringLiteral("(() => { const cfg = ") + cfg + body;
+}
+
+QString mirrorBaselineExtractBody()
+{
+    return QStringLiteral(R"js(;
+  const abs = (href) => { try { return new URL(href, location.href).href; } catch (e) { return href || ''; } };
+  const label = (el) => {
+    if (!el) return '';
+    const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'))) || '';
+    const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
+    return (aria || text).replace(/\s+/g, ' ').trim();
+  };
+  const pickSrc = (value) => {
+    if (!value) return '';
+    const text = String(value).trim();
+    if (!text || text.indexOf('data:') === 0 || text.indexOf('blob:') === 0) return '';
+    let best = '', bestW = -1;
+    for (const part of text.split(',')) {
+      const bits = part.trim().split(/\s+/);
+      const url = bits[0] || '';
+      if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) continue;
+      const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
+      if (w >= bestW) { bestW = w; best = url; }
+    }
+    return best;
+  };
+  const bgUrl = (el) => {
+    if (!el) return '';
+    const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
+    const match = /url\((['"]?)((?:https?:)?\/\/[^'")]+)\1\)/.exec(raw);
+    return match ? match[2] : '';
+  };
+  const placeholder = (url) => {
+    const u = String(url || '').toLowerCase();
+    if (u.indexOf('.gif') < 0) return false;
+    return u.indexOf('1x1') >= 0 || u.indexOf('pixel') >= 0 || u.indexOf('spacer') >= 0;
+  };
+  const httpUrl = (value) => {
+    let url = pickSrc(value);
+    if (!url) return '';
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    if (placeholder(url)) return '';
+    return url.indexOf('http') === 0 ? url : '';
+  };
+  const collectArt = (root, nodes, depth) => {
+    if (!root || depth > 3 || nodes.length >= 8) return;
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && nodes.length < 8 && seen < 40) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try {
+        const tag = String(el.tagName || '').toLowerCase();
+        const style = (el.getAttribute && (el.getAttribute('style') || '')) || '';
+        if (tag === 'img' || tag === 'source' || style.indexOf('background') >= 0) nodes.push(el);
+      } catch (e) {}
+      try { if (el.shadowRoot) collectArt(el.shadowRoot, nodes, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 40; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+  };
+  const artIn = (root) => {
+    if (!root) return '';
+    const nodes = [];
+    collectArt(root, nodes, 0);
+    nodes.push(root);
+    for (const el of nodes) {
+      if (!el) continue;
+      const loaded = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+      if (loaded) return loaded;
+    }
+    for (const el of nodes) {
+      if (!el) continue;
+      const vals = [];
+      if (el.getAttribute) {
+        vals.push(el.getAttribute('srcset') || '');
+        vals.push(el.getAttribute('data-srcset') || '');
+        vals.push(el.getAttribute('data-src') || '');
+        vals.push(el.getAttribute('data-lazy-src') || '');
+        vals.push(el.getAttribute('data-original') || '');
+      }
+      vals.push(bgUrl(el));
+      for (const value of vals) {
+        const url = httpUrl(value);
+        if (url) return url;
+      }
+    }
+    return '';
+  };
+  const artOf = (root) => {
+    const own = artIn(root);
+    if (own) return own;
+    const tag = root && root.tagName ? String(root.tagName).toLowerCase() : '';
+    if (tag === 'a') return '';
+    const parent = root && root.parentElement;
+    if (!parent || !parent.children) return '';
+    for (const kid of parent.children) {
+      if (!kid || kid === root) continue;
+      if (kid.querySelector && kid.querySelector('a[href]')) continue;
+      const url = artIn(kid);
+      if (url) return url;
+    }
+    return '';
+  };
+  const synopsisOf = (root, title) => {
+    if (!root || !root.querySelectorAll) return '';
+    let text = '';
+    for (const el of root.querySelectorAll('p, span, div')) {
+      const cls = ((el.className && el.className.toString) ? el.className.toString() : '')
+        + ' ' + ((el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-uia') || '')) || '');
+      if (!/synopsis|description|overview|plot/i.test(cls)) continue;
+      text = label(el);
+      if (text && text !== title) break;
+      text = '';
+    }
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    if (!text || text === title) return '';
+    if (text.length > 280) text = text.slice(0, 277) + '…';
+    return text;
+  };
+  const progressOf = (el) => {
+    if (!el) return 0;
+    const now = parseFloat(el.getAttribute('aria-valuenow') || '');
+    const max = parseFloat(el.getAttribute('aria-valuemax') || '100');
+    if (!Number.isNaN(now) && max > 0) return Math.max(0, Math.min(1, now / max));
+    const w = (el.style && el.style.width) || '';
+    const m = /([\d.]+)%/.exec(w);
+    if (m) return Math.max(0, Math.min(1, parseFloat(m[1]) / 100));
+    return 0;
+  };
+  try {
+    let profiles = [];
+    if (cfg.profile) {
+      try { profiles = [...document.querySelectorAll(cfg.profile)].map(label).filter(Boolean); }
+      catch (e) { profiles = []; }
+    }
+    const shelves = [];
+    const seenRow = new Set();
+    for (const rowEl of document.querySelectorAll(cfg.row)) {
+      if (shelves.length >= cfg.maxRows) break;
+      const context = rowEl.getAttribute('data-list-context') || '';
+      const title = label(rowEl.querySelector(cfg.title)) || context;
+      const rows = [];
+      const seen = new Set();
+      for (const card of rowEl.querySelectorAll(cfg.card)) {
+        if (rows.length >= cfg.maxCards) break;
+        try {
+          const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
+          const img = card.querySelector(cfg.image);
+          const href = abs(link && link.getAttribute('href'));
+          const name = label(link) || label(img) || label(card);
+          if (!href || !name || seen.has(href)) continue;
+          seen.add(href);
+          rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+        } catch (e) {}
+      }
+      if (!rows.length) continue;
+      const key = (title || 'row') + ':' + rows[0].href;
+      if (seenRow.has(key)) continue;
+      seenRow.add(key);
+      shelves.push({title: title, context: context, rows: rows});
+    }
+    if (!shelves.length && cfg.link) {
+      const rows = [];
+      const seen = new Set();
+      for (const link of document.querySelectorAll(cfg.link)) {
+        if (rows.length >= cfg.maxCards) break;
+        if (!link || (link.matches && !link.matches('a[href]'))) continue;
+        const img = link.querySelector(cfg.image);
+        const href = abs(link.getAttribute('href'));
+        const name = label(link) || label(img);
+        if (!href || !name || seen.has(href)) continue;
+        seen.add(href);
+        let art = '';
+        try { art = artOf(link); } catch (e) { art = ''; }
+        rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
+      }
+      if (rows.length)
+        shelves.push({title: '', context: 'flatLinks', rows: rows});
+    }
+    const login = !!document.querySelector("input[type='password'], form[action*='login']");
+    return JSON.stringify({needsLogin: login && shelves.length === 0, profiles: profiles, shelves: shelves});
+  } catch (e) {
+    return JSON.stringify({needsLogin: false, profiles: [], shelves: [], error: String(e)});
+  }
+})())js");
+}
+
+QString mirrorHboExtractBody()
+{
+    return QStringLiteral(R"js(;
+  const abs = (href) => { try { return new URL(href, location.href).href; } catch (e) { return href || ''; } };
+  const label = (el) => {
+    if (!el) return '';
+    const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'))) || '';
+    const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
+    return (aria || text).replace(/\s+/g, ' ').trim();
+  };
+  const pickSrc = (value) => {
+    if (!value) return '';
+    const text = String(value).trim();
+    if (!text || text.indexOf('data:') === 0 || text.indexOf('blob:') === 0) return '';
+    let best = '', bestW = -1;
+    for (const part of text.split(',')) {
+      const bits = part.trim().split(/\s+/);
+      const url = bits[0] || '';
+      if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) continue;
+      const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
+      if (w >= bestW) { bestW = w; best = url; }
+    }
+    return best;
+  };
+  const bgUrl = (el) => {
+    if (!el) return '';
+    const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
+    const match = /url\((['"]?)((?:https?:)?\/\/[^'")]+)\1\)/.exec(raw);
+    return match ? match[2] : '';
+  };
+  const placeholder = (url) => {
+    const u = String(url || '').toLowerCase();
+    if (u.indexOf('.gif') < 0) return false;
+    return u.indexOf('1x1') >= 0 || u.indexOf('pixel') >= 0 || u.indexOf('spacer') >= 0;
+  };
+  const httpUrl = (value) => {
+    let url = pickSrc(value);
+    if (!url) return '';
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    if (placeholder(url)) return '';
+    return url.indexOf('http') === 0 ? url : '';
+  };
+  const collectArt = (root, nodes, depth) => {
+    if (!root || depth > 3 || nodes.length >= 8) return;
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && nodes.length < 8 && seen < 40) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try {
+        const tag = String(el.tagName || '').toLowerCase();
+        const style = (el.getAttribute && (el.getAttribute('style') || '')) || '';
+        if (tag === 'img' || tag === 'source' || style.indexOf('background') >= 0) nodes.push(el);
+      } catch (e) {}
+      try { if (el.shadowRoot) collectArt(el.shadowRoot, nodes, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 40; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+  };
+  const artIn = (root) => {
+    if (!root) return '';
+    const nodes = [];
+    collectArt(root, nodes, 0);
+    nodes.push(root);
+    for (const el of nodes) {
+      if (!el) continue;
+      const loaded = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+      if (loaded) return loaded;
+    }
+    for (const el of nodes) {
+      if (!el) continue;
+      const vals = [];
+      if (el.getAttribute) {
+        vals.push(el.getAttribute('srcset') || '');
+        vals.push(el.getAttribute('data-srcset') || '');
+        vals.push(el.getAttribute('data-src') || '');
+        vals.push(el.getAttribute('data-lazy-src') || '');
+        vals.push(el.getAttribute('data-original') || '');
+      }
+      vals.push(bgUrl(el));
+      for (const value of vals) {
+        const url = httpUrl(value);
+        if (url) return url;
+      }
+    }
+    return '';
+  };
+  const artOf = (root) => {
+    const own = artIn(root);
+    if (own) return own;
+    const tag = root && root.tagName ? String(root.tagName).toLowerCase() : '';
+    if (tag === 'a') return '';
+    const parent = root && root.parentElement;
+    if (!parent || !parent.children) return '';
+    for (const kid of parent.children) {
+      if (!kid || kid === root) continue;
+      if (kid.querySelector && kid.querySelector('a[href]')) continue;
+      const url = artIn(kid);
+      if (url) return url;
+    }
+    return '';
+  };
+  const synopsisOf = (root, title) => {
+    if (!root || !root.querySelectorAll) return '';
+    let text = '';
+    for (const el of root.querySelectorAll('p, span, div')) {
+      const cls = ((el.className && el.className.toString) ? el.className.toString() : '')
+        + ' ' + ((el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-uia') || '')) || '');
+      if (!/synopsis|description|overview|plot/i.test(cls)) continue;
+      text = label(el);
+      if (text && text !== title) break;
+      text = '';
+    }
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    if (!text || text === title) return '';
+    if (text.length > 280) text = text.slice(0, 277) + '…';
+    return text;
+  };
+  const progressOf = (el) => {
+    if (!el) return 0;
+    const now = parseFloat(el.getAttribute('aria-valuenow') || '');
+    const max = parseFloat(el.getAttribute('aria-valuemax') || '100');
+    if (!Number.isNaN(now) && max > 0) return Math.max(0, Math.min(1, now / max));
+    const w = (el.style && el.style.width) || '';
+    const m = /([\d.]+)%/.exec(w);
+    if (m) return Math.max(0, Math.min(1, parseFloat(m[1]) / 100));
+    return 0;
+  };
+  try {
+    let profiles = [];
+    if (cfg.profile) {
+      try { profiles = [...document.querySelectorAll(cfg.profile)].map(label).filter(Boolean); }
+      catch (e) { profiles = []; }
+    }
+    const shelves = [];
+    const seenRow = new Set();
+    for (const rowEl of document.querySelectorAll(cfg.row)) {
+      if (shelves.length >= cfg.maxRows) break;
+      const context = rowEl.getAttribute('data-list-context') || '';
+      const title = label(rowEl.querySelector(cfg.title)) || context;
+      const rows = [];
+      const seen = new Set();
+      for (const card of rowEl.querySelectorAll(cfg.card)) {
+        if (rows.length >= cfg.maxCards) break;
+        try {
+          let nestedCards = 0;
+          try { nestedCards = card.querySelectorAll(cfg.card).length; } catch (e) { nestedCards = 0; }
+          if (nestedCards >= 2) continue;
+          const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
+          const img = card.querySelector(cfg.image);
+          const href = abs(link && link.getAttribute('href'));
+          const name = label(link) || label(img) || label(card);
+          if (!href || !name || seen.has(href)) continue;
+          seen.add(href);
+          rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+        } catch (e) {}
+      }
+      if (!rows.length) continue;
+      const key = (title || 'row') + ':' + rows[0].href;
+      if (seenRow.has(key)) continue;
+      seenRow.add(key);
+      shelves.push({title: title, context: context, rows: rows});
+    }
+    if (!shelves.length && cfg.link) {
+      const rows = [];
+      const seen = new Set();
+      for (const link of document.querySelectorAll(cfg.link)) {
+        if (rows.length >= cfg.maxCards) break;
+        if (!link || (link.matches && !link.matches('a[href]'))) continue;
+        const img = link.querySelector(cfg.image);
+        const href = abs(link.getAttribute('href'));
+        const name = label(link) || label(img);
+        if (!href || !name || seen.has(href)) continue;
+        seen.add(href);
+        let art = '';
+        try { art = artOf(link); } catch (e) { art = ''; }
+        rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
+      }
+      if (rows.length)
+        shelves.push({title: '', context: 'flatLinks', rows: rows});
+    }
+    const login = !!document.querySelector("input[type='password'], form[action*='login']");
+    return JSON.stringify({needsLogin: login && shelves.length === 0, profiles: profiles, shelves: shelves});
+  } catch (e) {
+    return JSON.stringify({needsLogin: false, profiles: [], shelves: [], error: String(e)});
+  }
+})())js");
+}
+
+QString mirrorYoutubeExtractBody()
+{
+    return QStringLiteral(R"js(;
+  const abs = (href) => { try { return new URL(href, location.href).href; } catch (e) { return href || ''; } };
+  const label = (el) => {
+    if (!el) return '';
+    const aria = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('alt'))) || '';
+    const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
+    return (aria || text).replace(/\s+/g, ' ').trim();
+  };
+  const pickSrc = (value) => {
+    if (!value) return '';
+    const text = String(value).trim();
+    if (!text || text.indexOf('data:') === 0 || text.indexOf('blob:') === 0) return '';
+    let best = '', bestW = -1;
+    for (const part of text.split(',')) {
+      const bits = part.trim().split(/\s+/);
+      const url = bits[0] || '';
+      if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) continue;
+      const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
+      if (w >= bestW) { bestW = w; best = url; }
+    }
+    return best;
+  };
+  const bgUrl = (el) => {
+    if (!el) return '';
+    const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
+    const match = /url\((['"]?)((?:https?:)?\/\/[^'")]+)\1\)/.exec(raw);
+    return match ? match[2] : '';
+  };
+  const placeholder = (url) => {
+    const u = String(url || '').toLowerCase();
+    if (u.indexOf('.gif') < 0) return false;
+    return u.indexOf('1x1') >= 0 || u.indexOf('pixel') >= 0 || u.indexOf('spacer') >= 0;
+  };
+  const httpUrl = (value) => {
+    let url = pickSrc(value);
+    if (!url) return '';
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    if (placeholder(url)) return '';
+    return url.indexOf('http') === 0 ? url : '';
+  };
+  const collectArt = (root, nodes, depth) => {
+    if (!root || depth > 3 || nodes.length >= 8) return;
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && nodes.length < 8 && seen < 40) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try {
+        const tag = String(el.tagName || '').toLowerCase();
+        const style = (el.getAttribute && (el.getAttribute('style') || '')) || '';
+        if (tag === 'img' || tag === 'source' || style.indexOf('background') >= 0) nodes.push(el);
+      } catch (e) {}
+      try { if (el.shadowRoot) collectArt(el.shadowRoot, nodes, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 40; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+  };
+  const artIn = (root) => {
+    if (!root) return '';
+    const nodes = [];
+    collectArt(root, nodes, 0);
+    nodes.push(root);
+    for (const el of nodes) {
+      if (!el) continue;
+      const loaded = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+      if (loaded) return loaded;
+    }
+    for (const el of nodes) {
+      if (!el) continue;
+      const vals = [];
+      if (el.getAttribute) {
+        vals.push(el.getAttribute('srcset') || '');
+        vals.push(el.getAttribute('data-srcset') || '');
+        vals.push(el.getAttribute('data-src') || '');
+        vals.push(el.getAttribute('data-lazy-src') || '');
+        vals.push(el.getAttribute('data-original') || '');
+      }
+      vals.push(bgUrl(el));
+      for (const value of vals) {
+        const url = httpUrl(value);
+        if (url) return url;
+      }
+    }
+    return '';
+  };
+  const artOf = (root) => {
+    const own = artIn(root);
+    if (own) return own;
+    const tag = root && root.tagName ? String(root.tagName).toLowerCase() : '';
+    if (tag === 'a') return '';
+    const parent = root && root.parentElement;
+    if (!parent || !parent.children) return '';
+    for (const kid of parent.children) {
+      if (!kid || kid === root) continue;
+      if (kid.querySelector && kid.querySelector('a[href]')) continue;
+      const url = artIn(kid);
+      if (url) return url;
+    }
+    return '';
+  };
+  const synopsisOf = (root, title) => {
+    if (!root || !root.querySelectorAll) return '';
+    let text = '';
+    for (const el of root.querySelectorAll('p, span, div')) {
+      const cls = ((el.className && el.className.toString) ? el.className.toString() : '')
+        + ' ' + ((el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-uia') || '')) || '');
+      if (!/synopsis|description|overview|plot/i.test(cls)) continue;
+      text = label(el);
+      if (text && text !== title) break;
+      text = '';
+    }
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    if (!text || text === title) return '';
+    if (text.length > 280) text = text.slice(0, 277) + '…';
+    return text;
+  };
+  const progressOf = (el) => {
+    if (!el) return 0;
+    const now = parseFloat(el.getAttribute('aria-valuenow') || '');
+    const max = parseFloat(el.getAttribute('aria-valuemax') || '100');
+    if (!Number.isNaN(now) && max > 0) return Math.max(0, Math.min(1, now / max));
+    const w = (el.style && el.style.width) || '';
+    const m = /([\d.]+)%/.exec(w);
+    if (m) return Math.max(0, Math.min(1, parseFloat(m[1]) / 100));
+    return 0;
+  };
+  try {
+    let profiles = [];
+    if (cfg.profile) {
+      try { profiles = [...document.querySelectorAll(cfg.profile)].map(label).filter(Boolean); }
+      catch (e) { profiles = []; }
+    }
+    const shelves = [];
+    const seenRow = new Set();
+    for (const rowEl of document.querySelectorAll(cfg.row)) {
+      if (shelves.length >= cfg.maxRows) break;
+      const context = rowEl.getAttribute('data-list-context') || '';
+      const title = label(rowEl.querySelector(cfg.title)) || context;
+      const rows = [];
+      const seen = new Set();
+      for (const card of rowEl.querySelectorAll(cfg.card)) {
+        if (rows.length >= cfg.maxCards) break;
+        try {
+          const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
+          const img = card.querySelector(cfg.image);
+          const href = abs(link && link.getAttribute('href'));
+          const name = label(link) || label(img) || label(card);
+          if (!href || !name || seen.has(href)) continue;
+          seen.add(href);
+          rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+        } catch (e) {}
+      }
+      if (rows.length < 4) {
+        const shadowed = [];
+        const walkShadow = (node, depth) => {
+          if (!node || depth > 4 || shadowed.length >= cfg.maxCards) return;
+          try {
+            if (node.shadowRoot) {
+              const list = node.shadowRoot.querySelectorAll(cfg.card);
+              for (let i = 0; i < list.length && shadowed.length < cfg.maxCards; i++) shadowed.push(list[i]);
+              walkShadow(node.shadowRoot, depth + 1);
+            }
+          } catch (e) {}
+          try {
+            const kids = node.children || [];
+            for (let i = 0; i < kids.length && shadowed.length < cfg.maxCards; i++) walkShadow(kids[i], depth + 1);
+          } catch (e) {}
+        };
+        try { walkShadow(rowEl, 0); } catch (e) {}
+        for (const card of shadowed) {
+          if (rows.length >= cfg.maxCards) break;
+          try {
+            const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
+            const img = card.querySelector(cfg.image);
+            const href = abs(link && link.getAttribute('href'));
+            const name = label(link) || label(img) || label(card);
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+          } catch (e) {}
+        }
+      }
+      if (!rows.length) continue;
+      const key = (title || 'row') + ':' + rows[0].href;
+      if (seenRow.has(key)) continue;
+      seenRow.add(key);
+      shelves.push({title: title, context: context, rows: rows});
+    }
+    if (!shelves.length && cfg.link) {
+      const rows = [];
+      const seen = new Set();
+      for (const link of document.querySelectorAll(cfg.link)) {
+        if (rows.length >= cfg.maxCards) break;
+        if (!link || (link.matches && !link.matches('a[href]'))) continue;
+        const img = link.querySelector(cfg.image);
+        const href = abs(link.getAttribute('href'));
+        const name = label(link) || label(img);
+        if (!href || !name || seen.has(href)) continue;
+        seen.add(href);
+        let art = '';
+        try { art = artOf(link); } catch (e) { art = ''; }
+        rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
+      }
+      if (rows.length)
+        shelves.push({title: '', context: 'flatLinks', rows: rows});
+    }
+    const login = !!document.querySelector("input[type='password'], form[action*='login']");
+    return JSON.stringify({needsLogin: login && shelves.length === 0, profiles: profiles, shelves: shelves});
+  } catch (e) {
+    return JSON.stringify({needsLogin: false, profiles: [], shelves: [], error: String(e)});
+  }
+})())js");
+}
+
+QString mirrorGloboplayExtractBody()
+{
+    return QStringLiteral(R"js(;
   const abs = (href) => { try { return new URL(href, location.href).href; } catch (e) { return href || ''; } };
   const badgeOnly = (text) => {
     const n = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -648,22 +1256,17 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     if (badgeOnly(ariaClean) && text && !badgeOnly(text)) return text;
     return (ariaClean || text).replace(/\s+/g, ' ').trim();
   };
-  const errorTitle = (text) => {
-    const n = String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return n === 'só um erro' || n === 'so um erro' || n === 'something went wrong' || n === 'um erro';
-  };
   const shelfTitle = (rowEl) => {
     const pick = (root) => {
       if (!root || !root.querySelectorAll) return '';
       let nodes = [];
-      try { nodes = [...root.querySelectorAll(cfg.title || 'h2')]; } catch (e) { nodes = []; }
-      if (!nodes.length) {
-        try { nodes = [...root.querySelectorAll('h2, #title')]; } catch (e) { nodes = []; }
-      }
+      try {
+        nodes = [...root.querySelectorAll('#header #title, h2, #title-container #title, ' + (cfg.title || '#title'))];
+      } catch (e) { nodes = []; }
       for (const el of nodes) {
         try { if (cfg.card && el.closest && el.closest(cfg.card)) continue; } catch (e) {}
         const text = label(el);
-        if (text && !badgeOnly(text) && !errorTitle(text)) return text;
+        if (text && !badgeOnly(text)) return text;
       }
       return '';
     };
@@ -672,10 +1275,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
   const cardName = (card, link, img) => {
     let titled = null;
     try {
-      const root = link || card;
-      titled = root && root.querySelector && (root.querySelector('#video-title') || root.querySelector('a#video-title-link'));
-      if (!titled && card && card !== link && card.querySelector)
-        titled = card.querySelector('#video-title') || card.querySelector('a#video-title-link');
+      titled = card && card.querySelector && (card.querySelector('#video-title') || card.querySelector('a#video-title-link') || card.querySelector('h3'));
     } catch (e) { titled = null; }
     const fromTitle = label(titled);
     if (fromTitle && !badgeOnly(fromTitle)) return fromTitle;
@@ -684,14 +1284,14 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     const fromImg = label(img);
     if (fromImg && !badgeOnly(fromImg)) return fromImg;
     const fromCard = label(card);
-    if (fromCard && !badgeOnly(fromCard) && fromCard.length <= 80) return fromCard;
-    return fromLink || fromImg || fromTitle || '';
+    if (fromCard && !badgeOnly(fromCard)) return fromCard;
+    return fromTitle || fromLink || fromImg || fromCard || '';
   };
   const hrefRank = (href) => {
     const h = String(href || '');
     if (h.indexOf('/v/') >= 0 || h.indexOf('watch?v=') >= 0 || h.indexOf('/watch/') >= 0) return 3;
     if (h.indexOf('/t/') >= 0 || h.indexOf('/detail/') >= 0 || h.indexOf('/movie/') >= 0 || h.indexOf('/show/') >= 0 || h.indexOf('/episode/') >= 0) return 2;
-    if (h.indexOf('/ao-vivo') >= 0 || h.indexOf('jbv=') >= 0) return 1;
+    if (h.indexOf('/ao-vivo') >= 0) return 1;
     return 0;
   };
   const linksOf = (card) => {
@@ -699,15 +1299,10 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     const push = (el) => {
       if (!el || found.indexOf(el) >= 0) return;
       const href = el.getAttribute && el.getAttribute('href');
-      if (!href || href.indexOf('javascript:') === 0) return;
+      if (!href) return;
       found.push(el);
     };
-    let selfLink = false;
-    try { selfLink = !!(card && card.matches && card.matches('a[href]')); } catch (e) { selfLink = false; }
-    if (selfLink) {
-      push(card);
-      return found;
-    }
+    try { if (card && card.matches && card.matches('a[href]')) push(card); } catch (e) {}
     try {
       const list = card && card.querySelectorAll ? card.querySelectorAll(cfg.link || 'a[href]') : [];
       for (const el of list) push(el);
@@ -720,25 +1315,6 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     }
     found.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
     return found;
-  };
-  const wrapsCards = (el) => {
-    if (!el || !el.querySelectorAll) return false;
-    let inner = [];
-    try { inner = el.querySelectorAll(cfg.card); } catch (e) { return false; }
-    if (inner.length >= 2) return true;
-    if (!inner.length) return false;
-    let links = [];
-    try { links = el.querySelectorAll(cfg.link || 'a[href]'); } catch (e) { return false; }
-    return links.length >= 2;
-  };
-  const wrapsRows = (el) => {
-    if (!el || !el.querySelectorAll) return false;
-    let inner = [];
-    try { inner = el.querySelectorAll(cfg.row); } catch (e) { return false; }
-    for (const n of inner) {
-      try { if (n.querySelector && n.querySelector(cfg.card)) return true; } catch (e) {}
-    }
-    return false;
   };
   const pickSrc = (value) => {
     if (!value) return '';
@@ -826,49 +1402,28 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     const nodes = [];
     collectArt(root, nodes, 0);
     nodes.push(root);
-    const imgs = [];
-    const other = [];
-    const sources = [];
     for (const el of nodes) {
       if (!el) continue;
-      const tag = el.tagName ? String(el.tagName).toLowerCase() : '';
-      if (tag === 'img') imgs.push(el);
-      else if (tag === 'source' || tag === 'picture') sources.push(el);
-      else other.push(el);
+      const loaded = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+      if (loaded) return loaded;
     }
-    const loaded = (list) => {
-      for (const el of list) {
-        const url = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+    for (const el of nodes) {
+      if (!el) continue;
+      const vals = [];
+      if (el.getAttribute) {
+        vals.push(el.getAttribute('srcset') || '');
+        vals.push(el.getAttribute('data-srcset') || '');
+        vals.push(el.getAttribute('data-src') || '');
+        vals.push(el.getAttribute('data-lazy-src') || '');
+        vals.push(el.getAttribute('data-original') || '');
+      }
+      vals.push(bgUrl(el));
+      for (const value of vals) {
+        const url = httpUrl(value);
         if (url) return url;
       }
-      return '';
-    };
-    const fromImg = loaded(imgs);
-    if (fromImg) return fromImg;
-    const srcsetOf = (list) => {
-      for (const el of list) {
-        if (!el) continue;
-        const vals = [];
-        if (el.getAttribute) {
-          vals.push(el.getAttribute('srcset') || '');
-          vals.push(el.getAttribute('data-srcset') || '');
-          vals.push(el.getAttribute('data-src') || '');
-          vals.push(el.getAttribute('data-lazy-src') || '');
-          vals.push(el.getAttribute('data-original') || '');
-        }
-        vals.push(bgUrl(el));
-        for (const value of vals) {
-          const url = httpUrl(value);
-          if (url) return url;
-        }
-      }
-      return '';
-    };
-    const fromImgSet = srcsetOf(imgs);
-    if (fromImgSet) return fromImgSet;
-    const fromOther = loaded(other) || srcsetOf(other);
-    if (fromOther) return fromOther;
-    return loaded(sources) || srcsetOf(sources);
+    }
+    return '';
   };
   const artOf = (root) => {
     const own = artIn(root);
@@ -882,34 +1437,6 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
       if (kid.querySelector && kid.querySelector('a[href]')) continue;
       const url = artIn(kid);
       if (url) return url;
-    }
-    return '';
-  };
-  const artFor = (card, link, many) => {
-    if (!many) {
-      try {
-        const own = artOf(card);
-        if (own) return own;
-      } catch (e) {}
-    }
-    if (!link) return '';
-    try {
-      const onLink = artOf(link);
-      if (onLink) return onLink;
-    } catch (e) {}
-    if (!many) return '';
-    let el = link.parentElement;
-    while (el && el !== card) {
-      let count = 2;
-      try {
-        const list = el.querySelectorAll ? el.querySelectorAll('a[href]') : [];
-        count = list.length;
-      } catch (e) { count = 2; }
-      if (count <= 1) {
-        const url = artIn(el);
-        if (url) return url;
-      }
-      el = el.parentElement;
     }
     return '';
   };
@@ -947,66 +1474,17 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     }
     const shelves = [];
     const seenRow = new Set();
-    const addShadowLinks = (root, rows, seen) => {
-      if (rows.length >= 4) return;
-      const extra = [];
-      try { shadowLinks(root, 0, extra); } catch (e) {}
-      extra.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
-      for (const link of extra) {
-        if (rows.length >= cfg.maxCards) break;
-        try {
-          const href = abs(link.getAttribute('href'));
-          if (!href || hrefRank(href) <= 0) continue;
-          const name = cardName(link, link, link.querySelector && link.querySelector('img'));
-          if (!name || seen.has(href)) continue;
-          seen.add(href);
-          let art = '';
-          try { art = artOf(link); } catch (e) { art = ''; }
-          rows.push({title: name, href: href, artwork: art, synopsis: '', progress: 0});
-        } catch (e) {}
-      }
-    };
-    const pierceCards = (root) => {
-      const extra = [];
-      const walk = (node, depth) => {
-        if (!node || depth > 4 || extra.length >= cfg.maxCards) return;
-        try {
-          if (node.shadowRoot) {
-            const list = node.shadowRoot.querySelectorAll(cfg.card);
-            for (let i = 0; i < list.length && extra.length < cfg.maxCards; i++) extra.push(list[i]);
-            walk(node.shadowRoot, depth + 1);
-          }
-        } catch (e) {}
-        try {
-          const kids = node.children || [];
-          for (let i = 0; i < kids.length && extra.length < cfg.maxCards; i++) walk(kids[i], depth + 1);
-        } catch (e) {}
-      };
-      try { walk(root, 0); } catch (e) {}
-      return extra;
-    };
     for (const rowEl of document.querySelectorAll(cfg.row)) {
       if (shelves.length >= cfg.maxRows) break;
-      try { if (wrapsRows(rowEl)) continue; } catch (e) {}
       const context = rowEl.getAttribute('data-list-context') || '';
       const title = shelfTitle(rowEl) || label(rowEl.querySelector(cfg.title)) || context;
-      if (errorTitle(title) && !context) continue;
       const rows = [];
       const seen = new Set();
-      let cards = [];
-      try { cards = [...rowEl.querySelectorAll(cfg.card)]; } catch (e) { cards = []; }
-      if (cards.length < 4) {
-        for (const el of pierceCards(rowEl)) {
-          if (cards.indexOf(el) < 0) cards.push(el);
-        }
-      }
-      for (const card of cards) {
+      for (const card of rowEl.querySelectorAll(cfg.card)) {
         if (rows.length >= cfg.maxCards) break;
         try {
-          if (wrapsCards(card)) continue;
           const links = linksOf(card);
           const list = links.length ? links : [null];
-          const many = list.filter(Boolean).length > 1;
           for (const link of list) {
             if (rows.length >= cfg.maxCards) break;
             const img = (link && link.querySelector && link.querySelector(cfg.image)) || (card.querySelector && card.querySelector(cfg.image));
@@ -1015,39 +1493,38 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
             if (!href || !name || seen.has(href)) continue;
             seen.add(href);
             let art = '';
-            try { art = artFor(card, link, many); } catch (e) { art = ''; }
+            try { art = artOf(card) || (link ? artOf(link) : ''); } catch (e) { art = ''; }
             rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
           }
         } catch (e) {}
       }
-      addShadowLinks(rowEl, rows, seen);
+      if (!rows.length) {
+        const extra = [];
+        try { shadowLinks(rowEl, 0, extra); } catch (e) {}
+        extra.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
+        for (const link of extra) {
+          if (rows.length >= cfg.maxCards) break;
+          try {
+            const href = abs(link.getAttribute('href'));
+            const name = cardName(link, link, link.querySelector && link.querySelector('img'));
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            let art = '';
+            try { art = artOf(link); } catch (e) { art = ''; }
+            rows.push({title: name, href: href, artwork: art, synopsis: '', progress: 0});
+          } catch (e) {}
+        }
+      }
       if (!rows.length) continue;
       const key = (title || 'row') + ':' + rows[0].href;
       if (seenRow.has(key)) continue;
       seenRow.add(key);
       shelves.push({title: title, context: context, rows: rows});
     }
-    const titleCount = shelves.reduce((n, shelf) => n + shelf.rows.length, 0);
-    if (titleCount < 4 && cfg.link) {
+    if (!shelves.length && cfg.link) {
       const rows = [];
       const seen = new Set();
-      for (const shelf of shelves) {
-        for (const row of shelf.rows) {
-          if (row && row.href) seen.add(row.href);
-        }
-      }
-      let links = [];
-      try { links = [...document.querySelectorAll(cfg.link)]; } catch (e) { links = []; }
-      if (links.length < 4) {
-        for (const el of pierceCards(document.body || document)) {
-          try {
-            const inner = el.querySelectorAll ? el.querySelectorAll(cfg.link || 'a[href]') : [];
-            for (const link of inner) links.push(link);
-            if (el.matches && el.matches('a[href]')) links.push(el);
-          } catch (e) {}
-        }
-      }
-      for (const link of links) {
+      for (const link of document.querySelectorAll(cfg.link)) {
         if (rows.length >= cfg.maxCards) break;
         if (!link || (link.matches && !link.matches('a[href]'))) continue;
         const img = link.querySelector(cfg.image);
@@ -1059,7 +1536,21 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         try { art = artOf(link); } catch (e) { art = ''; }
         rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
       }
-      addShadowLinks(document.body || document, rows, seen);
+      if (!rows.length) {
+        const extra = [];
+        try { shadowLinks(document.body, 0, extra); } catch (e) {}
+        extra.sort((a, b) => hrefRank(b.getAttribute('href')) - hrefRank(a.getAttribute('href')));
+        for (const link of extra) {
+          if (rows.length >= cfg.maxCards) break;
+          try {
+            const href = abs(link.getAttribute('href'));
+            const name = cardName(link, link, link.querySelector && link.querySelector('img'));
+            if (!href || !name || seen.has(href)) continue;
+            seen.add(href);
+            rows.push({title: name, href: href, artwork: artOf(link), synopsis: '', progress: 0});
+          } catch (e) {}
+        }
+      }
       if (rows.length)
         shelves.push({title: '', context: 'flatLinks', rows: rows});
     }
@@ -1069,6 +1560,19 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     return JSON.stringify({needsLogin: false, profiles: [], shelves: [], error: String(e)});
   }
 })())js");
+}
+
+QString mirrorExtractScript(const MirrorAdapter &adapter)
+{
+    const QString cfg = mirrorExtractCfg(adapter);
+    const QString id = adapter.id.toLower();
+    if (id == QLatin1String("globoplay"))
+        return mirrorExtractWrapped(cfg, mirrorGloboplayExtractBody());
+    if (id == QLatin1String("hbo"))
+        return mirrorExtractWrapped(cfg, mirrorHboExtractBody());
+    if (id == QLatin1String("youtube"))
+        return mirrorExtractWrapped(cfg, mirrorYoutubeExtractBody());
+    return mirrorExtractWrapped(cfg, mirrorBaselineExtractBody());
 }
 
 QString mirrorFocusPlayerScript(const MirrorAdapter &adapter)
