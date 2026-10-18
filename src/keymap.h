@@ -29,6 +29,8 @@ enum class RemoteAction {
 };
 
 RemoteAction actionForEvdev(int code);
+// 0–9, 10 para o ponto do canal virtual (7.1). -1 se a tecla não é número.
+int dialFromEvdev(int code);
 const char *actionName(RemoteAction action);
 
 struct MapBinding {

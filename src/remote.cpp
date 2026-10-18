@@ -183,6 +183,13 @@ protected:
                 while (::read(fds[i], &event, sizeof(event)) == ssize_t(sizeof(event))) {
                     if (event.type != EV_KEY || event.value != 1)
                         continue;
+                    const int dial = dialFromEvdev(event.code);
+                    if (dial >= 0) {
+                        QMetaObject::invokeMethod(m_owner, [owner = m_owner, dial] {
+                            emit owner->dialKey(dial);
+                        }, Qt::QueuedConnection);
+                        continue;
+                    }
                     const RemoteAction action = actionForEvdev(event.code);
                     if (action == RemoteAction::Unmapped || action == RemoteAction::Ignore) {
                         if (action == RemoteAction::Ignore)

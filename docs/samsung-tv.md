@@ -5,11 +5,14 @@ O mini-PC controla a TV pela rede. Volume, mudo, força e entrada HDMI usam o De
 ```text
 ATONGX 115 / 114 / 113 / 116
   → src/samsung.cpp
-  → ws://192.168.3.6:8001/api/v2/channels/samsung.remote.control
+  → wss://192.168.3.6:8002/api/v2/channels/samsung.remote.control?name=<base64>
+  → Allow na TV, se ainda não houver token
   → KEY_VOLUP / KEY_VOLDOWN / KEY_MUTE / KEY_POWER
 ```
 
-A porta segura `wss://:8002` é a segunda tentativa. O nome no pareamento é **Zappe**. O token volta no evento `ms.channel.connect` e é gravado em `~/.local/share/zappe/samsung.json` com permissão `0600`. Não commitar esse arquivo.
+A Tizen só mostra o **Allow** no websocket seguro (`wss://<ip>:8002/...&token=`) e só enquanto o socket fica aberto. Sem token, o app abre essa URL na hora (ao subir e ao atualizar Ajustes), ignora o certificado autoassinado e espera o Allow por 45 segundos. `unauthorized` nesse socket não fecha a conexão: fechar cedo some com o pedido na TV. Um token recusado é tentado de novo uma vez, sem o token, para o Allow voltar. A porta `ws://:8001` entra se a segura não conectar. Cada passo vai para o stderr (`kiosk.log`): abertura, token presente ou não, certificado, evento, espera do Allow, tecla, arquivo gravado. O token em si não é logado.
+
+O nome no pareamento é **Zappe** (`WmFwcGU=` em base64). O token volta no evento `ms.channel.connect` e é gravado em `~/.local/share/zappe/samsung.json` com permissão `0600`. Não commitar esse arquivo.
 
 ## Configurar
 
@@ -31,7 +34,7 @@ Edite o arquivo na máquina (não no git):
 | `mac` | MAC da TV, para Wake-on-LAN. Vazio desliga o WoL. |
 | `cec` | Vazio tenta `/dev/cec0`. `off` não manda HDMI-CEC. |
 
-Na TV, aceite **Zappe** em Gerenciador de dispositivos / Device Connect. Sem isso o websocket responde `unauthorized` e o app avisa na tela.
+Na TV, aceite **Zappe** no pedido Allow (Gerenciador de dispositivos / Device Connect). Sem isso o websocket responde `unauthorized`. O app segura o socket seguro até o pedido aparecer; não fecha no primeiro `unauthorized`.
 
 O MAC está em Configurações → Rede → Status da conexão, ou no roteador. Formato `aa:bb:cc:dd:ee:ff`. Wake-on-LAN precisa estar ligado na TV (rede em standby).
 

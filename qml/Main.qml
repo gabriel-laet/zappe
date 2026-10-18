@@ -147,6 +147,40 @@ Window {
     VolumeHud {}
     Toast {}
 
+    Rectangle {
+        visible: guide.dialText.length > 0
+        z: 18
+        anchors.centerIn: parent
+        width: dialLabel.implicitWidth + 96
+        height: 168
+        radius: 28
+        color: "#E6141416"
+        border.color: guide.accent
+        border.width: 3
+        Column {
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "CANAL"
+                color: "#aeaeb2"
+                font.family: guide.uiFont
+                font.pixelSize: 18
+                font.weight: 700
+                font.letterSpacing: 2
+            }
+            Text {
+                id: dialLabel
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: guide.dialText
+                color: "#f5f5f7"
+                font.family: guide.uiFont
+                font.pixelSize: 84
+                font.weight: 600
+            }
+        }
+    }
+
     SplashView {
         anchors.fill: parent
         z: 6
@@ -293,6 +327,21 @@ Window {
                 break
             case Qt.Key_PageDown:
                 guide.move(1, 0)
+                break
+            case Qt.Key_0:
+            case Qt.Key_1:
+            case Qt.Key_2:
+            case Qt.Key_3:
+            case Qt.Key_4:
+            case Qt.Key_5:
+            case Qt.Key_6:
+            case Qt.Key_7:
+            case Qt.Key_8:
+            case Qt.Key_9:
+                house.dial(event.text)
+                break
+            case Qt.Key_Period:
+                house.dial(".")
                 break
             default:
                 event.accepted = false

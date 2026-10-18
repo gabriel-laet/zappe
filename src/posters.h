@@ -16,6 +16,12 @@ struct ArtPaths {
 ArtPaths makePoster(const QString &cacheDir, const QString &title, const QString &serviceLabel, bool wide);
 // Canal ao vivo sem frame: nome e degradê, sem o desenho genérico da capa.
 ArtPaths makeChannelCard(const QString &cacheDir, const QString &name);
+// Id estável da rede (globo, sbt, record, band, cultura, redetv, tvbrasil) ou vazio.
+QString networkMarkId(const QString &name);
+// Monograma original nas cores públicas da rede, um arquivo por rede. Vazio se a rede é desconhecida.
+ArtPaths makeNetworkLogo(const QString &cacheDir, const QString &name);
+// Logo da rede quando existe; senão o card com nome e cor.
+ArtPaths liveChannelArt(const QString &cacheDir, const QString &name);
 ArtPaths artFromFile(const QString &cacheDir, const QString &imagePath, const QString &title, const QString &serviceLabel,
                      bool wide);
 QString makeShadowSprite(const QString &cacheDir);

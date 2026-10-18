@@ -2,6 +2,7 @@
 
 #include "display.h"
 #include "mirror.h"
+#include "ota.h"
 #include "posters.h"
 #include "util.h"
 
@@ -590,6 +591,40 @@ void Guide::back()
         setPage(QStringLiteral("home"));
         return;
     }
+}
+
+void Guide::pushDial(const QString &glyph)
+{
+    const QString next = appendDialText(m_dialText, glyph);
+    if (next == m_dialText)
+        return;
+    m_dialText = next;
+    emit dialChanged();
+}
+
+void Guide::clearDial()
+{
+    if (m_dialText.isEmpty())
+        return;
+    m_dialText.clear();
+    emit dialChanged();
+}
+
+void Guide::noteLiveEpg(const QString &href, const QString &line)
+{
+    if (href.isEmpty() || line.isEmpty())
+        return;
+    bool changed = false;
+    for (ShelfData &shelf : m_baseShelves) {
+        for (RowData &row : shelf.rows) {
+            if (row.href != href)
+                continue;
+            row.synopsis = line;
+            changed = true;
+        }
+    }
+    if (changed)
+        publishShelves(false);
 }
 
 void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color)

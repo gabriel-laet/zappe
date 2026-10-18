@@ -47,6 +47,7 @@ qt_add_executable(zappe
   src/audio.cpp
   src/voice.cpp
   src/ota.cpp
+  src/epg.cpp
   src/samsung.cpp
   src/chrome.cpp
   src/cdp.cpp

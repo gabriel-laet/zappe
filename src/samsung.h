@@ -47,6 +47,13 @@ struct PowerPlan {
 
 SamsungConfig loadSamsungConfig(const QString &dataDir);
 QString samsungWebsocketUrl(const SamsungConfig &config, bool secure);
+QString samsungConnectToken(const QByteArray &message);
+bool samsungAuthDenied(const QByteArray &message);
+int samsungPairingWaitMs();
+bool samsungUpgradeToSecure(bool secure, bool denied);
+bool samsungRetryWithoutToken(bool secure, bool hadToken, bool stripped, bool denied);
+bool samsungShouldHoldPairing(bool secure, bool tokenPresent, bool denied);
+bool saveSamsungToken(const QString &dataDir, const QString &host, const QString &name, const QString &token);
 const char *tvKeyCode(TvKey key);
 QByteArray samsungKeyPayload(TvKey key);
 QString samsungUserMessage(const QString &error, const SamsungConfig &config);
@@ -71,7 +78,7 @@ class SamsungClient : public QObject {
 
 public:
     explicit SamsungClient(QObject *parent = nullptr);
-    void setDataDir(const QString &dataDir) { m_dataDir = dataDir; }
+    void setDataDir(const QString &dataDir);
 
     QString powerLabel() const;
     QString volumeLabel() const;
@@ -93,10 +100,13 @@ signals:
 private:
     void sendKey(TvKey key, bool quietPowerError);
     void sendOn(TvKey key, bool secure);
+    void ensurePaired();
+    void openSocket(TvKey key, bool secure, bool pairOnly);
     void beginProbe(bool toggle);
     void applyProbe(bool httpOk, const TvProbe &probe, bool toggle);
     void queryVolume();
-    void finishSocket(const QString &error, bool trySecure, TvKey key);
+    enum class SocketFollow { Finish, TrySecure, RetryBare };
+    void finishSocket(const QString &error, SocketFollow follow, TvKey key, bool quiet);
 
     struct Pending {
         TvKey key = TvKey::VolumeUp;
@@ -105,6 +115,8 @@ private:
 
     QString m_dataDir;
     bool m_busy = false;
+    bool m_pairing = false;
+    bool m_stripToken = false;
     bool m_quietPowerError = false;
     bool m_hasQueued = false;
     Pending m_queued;

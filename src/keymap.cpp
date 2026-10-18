@@ -46,6 +46,48 @@ RemoteAction actionForEvdev(int code)
     }
 }
 
+int dialFromEvdev(int code)
+{
+    // KEY_1..KEY_9 = 2..10, KEY_0 = 11. Numérico: 1=79, 2=80, 3=81, 4=75, 5=76, 6=77, 7=71, 8=72, 9=73, 0=82.
+    switch (code) {
+    case 11:
+    case 82:
+        return 0;
+    case 2:
+    case 79:
+        return 1;
+    case 3:
+    case 80:
+        return 2;
+    case 4:
+    case 81:
+        return 3;
+    case 5:
+    case 75:
+        return 4;
+    case 6:
+    case 76:
+        return 5;
+    case 7:
+    case 77:
+        return 6;
+    case 8:
+    case 71:
+        return 7;
+    case 9:
+    case 72:
+        return 8;
+    case 10:
+    case 73:
+        return 9;
+    case 52:
+    case 83:
+        return 10;
+    default:
+        return -1;
+    }
+}
+
 const char *actionName(RemoteAction action)
 {
     switch (action) {

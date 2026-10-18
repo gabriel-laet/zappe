@@ -24,7 +24,7 @@ Não há segundo gamescope. O gamescope ignora posição de janela e mostra o qu
 | Chrome | Um perfil, porta CDP 9222. Catálogo num Xvfb; kiosk no gamescope só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
-| TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
+| TV aberta | `channels.conf`, HD primeiro. 1-seg só fica se não houver fullseg. |
 | Controle | evdev do ATONGX. `event4` (air mouse) com grab exclusivo. |
 | Samsung | Power, volume, mudo, HDMI e estado da UN43TU7020. |
 | Voz | Whisper pt-BR, modelo base e, se não houver, tiny. |
@@ -193,6 +193,7 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Mute | 113 | Samsung |
 | Del | 14 | voltar |
 | Mic | 582 | Whisper |
+| Números | 2–11, 71–83 | sintonia (7.1, 13). O ponto é 52 ou 83 |
 
 O nó `event4` do air mouse recebe `EVIOCGRAB`. O cursor desse nó é descartado. O nó da tecla Power também: o logind não desliga o mini-PC. Detalhe em [`docs/atongx-input.md`](docs/atongx-input.md) e [`docs/samsung-tv.md`](docs/samsung-tv.md).
 
@@ -200,11 +201,17 @@ IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo se
 
 ## TV aberta
 
-Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Nomes 1Seg saem. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
+Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Um serviço 1-seg (o nome ou `ISDBT_LAYER_ENABLED = 1`, só a camada A) sai quando o mesmo canal tem fullseg. Se a Band só veio assim, ela permanece na fileira e o log diz que o fullseg não foi gravado. Sem nenhuma seção da Band, o log diz que a varredura não travou o canal físico usual, o 13. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
+
+O número virtual vem de `LOGICAL_CHANNEL_NUMBER`, `VCHANNEL` ou `LCN`, senão de um número no nome. Sem número no arquivo, os majors habituais entram: Band 13.1, Record 7.1, Globo 5.1, SBT 4.1, Cultura 2.1, RedeTV 9.1. Digitar no controle (13, ou 7.1) mostra o número na tela e sintoniza depois de pouco mais de um segundo. Voltar apaga o número antes de sair da tela.
+
+Com o canal em foco, a capa atualiza na hora. Se esse canal já está no ar, é um `screenshot-to-file` e o vídeo não para. Se outro canal está no ar, o sintonizador não é trocado. Se está livre, um `dvbv5-zap` curto grava um TS, o `ffmpeg` tira um frame e o guia continua na frente. O mesmo TS entrega o EPG: EIT presente/seguinte (e a grade, se o presente não vier) e o nome no SDT. O guia e a tela de sintonia mostram "Agora" e "A seguir".
+
+Sem frame, a capa é um monograma da rede (Globo, SBT, Record, Band, Cultura, RedeTV, TV Brasil), um arquivo por rede em cache. Rede desconhecida continua no card com o nome e o degradê.
 
 OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar.
 
-Sem um frame gravado, o card é o nome do canal num degradê, não o desenho genérico das outras capas. Enquanto o mpv já está no ar, o app pede um `screenshot-to-file` pelo socket IPC (8 segundos depois da imagem, e de novo a cada 3 minutos). O JPEG fica em `~/.local/share/zappe/ota-frames/` e vale por 12 horas. Isso não abre outro sintonizador e não pausa o vídeo. Quando o card usa esse frame, o granulado e as manchas de cor saem de cima da foto. Na próxima vez que o guia mostra o canal, a capa é esse frame.
+Sem um frame gravado, o card é o monograma da rede ou, fora dessa lista, o nome do canal num degradê, não o desenho genérico das outras capas. Enquanto o mpv já está no ar, o app pede um `screenshot-to-file` pelo socket IPC (8 segundos depois da imagem, e de novo a cada 3 minutos). O JPEG fica em `~/.local/share/zappe/ota-frames/` e vale por 12 horas. Isso não abre outro sintonizador e não pausa o vídeo. Quando o card usa esse frame, o granulado e as manchas de cor saem de cima da foto. Na próxima vez que o guia mostra o canal, a capa é esse frame.
 
 Voltar no canal fecha o mpv e devolve o guia, mesmo com o mpv em foco. O app trata Back (evdev 158) e Escape (evdev 1) como sair do canal. Enquanto o canal está no ar, o app também captura no X o keycode 166 (`XF86Back`), então `xdotool key 166` fecha o mpv mesmo com ele em foco. O `input.conf` do mpv usa `BACK` e `GO_BACK` (o nome que o mpv dá a essa tecla; `XF86Back` ele ignora) e o keycode `0x21FF26`. Quando o processo termina, o guia volta para a frente.
 

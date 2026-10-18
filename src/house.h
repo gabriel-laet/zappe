@@ -63,6 +63,7 @@ public:
     Q_INVOKABLE void goBack();
     Q_INVOKABLE void cancelLoading();
     Q_INVOKABLE void retryLoading();
+    Q_INVOKABLE void dial(const QString &glyph);
     QObject *tv() const;
 
     static constexpr int loadingTimeoutMs = 10000;
@@ -70,6 +71,7 @@ public:
 public slots:
     void playRequested(const QString &title, const QString &service, const QString &href);
     void onRemote(int remoteAction);
+    void onDial(int value);
 
 signals:
     void changed();
@@ -98,6 +100,9 @@ private:
     void updateKeyHold();
     bool chromeFocused() const;
     void forwardChromeKey(RemoteAction action);
+    void commitDial();
+    void refreshFocusedArt();
+    void applyEpg(const QString &channel, const QString &nowTitle, const QString &nextTitle);
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -140,7 +145,11 @@ private:
     QString m_retryHref;
     QString m_chromeOwner;
     class QTimer *m_loadTimer = nullptr;
+    class QTimer *m_dialTimer = nullptr;
+    class QTimer *m_focusTimer = nullptr;
     qint64 m_lastBack = 0;
+    QString m_refreshTitle;
+    qint64 m_refreshAt = 0;
 };
 
 } // namespace zappe

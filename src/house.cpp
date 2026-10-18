@@ -5,6 +5,7 @@
 #include "guide.h"
 #include "logins.h"
 #include "mirror.h"
+#include "epg.h"
 #include "ota.h"
 #include "posters.h"
 #include "remote.h"
@@ -126,6 +127,10 @@ House::House(QObject *parent)
             return;
         const ArtPaths art = artFromFile(cacheDir(), path, channel, QStringLiteral("TV aberta"), true);
         m_guide->noteLiveFrame(QStringLiteral("zappe://ota/") + channel, art.artwork, art.ambient, art.color);
+        if (m_loading && m_loadingKind == QLatin1String("ota") && m_loadingTitle == channel) {
+            m_loadingArt = art.artwork;
+            emit changed();
+        }
     });
     connect(m_ota, &OtaPlayer::stopped, this, [this] {
         if (m_player && m_chrome->running())
@@ -162,6 +167,8 @@ House::House(QObject *parent)
         handleVoice(transcript);
     });
     connect(m_remote, &RemoteWatcher::action, this, &House::onRemote);
+    connect(m_remote, &RemoteWatcher::dialKey, this, &House::onDial);
+    connect(m_ota, &OtaPlayer::epgReady, this, &House::applyEpg);
     connect(m_chrome, &ChromeSession::exited, this, [this] { updateKeyHold(); });
     connect(m_mirror, &MirrorSession::playerReady, this, [this] {
         if (!m_player || m_loadingFailed)
@@ -194,6 +201,15 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
     m_window = window;
     m_dataDir = dataDir;
     m_samsung->setDataDir(dataDir);
+    connect(m_guide, &Guide::focusChanged, this, [this] {
+        if (!m_focusTimer) {
+            m_focusTimer = new QTimer(this);
+            m_focusTimer->setSingleShot(true);
+            m_focusTimer->setInterval(otaFocusRefreshMs());
+            connect(m_focusTimer, &QTimer::timeout, this, &House::refreshFocusedArt);
+        }
+        m_focusTimer->start();
+    });
     connect(m_guide, &Guide::settingsCommand, this, &House::onSettings);
     connect(m_guide, &Guide::pageChanged, this, [this] {
         if (m_guide && m_guide->page() == QLatin1String("settings"))
@@ -278,7 +294,15 @@ void House::playRequested(const QString &title, const QString &service, const QS
     m_retryService = service;
     m_retryHref = href;
     const bool ota = service == QLatin1String("ota") || href.startsWith(QStringLiteral("zappe://ota/"));
+    const QString epgStatus = ota && m_guide && m_guide->focusTitle() == title
+                                      && m_guide->focusSynopsis().startsWith(QStringLiteral("Agora:"))
+                                  ? m_guide->focusSynopsis()
+                                  : QString();
     beginLoading(title, m_guide ? m_guide->focusArtwork() : QString(), ota ? QStringLiteral("ota") : QStringLiteral("chrome"));
+    if (!epgStatus.isEmpty()) {
+        m_loadingStatus = epgStatus;
+        emit changed();
+    }
     if (ota) {
         const QString query = href.startsWith(QStringLiteral("zappe://ota/")) ? href.mid(12) : title;
         playOta(query);
@@ -422,6 +446,14 @@ void House::goBack()
     if (now - m_lastBack < 150)
         return;
     m_lastBack = now;
+    if (m_guide && !m_guide->dialText().isEmpty()) {
+        m_guide->clearDial();
+        if (m_dialTimer)
+            m_dialTimer->stop();
+        if (m_ota->playing())
+            hideGuide();
+        return;
+    }
     if (m_loading) {
         cancelLoading();
         return;
@@ -669,6 +701,82 @@ bool House::take(RemoteAction action)
     m_lastAction = int(action);
     m_lastRemote = now;
     return true;
+}
+
+void House::dial(const QString &glyph)
+{
+    if (m_promptOpen || chromeFocused() || !m_guide)
+        return;
+    m_guide->pushDial(glyph);
+    if (m_guide->dialText().isEmpty())
+        return;
+    if (m_ota->playing())
+        showGuide();
+    if (!m_dialTimer) {
+        m_dialTimer = new QTimer(this);
+        m_dialTimer->setSingleShot(true);
+        connect(m_dialTimer, &QTimer::timeout, this, &House::commitDial);
+    }
+    m_dialTimer->start(dialCommitMs());
+}
+
+void House::onDial(int value)
+{
+    if (value == 10)
+        dial(QStringLiteral("."));
+    else if (value >= 0 && value <= 9)
+        dial(QString::number(value));
+}
+
+void House::commitDial()
+{
+    if (!m_guide)
+        return;
+    QString typed = m_guide->dialText().trimmed();
+    m_guide->clearDial();
+    if (typed.endsWith(QLatin1Char('.')))
+        typed.chop(1);
+    if (typed.isEmpty())
+        return;
+    const QVector<OtaChannel> channels = listOtaChannels();
+    if (channels.isEmpty()) {
+        toast(QStringLiteral("channels.conf não encontrado."));
+        return;
+    }
+    const QString name = resolveDialTarget(typed, channels);
+    if (name.isEmpty()) {
+        toast(QStringLiteral("Canal %1 não está na varredura").arg(typed));
+        return;
+    }
+    playRequested(name, QStringLiteral("ota"), QStringLiteral("zappe://ota/") + name);
+}
+
+void House::refreshFocusedArt()
+{
+    if (!m_guide || !m_guide->focusLive() || m_guide->page() != QLatin1String("home"))
+        return;
+    const QString title = m_guide->focusTitle();
+    if (title.isEmpty())
+        return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (title == m_refreshTitle && now - m_refreshAt < 20000)
+        return;
+    m_refreshTitle = title;
+    m_refreshAt = now;
+    m_ota->refreshFocused(title);
+}
+
+void House::applyEpg(const QString &channel, const QString &nowTitle, const QString &nextTitle)
+{
+    const QString line = epgGuideLine(nowTitle, nextTitle);
+    if (line.isEmpty())
+        return;
+    if (m_guide)
+        m_guide->noteLiveEpg(QStringLiteral("zappe://ota/") + channel, line);
+    if (m_loading && m_loadingKind == QLatin1String("ota") && m_loadingTitle == channel) {
+        m_loadingStatus = line;
+        emit changed();
+    }
 }
 
 void House::onRemote(int remoteAction)

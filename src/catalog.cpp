@@ -367,7 +367,7 @@ void decorateCatalog(CatalogFile &catalog, const QString &dataDir, const QString
             const QString artwork = resolveArtwork(row.artworkSpec, catalog.path, dataDir);
             const ArtPaths art = !artwork.isEmpty()
                                      ? artFromFile(cacheDir, artwork, row.title, row.serviceLabel, row.wide)
-                                     : (row.live ? makeChannelCard(cacheDir, row.title)
+                                     : (row.live ? liveChannelArt(cacheDir, row.title)
                                                  : makePoster(cacheDir, row.title, row.serviceLabel, row.wide));
             row.artwork = art.artwork;
             row.ambient = art.ambient;

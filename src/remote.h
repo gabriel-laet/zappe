@@ -19,6 +19,8 @@ public:
 
 signals:
     void action(int remoteAction);
+    // 0–9 ou 10 para o ponto. O nó exclusivo ainda entrega o número.
+    void dialKey(int value);
 
 private:
     class Worker;

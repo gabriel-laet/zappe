@@ -1,6 +1,8 @@
 #include "ota.h"
 
 #include "branding.h"
+#include "epg.h"
+#include "posters.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -16,6 +18,7 @@
 #include <QTimer>
 
 #include <algorithm>
+#include <cstdio>
 
 namespace zappe {
 namespace {
@@ -81,6 +84,11 @@ bool is1Seg(const QString &name)
 QString channelBaseKey(QString name)
 {
     QString folded = foldName(name);
+    folded.replace(QStringLiteral("1-seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("one seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("1seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("oneseg"), QStringLiteral(" "));
+    folded = folded.simplified();
     const QStringList tokens = {QStringLiteral(" hdtv"), QStringLiteral(" hd"),  QStringLiteral(" fhd"),
                                 QStringLiteral(" sd"),   QStringLiteral(" uhd"), QStringLiteral(" 4k"),
                                 QStringLiteral(" (hd)"), QStringLiteral(" [hd]")};
@@ -107,6 +115,86 @@ int hdScore(const QString &name)
     if (folded.contains(QStringLiteral(" sd")))
         return 3;
     return 2;
+}
+
+QString numberInName(const QString &name)
+{
+    QString folded = foldName(name);
+    folded.replace(QStringLiteral("1-seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("one seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("1seg"), QStringLiteral(" "));
+    folded.replace(QStringLiteral("oneseg"), QStringLiteral(" "));
+    folded = folded.simplified();
+    static const QRegularExpression re(QStringLiteral("(?:^|\\D)(\\d{1,3}(?:\\.\\d)?)(?:\\D|$)"));
+    const QRegularExpressionMatch match = re.match(folded);
+    if (!match.hasMatch())
+        return {};
+    return match.captured(1);
+}
+
+struct VirtualChannel {
+    int major = 0;
+    int minor = -1;
+    bool ok = false;
+};
+
+VirtualChannel parseVirtualChannel(const QString &text)
+{
+    const QString trimmed = text.trimmed();
+    static const QRegularExpression re(QStringLiteral("^(\\d{1,3})(?:\\.(\\d))?$"));
+    const QRegularExpressionMatch match = re.match(trimmed);
+    VirtualChannel channel;
+    if (!match.hasMatch())
+        return channel;
+    channel.major = match.captured(1).toInt();
+    if (channel.major <= 0 || channel.major > 999)
+        return {};
+    channel.ok = true;
+    if (match.lastCapturedIndex() >= 2 && !match.captured(2).isEmpty())
+        channel.minor = match.captured(2).toInt();
+    return channel;
+}
+
+QString formatVirtualChannel(const VirtualChannel &channel)
+{
+    if (!channel.ok)
+        return {};
+    if (channel.minor < 0)
+        return QString::number(channel.major);
+    return QStringLiteral("%1.%2").arg(channel.major).arg(channel.minor);
+}
+
+VirtualChannel defaultVirtualChannel(const QString &name)
+{
+    const QString id = networkMarkId(name);
+    VirtualChannel channel;
+    channel.ok = true;
+    channel.minor = 1;
+    if (id == QLatin1String("band"))
+        channel.major = 13;
+    else if (id == QLatin1String("record"))
+        channel.major = 7;
+    else if (id == QLatin1String("globo"))
+        channel.major = 5;
+    else if (id == QLatin1String("sbt"))
+        channel.major = 4;
+    else if (id == QLatin1String("cultura"))
+        channel.major = 2;
+    else if (id == QLatin1String("redetv"))
+        channel.major = 9;
+    else
+        return {};
+    return channel;
+}
+
+QString assignedNumber(const OtaService &service)
+{
+    if (!service.number.isEmpty()) {
+        const VirtualChannel parsed = parseVirtualChannel(service.number);
+        if (parsed.ok)
+            return formatVirtualChannel(parsed);
+    }
+    return formatVirtualChannel(defaultVirtualChannel(service.name));
 }
 
 int scoreHit(const QString &key, const QString &folded, const QString &reqKey, const QString &reqFold)
@@ -155,54 +243,111 @@ QStringList channelConfigPaths()
 
 } // namespace
 
-QStringList parseChannelNames(const QString &text)
+QVector<OtaService> parseOtaServices(const QString &text)
 {
-    QStringList names;
+    QVector<OtaService> out;
+    OtaService current;
+    bool inSection = false;
+    const auto flush = [&] {
+        if (!inSection || current.name.trimmed().isEmpty())
+            return;
+        if (current.layer == 1 || is1Seg(current.name))
+            current.oneSeg = true;
+        if (current.number.isEmpty())
+            current.number = numberInName(current.name);
+        out.append(current);
+        current = {};
+        inSection = false;
+    };
     for (const QString &raw : text.split(QLatin1Char('\n'))) {
         const QString line = raw.trimmed();
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
             continue;
         if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']')) && line.size() > 2) {
-            names.append(line.mid(1, line.size() - 2).trimmed());
+            flush();
+            current.name = line.mid(1, line.size() - 2).trimmed();
+            inSection = true;
             continue;
         }
-        const int colon = line.indexOf(QLatin1Char(':'));
-        if (colon > 0) {
-            const QString name = line.left(colon).trimmed();
-            if (!name.isEmpty() && !name.startsWith(QLatin1Char('[')))
-                names.append(name);
+        if (!inSection) {
+            const int colon = line.indexOf(QLatin1Char(':'));
+            if (colon > 0) {
+                const QString name = line.left(colon).trimmed();
+                if (!name.isEmpty() && !name.startsWith(QLatin1Char('['))) {
+                    OtaService legacy;
+                    legacy.name = name;
+                    if (is1Seg(name))
+                        legacy.oneSeg = true;
+                    legacy.number = numberInName(name);
+                    out.append(legacy);
+                }
+            }
+            continue;
+        }
+        const int eq = line.indexOf(QLatin1Char('='));
+        if (eq <= 0)
+            continue;
+        const QString key = line.left(eq).trimmed().toUpper();
+        const QString value = line.mid(eq + 1).trimmed();
+        if (key == QLatin1String("LOGICAL_CHANNEL_NUMBER") || key == QLatin1String("VCHANNEL")
+            || key == QLatin1String("LCN")) {
+            if (!value.isEmpty())
+                current.number = value;
+        } else if (key == QLatin1String("ISDBT_LAYER_ENABLED")) {
+            current.layer = value.toInt();
         }
     }
+    flush();
+    return out;
+}
+
+QStringList parseChannelNames(const QString &text)
+{
+    QStringList names;
+    for (const OtaService &service : parseOtaServices(text))
+        names.append(service.name);
     return names;
 }
 
-QStringList filterAndSortChannels(QStringList names)
+QStringList playableNames(const QVector<OtaService> &services)
 {
-    QStringList filtered;
-    for (const QString &name : names) {
-        if (!is1Seg(name))
-            filtered.append(name);
-    }
-    std::sort(filtered.begin(), filtered.end(), [](const QString &a, const QString &b) {
-        const int score = hdScore(a) - hdScore(b);
-        if (score != 0)
-            return score < 0;
-        return foldName(a) < foldName(b);
-    });
-    QHash<QString, QString> seen;
-    QStringList order;
-    for (const QString &name : filtered) {
-        const QString key = channelBaseKey(name);
-        if (!seen.contains(key)) {
-            seen.insert(key, name);
-            order.append(key);
-        } else if (hdScore(name) < hdScore(seen.value(key))) {
-            seen.insert(key, name);
+    struct Group {
+        QVector<OtaService> items;
+    };
+    QVector<Group> groups;
+    QHash<QString, int> index;
+    for (const OtaService &service : services) {
+        if (service.name.trimmed().isEmpty())
+            continue;
+        const QString key = channelBaseKey(service.name);
+        if (!index.contains(key)) {
+            index.insert(key, groups.size());
+            groups.append(Group{});
         }
+        groups[index.value(key)].items.append(service);
     }
     QStringList out;
-    for (const QString &key : order)
-        out.append(seen.value(key));
+    for (const Group &group : groups) {
+        bool full = false;
+        for (const OtaService &item : group.items) {
+            if (!item.oneSeg)
+                full = true;
+        }
+        bool have = false;
+        OtaService best;
+        for (const OtaService &item : group.items) {
+            if (full && item.oneSeg)
+                continue;
+            const bool better = !have || hdScore(item.name) < hdScore(best.name)
+                                || (hdScore(item.name) == hdScore(best.name) && foldName(item.name) < foldName(best.name));
+            if (better) {
+                best = item;
+                have = true;
+            }
+        }
+        if (have)
+            out.append(best.name);
+    }
     std::sort(out.begin(), out.end(), [](const QString &a, const QString &b) {
         const int score = hdScore(a) - hdScore(b);
         if (score != 0)
@@ -210,6 +355,141 @@ QStringList filterAndSortChannels(QStringList names)
         return foldName(a) < foldName(b);
     });
     return out;
+}
+
+QStringList filterAndSortChannels(QStringList names)
+{
+    QVector<OtaService> services;
+    services.reserve(names.size());
+    for (const QString &name : names) {
+        OtaService service;
+        service.name = name;
+        service.oneSeg = is1Seg(name);
+        services.append(service);
+    }
+    return playableNames(services);
+}
+
+QString fullsegGapReason(const QVector<OtaService> &services, const QString &networkId)
+{
+    if (networkId != QLatin1String("band"))
+        return {};
+    QVector<OtaService> hits;
+    for (const OtaService &service : services) {
+        if (networkMarkId(service.name) == networkId)
+            hits.append(service);
+    }
+    if (hits.isEmpty()) {
+        return QStringLiteral(
+            "A varredura não gravou a Band. O dvbv5 costuma travar na camada A (1-seg) ou o nome do SDT não contém Band; o canal físico usual é o 13.");
+    }
+    bool full = false;
+    for (const OtaService &service : hits) {
+        if (!service.oneSeg)
+            full = true;
+    }
+    if (full)
+        return {};
+    return QStringLiteral(
+        "A Band entrou só como 1-seg (camada A ou o nome traz 1seg). O fullseg não foi gravado; o canal continua na lista por essa versão.");
+}
+
+QVector<OtaChannel> otaChannelsFromConf(const QString &text)
+{
+    const QVector<OtaService> services = parseOtaServices(text);
+    QHash<QString, OtaService> byName;
+    for (const OtaService &service : services)
+        byName.insert(service.name, service);
+    QVector<OtaChannel> out;
+    for (const QString &name : playableNames(services)) {
+        const OtaService service = byName.value(name);
+        OtaChannel channel;
+        channel.name = name;
+        channel.number = assignedNumber(service);
+        channel.oneSeg = service.oneSeg;
+        out.append(channel);
+    }
+    return out;
+}
+
+QString resolveDialTarget(const QString &typed, const QVector<OtaChannel> &channels)
+{
+    const VirtualChannel want = parseVirtualChannel(typed);
+    if (!want.ok)
+        return {};
+    struct Hit {
+        QString name;
+        int rank = 9;
+        int quality = 9;
+        bool oneSeg = false;
+        QString folded;
+    };
+    QVector<Hit> hits;
+    for (const OtaChannel &channel : channels) {
+        const VirtualChannel have = parseVirtualChannel(channel.number);
+        if (!have.ok || have.major != want.major)
+            continue;
+        int rank = 9;
+        if (want.minor < 0)
+            rank = (have.minor == 1 || have.minor < 0) ? 0 : 1;
+        else if (have.minor == want.minor)
+            rank = 0;
+        else if (have.minor < 0 && want.minor == 1)
+            rank = 1;
+        else
+            continue;
+        Hit hit;
+        hit.name = channel.name;
+        hit.rank = rank;
+        hit.quality = hdScore(channel.name);
+        hit.oneSeg = channel.oneSeg;
+        hit.folded = foldName(channel.name);
+        hits.append(hit);
+    }
+    if (hits.isEmpty())
+        return {};
+    std::sort(hits.begin(), hits.end(), [](const Hit &a, const Hit &b) {
+        if (a.rank != b.rank)
+            return a.rank < b.rank;
+        if (a.oneSeg != b.oneSeg)
+            return !a.oneSeg;
+        if (a.quality != b.quality)
+            return a.quality < b.quality;
+        if (a.folded.size() != b.folded.size())
+            return a.folded.size() < b.folded.size();
+        return a.folded < b.folded;
+    });
+    return hits.first().name;
+}
+
+QString appendDialText(const QString &current, const QString &glyph)
+{
+    if (glyph == QLatin1String(".")) {
+        if (current.isEmpty() || current.contains(QLatin1Char('.')))
+            return current;
+        return current + glyph;
+    }
+    if (glyph.size() != 1 || !glyph.at(0).isDigit())
+        return current;
+    const int dot = current.indexOf(QLatin1Char('.'));
+    if (dot < 0) {
+        if (current.size() >= 3)
+            return current;
+        return current + glyph;
+    }
+    if (current.size() - dot - 1 >= 1)
+        return current;
+    return current + glyph;
+}
+
+int dialCommitMs()
+{
+    return 1300;
+}
+
+int otaFocusRefreshMs()
+{
+    return 450;
 }
 
 QString resolveChannelName(const QString &requested, const QStringList &names)
@@ -285,16 +565,55 @@ QString otaPipelineScript(const QString &conf, const QString &channel)
     return QStringLiteral("exec setsid sh -c %1").arg(shellQuote(run));
 }
 
+QString otaPreviewScript(const QString &conf, const QString &channel, const QString &tsPath, const QString &jpgPath)
+{
+    // Sem mpv e sem tela cheia: o guia continua na frente. -t solta o sintonizador.
+    const QString run = QStringLiteral("set -o pipefail; dvbv5-zap -a 0 -c %1 -p %2 -r -t 8 -o %3; "
+                                       "ffmpeg -y -i %3 -frames:v 1 -q:v 3 %4")
+                            .arg(shellQuote(conf), shellQuote(channel), shellQuote(tsPath), shellQuote(jpgPath));
+    return QStringLiteral("sh -c %1").arg(shellQuote(run));
+}
+
+FrameRefresh planFrameRefresh(bool playing, const QString &playingChannel, const QString &focused)
+{
+    if (playing && playingChannel == focused)
+        return FrameRefresh::Screenshot;
+    if (playing)
+        return FrameRefresh::Busy;
+    return FrameRefresh::Preview;
+}
+
 QVector<OtaChannel> listOtaChannels()
 {
     QVector<OtaChannel> out;
+    static QString logged;
     for (const QString &path : channelConfigPaths()) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly))
             continue;
-        const QStringList names = filterAndSortChannels(parseChannelNames(QString::fromUtf8(file.readAll())));
-        for (const QString &name : names)
-            out.append({name, path});
+        const QString text = QString::fromUtf8(file.readAll());
+        const QVector<OtaService> services = parseOtaServices(text);
+        QVector<OtaChannel> channels = otaChannelsFromConf(text);
+        for (OtaChannel &channel : channels)
+            channel.source = path;
+        const QString stamp = path + QStringLiteral(":") + QString::number(services.size()) + QStringLiteral(":")
+                              + QString::number(channels.size());
+        if (logged != stamp) {
+            logged = stamp;
+            for (const OtaService &service : services) {
+                bool kept = false;
+                for (const OtaChannel &channel : channels) {
+                    if (channel.name == service.name)
+                        kept = true;
+                }
+                std::fprintf(stderr, "zappe: ota: %s %s%s\n", kept ? "fica" : "sai", qPrintable(service.name),
+                             service.oneSeg ? " (1-seg)" : "");
+            }
+            const QString band = fullsegGapReason(services, QStringLiteral("band"));
+            if (!band.isEmpty())
+                std::fprintf(stderr, "zappe: ota: %s\n", qPrintable(band));
+        }
+        out += channels;
     }
     return out;
 }
@@ -327,6 +646,8 @@ void mergeLiveChannels(CatalogFile &catalog, const QVector<OtaChannel> &channels
         row.href = QStringLiteral("zappe://ota/") + channel.name;
         row.live = true;
         row.wide = true;
+        if (!channel.number.isEmpty())
+            row.synopsis = QStringLiteral("Canal %1").arg(channel.number);
         assignOtaFrame(row, resolveDataDir(), QDateTime::currentDateTime());
         live->rows.append(row);
     }
@@ -382,8 +703,23 @@ void signalPipeline(qint64 pid, const QString &sig)
 
 } // namespace
 
+void OtaPlayer::stopPreview()
+{
+    QProcess *process = m_preview;
+    m_preview = nullptr;
+    m_previewChannel.clear();
+    if (!process)
+        return;
+    const qint64 pid = process->processId();
+    signalPipeline(pid, QStringLiteral("-TERM"));
+    process->kill();
+    process->waitForFinished(200);
+    process->deleteLater();
+}
+
 void OtaPlayer::stop()
 {
+    stopPreview();
     m_userStop = true;
     if (m_pictureTimer)
         m_pictureTimer->stop();
@@ -575,6 +911,94 @@ void OtaPlayer::captureFrame()
         sock->deleteLater();
     });
     sock->connectToServer(m_socket);
+}
+
+void OtaPlayer::refreshFocused(const QString &requested)
+{
+    const QVector<OtaChannel> channels = listOtaChannels();
+    if (channels.isEmpty())
+        return;
+    QStringList names;
+    QString conf;
+    for (const OtaChannel &channel : channels) {
+        names.append(channel.name);
+        if (conf.isEmpty())
+            conf = channel.source;
+    }
+    const QString resolved = resolveChannelName(requested, names);
+    if (resolved.isEmpty())
+        return;
+    for (const OtaChannel &channel : channels) {
+        if (channel.name == resolved && !channel.source.isEmpty()) {
+            conf = channel.source;
+            break;
+        }
+    }
+    const FrameRefresh plan = planFrameRefresh(m_process != nullptr, m_channel, resolved);
+    if (plan == FrameRefresh::Busy) {
+        std::fprintf(stderr, "zappe: ota: sintonizador em \"%s\"; não interrompe para atualizar \"%s\"\n",
+                     qPrintable(m_channel), qPrintable(resolved));
+        return;
+    }
+    if (plan == FrameRefresh::Screenshot) {
+        std::fprintf(stderr, "zappe: ota: capa de \"%s\" no canal que já está no ar\n", qPrintable(resolved));
+        captureFrame();
+        return;
+    }
+    if (m_preview && m_previewChannel == resolved)
+        return;
+    stopPreview();
+    if (!QFile::exists(QStringLiteral("/dev/dvb/adapter0")) && !QFile::exists(QStringLiteral("/dev/dvb/adapter0/frontend0"))) {
+        std::fprintf(stderr, "zappe: ota: sem sintonizador para a capa de \"%s\"\n", qPrintable(resolved));
+        return;
+    }
+    if (!qEnvironmentVariable("ZAPPE_OTA_FAKE").isEmpty()) {
+        std::fprintf(stderr, "zappe: ota: capa em segundo plano pulada (ZAPPE_OTA_FAKE)\n");
+        return;
+    }
+    const QString data = resolveDataDir();
+    QDir().mkpath(data);
+    const QString tsPath = QDir(data).filePath(QStringLiteral("ota-preview.ts"));
+    const QString jpgPath = otaFramePath(data, resolved);
+    QDir().mkpath(QFileInfo(jpgPath).absolutePath());
+    QFile::remove(tsPath);
+    auto *process = new QProcess(this);
+    process->setProcessChannelMode(QProcess::ForwardedChannels);
+    const QString script = otaPreviewScript(conf, resolved, tsPath, jpgPath);
+    std::fprintf(stderr, "zappe: ota: lendo capa e EPG de \"%s\" sem abrir o player\n", qPrintable(resolved));
+    process->start(QStringLiteral("sh"), {QStringLiteral("-c"), script});
+    if (!process->waitForStarted(2000)) {
+        std::fprintf(stderr, "zappe: ota: não abriu o zap de prévia\n");
+        process->deleteLater();
+        return;
+    }
+    m_preview = process;
+    m_previewChannel = resolved;
+    connect(process, &QProcess::finished, this, [this, process, resolved, tsPath, jpgPath](int, QProcess::ExitStatus) {
+        const bool current = m_preview == process;
+        if (current) {
+            m_preview = nullptr;
+            m_previewChannel.clear();
+        }
+        if (!current) {
+            process->deleteLater();
+            return;
+        }
+        QFile ts(tsPath);
+        if (ts.open(QIODevice::ReadOnly)) {
+            const QByteArray payload = ts.read(6 * 1024 * 1024);
+            ts.close();
+            const EpgSnapshot epg = parseEpgFromTs(payload);
+            if (!epg.nowTitle.isEmpty() || !epg.nextTitle.isEmpty()) {
+                std::fprintf(stderr, "zappe: ota: epg \"%s\" agora=\"%s\" a seguir=\"%s\"\n", qPrintable(resolved),
+                             qPrintable(epg.nowTitle), qPrintable(epg.nextTitle));
+                emit epgReady(resolved, epg.nowTitle, epg.nextTitle);
+            }
+        }
+        if (otaFrameIsFresh(jpgPath, QDateTime::currentDateTime()))
+            emit frameReady(resolved, jpgPath);
+        process->deleteLater();
+    });
 }
 
 void OtaPlayer::togglePause()

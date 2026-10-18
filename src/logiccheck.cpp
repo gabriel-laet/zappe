@@ -5,6 +5,7 @@
 #include "cdp.h"
 #include "chrome.h"
 #include "display.h"
+#include "epg.h"
 #include "house.h"
 #include "keymap.h"
 #include "learn.h"
@@ -66,6 +67,10 @@ int runLogicSelfCheck()
         return fail("volume/mic");
     if (actionForEvdev(172) != RemoteAction::Unmapped)
         return fail("old homepage code is not home");
+    if (dialFromEvdev(2) != 1 || dialFromEvdev(11) != 0 || dialFromEvdev(79) != 1 || dialFromEvdev(82) != 0
+        || dialFromEvdev(52) != 10 || dialFromEvdev(83) != 10 || dialFromEvdev(172) != -1
+        || actionForEvdev(2) != RemoteAction::Unmapped)
+        return fail("number keys");
 
     QFile mapFile(QStringLiteral(":/zappe/data/atongx-map.json"));
     if (!mapFile.open(QIODevice::ReadOnly))
@@ -127,8 +132,61 @@ int runLogicSelfCheck()
                                         "[SBT HD]\nDELIVERY_SYSTEM = ISDBT\n[Band 1-seg]\nDELIVERY_SYSTEM = ISDBT\n");
     const QStringList names = parseChannelNames(conf);
     const QStringList playable = filterAndSortChannels(names);
-    if (playable.contains(QStringLiteral("Globo 1Seg")) || playable.contains(QStringLiteral("Band 1-seg")))
-        return fail("1seg filtered");
+    if (playable.contains(QStringLiteral("Globo 1Seg")))
+        return fail("1seg filtered when the fullseg exists");
+    if (!playable.contains(QStringLiteral("Band 1-seg")))
+        return fail("lone band 1seg stays");
+    if (resolveChannelName(QStringLiteral("Band"), names) != QLatin1String("Band 1-seg"))
+        return fail("band resolves to the only service");
+    const QVector<OtaService> scanned = parseOtaServices(conf);
+    const QString bandGap = fullsegGapReason(scanned, QStringLiteral("band"));
+    if (!bandGap.contains(QStringLiteral("1-seg")) || !bandGap.contains(QStringLiteral("fullseg")))
+        return fail("band 1seg reason");
+    const QString noBand = fullsegGapReason(parseOtaServices(QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n")),
+                                            QStringLiteral("band"));
+    if (!noBand.contains(QStringLiteral("não gravou")) || !noBand.contains(QStringLiteral("13")))
+        return fail("band missing from scan");
+    const QString layerOnly = QStringLiteral("[BAND]\nISDBT_LAYER_ENABLED = 1\nDELIVERY_SYSTEM = ISDBT\n"
+                                             "[Globo HD]\nISDBT_LAYER_ENABLED = 7\n[Globo 1Seg]\nISDBT_LAYER_ENABLED = 1\n");
+    const QVector<OtaService> layered = parseOtaServices(layerOnly);
+    const QStringList layerPlayable = playableNames(layered);
+    if (!layerPlayable.contains(QStringLiteral("BAND")) || layerPlayable.contains(QStringLiteral("Globo 1Seg"))
+        || !layerPlayable.contains(QStringLiteral("Globo HD")))
+        return fail("layer A band kept, globo 1seg dropped");
+    if (!fullsegGapReason(layered, QStringLiteral("band")).contains(QStringLiteral("camada A")))
+        return fail("layer A reason");
+    const QString both = QStringLiteral("[Band HD]\nISDBT_LAYER_ENABLED = 7\n[Band 1-seg]\nISDBT_LAYER_ENABLED = 1\n");
+    if (playableNames(parseOtaServices(both)).contains(QStringLiteral("Band 1-seg"))
+        || !fullsegGapReason(parseOtaServices(both), QStringLiteral("band")).isEmpty())
+        return fail("band fullseg wins");
+    const QString numbered = QStringLiteral("[Globo HD]\nLOGICAL_CHANNEL_NUMBER = 5.1\n[Record HD]\n"
+                                            "[Band 1-seg]\n[SBT HD]\n[Cultura]\n[RedeTV!]\n"
+                                            "[Record News]\nLOGICAL_CHANNEL_NUMBER = 8.1\n");
+    const QVector<OtaChannel> dialChannels = otaChannelsFromConf(numbered);
+    if (resolveDialTarget(QStringLiteral("13"), dialChannels) != QLatin1String("Band 1-seg"))
+        return fail("dial 13 band");
+    if (resolveDialTarget(QStringLiteral("7.1"), dialChannels) != QLatin1String("Record HD"))
+        return fail("dial 7.1 record");
+    if (resolveDialTarget(QStringLiteral("5.1"), dialChannels) != QLatin1String("Globo HD"))
+        return fail("dial 5.1 globo");
+    if (resolveDialTarget(QStringLiteral("8.1"), dialChannels) != QLatin1String("Record News"))
+        return fail("file number wins");
+    if (!resolveDialTarget(QStringLiteral("7.1"),
+                           otaChannelsFromConf(QStringLiteral("[Record HD]\nLOGICAL_CHANNEL_NUMBER = 8.1\n")))
+             .isEmpty())
+        return fail("default does not override the file");
+    if (appendDialText(QString(), QStringLiteral("1")) != QLatin1String("1")
+        || appendDialText(QStringLiteral("1"), QStringLiteral("3")) != QLatin1String("13")
+        || appendDialText(QStringLiteral("13"), QStringLiteral(".")) != QLatin1String("13.")
+        || appendDialText(QStringLiteral("13."), QStringLiteral("1")) != QLatin1String("13.1")
+        || appendDialText(QStringLiteral("13.1"), QStringLiteral("2")) != QLatin1String("13.1"))
+        return fail("dial text");
+    if (dialCommitMs() < 1000 || otaFocusRefreshMs() < 400)
+        return fail("dial and focus timing");
+    if (planFrameRefresh(true, QStringLiteral("Globo HD"), QStringLiteral("Globo HD")) != FrameRefresh::Screenshot
+        || planFrameRefresh(true, QStringLiteral("Globo HD"), QStringLiteral("Band 1-seg")) != FrameRefresh::Busy
+        || planFrameRefresh(false, QString(), QStringLiteral("Band 1-seg")) != FrameRefresh::Preview)
+        return fail("frame refresh plan");
     if (resolveChannelName(QStringLiteral("Globo"), names) != QLatin1String("Globo HD"))
         return fail("globo hd");
     if (resolveChannelName(QStringLiteral("Record"), names) != QLatin1String("Record HD"))
@@ -136,6 +194,32 @@ int runLogicSelfCheck()
     if (resolveChannelName(QStringLiteral("SBT"), names) != QLatin1String("SBT HD"))
         return fail("sbt hd");
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
+    const QString preview = otaPreviewScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Band 1-seg"),
+                                             QStringLiteral("/tmp/preview.ts"), QStringLiteral("/tmp/preview.jpg"));
+    if (!preview.contains(QStringLiteral("dvbv5-zap")) || !preview.contains(QStringLiteral("-t 8"))
+        || !preview.contains(QStringLiteral("ffmpeg")) || preview.contains(QStringLiteral("mpv"))
+        || preview.contains(QStringLiteral("--fs")))
+        return fail("ota preview stays off the player");
+    const QByteArray present = buildEitSection(0x4E, 0, 30, QStringLiteral("Jornal da Band"));
+    const QByteArray following = buildEitSection(0x4E, 1, 30, QStringLiteral("Sessão"));
+    const QByteArray schedule = buildEitSection(0x50, 0, 30, QStringLiteral("Programa da tarde"));
+    const QByteArray sdt = buildSdtSection(30, QStringLiteral("Band"));
+    QByteArray ts = wrapTsSection(present, 0x12);
+    ts.append(wrapTsSection(following, 0x12));
+    ts.append(wrapTsSection(schedule, 0x12));
+    ts.append(wrapTsSection(sdt, 0x11));
+    ts.append(QByteArray(188, '\0'));
+    if (ts.size() % 188 != 0)
+        return fail("ts alignment");
+    const EpgSnapshot epg = parseEpgFromTs(ts);
+    if (epg.nowTitle != QStringLiteral("Jornal da Band") || epg.nextTitle != QStringLiteral("Sessão"))
+        return fail("eit now next");
+    if (epg.serviceName != QLatin1String("Band"))
+        return fail("sdt name");
+    if (epgGuideLine(epg.nowTitle, epg.nextTitle) != QStringLiteral("Agora: Jornal da Band · A seguir: Sessão"))
+        return fail("epg line");
+    if (parseEitSection(schedule).nowTitle != QLatin1String("Programa da tarde"))
+        return fail("schedule fallback");
     if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
         || !script.contains(QStringLiteral("ESC quit")) || !script.contains(QStringLiteral("BACK quit"))
         || !script.contains(QStringLiteral("GO_BACK quit")) || !script.contains(QStringLiteral("0x21FF26 quit"))
@@ -177,6 +261,23 @@ int runLogicSelfCheck()
         return fail("channel card");
     if (cardImage.pixel(80, 80) == posterImage.pixel(80, 80) && cardImage.pixel(480, 270) == posterImage.pixel(480, 270))
         return fail("channel card matches the generic poster");
+    const ArtPaths globoLogo = makeNetworkLogo(artDir, QStringLiteral("Globo HD"));
+    const ArtPaths globoAgain = makeNetworkLogo(artDir, QStringLiteral("Globo"));
+    const QImage globoImage(globoLogo.artwork);
+    const QColor globoPx(globoImage.pixel(24, 24));
+    if (globoLogo.artwork.isEmpty() || globoLogo.artwork != globoAgain.artwork || globoImage.size() != QSize(960, 540)
+        || globoPx.blue() < globoPx.red() || globoPx.blue() < 100)
+        return fail("globo logo");
+    if (!makeNetworkLogo(artDir, QStringLiteral("Canal Comunitário")).artwork.isEmpty())
+        return fail("unknown network has no logo");
+    const ArtPaths fallback = liveChannelArt(artDir, QStringLiteral("Canal Comunitário"));
+    const ArtPaths plain = makeChannelCard(artDir, QStringLiteral("Canal Comunitário"));
+    if (fallback.artwork.isEmpty() || fallback.artwork != plain.artwork)
+        return fail("logo fallback is the name card");
+    const ArtPaths bandLogo = makeNetworkLogo(artDir, QStringLiteral("Band"));
+    const QColor bandPx(QImage(bandLogo.artwork).pixel(24, 24));
+    if (bandLogo.artwork.isEmpty() || bandLogo.artwork == globoLogo.artwork || bandPx.red() < bandPx.blue())
+        return fail("band logo");
 
     if (parseVoicePtBr(QStringLiteral("abrir Netflix")).service != QLatin1String("netflix"))
         return fail("voice netflix");
@@ -225,6 +326,44 @@ int runLogicSelfCheck()
     const QString ws = samsungWebsocketUrl(samsung, false);
     if (!ws.startsWith(QStringLiteral("ws://192.168.3.6:8001/")) || !ws.contains(QStringLiteral("name=")))
         return fail("samsung url");
+    const QString wss = samsungWebsocketUrl(samsung, true);
+    if (!wss.startsWith(QStringLiteral("wss://192.168.3.6:8002/")) || !wss.contains(QStringLiteral("name=WmFwcGU="))
+        || wss.contains(QStringLiteral("token=")))
+        return fail("samsung secure url");
+    SamsungConfig withToken = samsung;
+    withToken.token = QStringLiteral("tok-test");
+    if (!samsungWebsocketUrl(withToken, true).contains(QStringLiteral("token=tok-test")))
+        return fail("samsung token query");
+    const QByteArray connectMsg = QByteArrayLiteral("{\"event\":\"ms.channel.connect\",\"data\":{\"token\":\"tok-test\"}}");
+    if (samsungConnectToken(connectMsg) != QLatin1String("tok-test"))
+        return fail("samsung token extract");
+    if (!samsungAuthDenied(QByteArrayLiteral("{\"event\":\"ms.channel.unauthorized\"}"))
+        || !samsungAuthDenied(QByteArrayLiteral("{\"event\":\"ms.channel.timeOut\"}"))
+        || samsungAuthDenied(connectMsg))
+        return fail("samsung unauthorized");
+    if (!samsungShouldHoldPairing(true, false, true) || samsungShouldHoldPairing(true, true, true)
+        || samsungShouldHoldPairing(false, false, true))
+        return fail("samsung hold");
+    if (!samsungRetryWithoutToken(true, true, false, true) || samsungRetryWithoutToken(true, true, true, true)
+        || !samsungUpgradeToSecure(false, true) || samsungUpgradeToSecure(true, true))
+        return fail("samsung retry");
+    if (samsungPairingWaitMs() < 45000)
+        return fail("samsung wait");
+    const QString pairDir = dir.filePath(QStringLiteral("pair"));
+    QDir().mkpath(pairDir);
+    QFile macFile(pairDir + QStringLiteral("/samsung.json"));
+    if (!macFile.open(QIODevice::WriteOnly) || macFile.write(QByteArrayLiteral("{\"mac\":\"02:11:22:33:44:55\"}")) < 0)
+        return fail("samsung seed");
+    macFile.close();
+    if (!saveSamsungToken(pairDir, QStringLiteral("192.168.3.6"), QStringLiteral("Zappe"), QStringLiteral("tok-test")))
+        return fail("samsung save");
+    const SamsungConfig paired = loadSamsungConfig(pairDir);
+    if (paired.token != QLatin1String("tok-test") || paired.mac != QLatin1String("02:11:22:33:44:55"))
+        return fail("samsung token roundtrip");
+    const QFileDevice::Permissions perms = QFile::permissions(pairDir + QStringLiteral("/samsung.json"));
+    if (perms & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                 | QFileDevice::WriteOther | QFileDevice::ExeOther))
+        return fail("samsung token mode");
     if (parsePowerState(QStringLiteral("on")) != TvPower::On
         || parsePowerState(QStringLiteral("STANDBY")) != TvPower::Standby
         || parsePowerState(QStringLiteral("ready")) != TvPower::Standby

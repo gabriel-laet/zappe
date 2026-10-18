@@ -46,6 +46,7 @@ class Guide : public QObject {
     Q_PROPERTY(bool focusLive READ focusLive NOTIFY focusChanged)
     Q_PROPERTY(bool focusMirrored READ focusMirrored NOTIFY focusChanged)
     Q_PROPERTY(QString focusSynopsis READ focusSynopsis NOTIFY focusChanged)
+    Q_PROPERTY(QString dialText READ dialText NOTIFY dialChanged)
 
     Q_PROPERTY(QString brandName READ brandName NOTIFY brandingChanged)
     Q_PROPERTY(QString accent READ accent NOTIFY brandingChanged)
@@ -121,6 +122,7 @@ public:
     bool focusLive() const { return m_focusLive; }
     bool focusMirrored() const { return m_focusMirrored; }
     QString focusSynopsis() const { return m_focusSynopsis; }
+    QString dialText() const { return m_dialText; }
 
     QString brandName() const { return m_brand.name; }
     QString accent() const { return m_brand.accent; }
@@ -160,15 +162,19 @@ public:
     Q_INVOKABLE void toggleMute();
     Q_INVOKABLE bool shelfShown(int index) const;
     Q_INVOKABLE QString episodeTitle(int index) const;
+    Q_INVOKABLE void pushDial(const QString &glyph);
+    Q_INVOKABLE void clearDial();
 
     void openMirror(const QString &serviceId);
     void closeMirror();
     void setMirrorServiceIds(const QStringList &ids);
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
     void noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color);
+    void noteLiveEpg(const QString &href, const QString &line);
 
 signals:
     void focusChanged();
+    void dialChanged();
     void detailChanged();
     void activated();
     void fpsChanged();
@@ -282,6 +288,7 @@ private:
     bool m_focusLive = false;
     bool m_focusMirrored = false;
     QString m_focusSynopsis;
+    QString m_dialText;
 };
 
 QString cacheDir();

@@ -16,12 +16,35 @@ namespace zappe {
 struct OtaChannel {
     QString name;
     QString source;
+    QString number;
+    bool oneSeg = false;
 };
 
+// Um serviço do channels.conf, com a camada ISDB e o número virtual quando existem.
+struct OtaService {
+    QString name;
+    bool oneSeg = false;
+    QString number;
+    int layer = -1;
+};
+
+// O que fazer com a capa do canal em foco. Screenshot não troca a sintonia.
+enum class FrameRefresh { Screenshot, Preview, Busy };
+
 QStringList parseChannelNames(const QString &text);
+QVector<OtaService> parseOtaServices(const QString &text);
 QStringList filterAndSortChannels(QStringList names);
+QStringList playableNames(const QVector<OtaService> &services);
+QString fullsegGapReason(const QVector<OtaService> &services, const QString &networkId);
+QVector<OtaChannel> otaChannelsFromConf(const QString &text);
 QString resolveChannelName(const QString &requested, const QStringList &names);
+QString resolveDialTarget(const QString &typed, const QVector<OtaChannel> &channels);
+QString appendDialText(const QString &current, const QString &glyph);
+int dialCommitMs();
+int otaFocusRefreshMs();
 QString otaPipelineScript(const QString &conf, const QString &channel);
+QString otaPreviewScript(const QString &conf, const QString &channel, const QString &tsPath, const QString &jpgPath);
+FrameRefresh planFrameRefresh(bool playing, const QString &playingChannel, const QString &focused);
 bool mpvPlaybackStarted(const QByteArray &ipcLine);
 
 QVector<OtaChannel> listOtaChannels();
@@ -36,26 +59,34 @@ class OtaPlayer : public QObject {
 public:
     explicit OtaPlayer(QObject *parent = nullptr);
     bool playing() const { return m_process != nullptr; }
+    QString playingChannel() const { return m_channel; }
     void play(const QString &requested);
     void stop();
     void togglePause();
+    // Capa do canal em foco. Se esse canal já está no ar, só tira um frame.
+    // Se outro está no ar, não troca. Se o sintonizador está livre, grava um TS curto.
+    void refreshFocused(const QString &requested);
 
 signals:
     void started(const QString &channel);
     void failed(const QString &message);
     void stopped();
     void frameReady(const QString &channel, const QString &path);
+    void epgReady(const QString &channel, const QString &nowTitle, const QString &nextTitle);
 
 private:
     void pollPicture();
     void armFrames();
     void captureFrame();
+    void stopPreview();
 
     QProcess *m_process = nullptr;
+    QProcess *m_preview = nullptr;
     QTimer *m_pictureTimer = nullptr;
     QTimer *m_frameTimer = nullptr;
     QLocalSocket *m_ipc = nullptr;
     QString m_channel;
+    QString m_previewChannel;
     QString m_socket;
     bool m_userStop = false;
     bool m_sawPicture = false;
