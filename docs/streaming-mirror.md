@@ -64,7 +64,9 @@ O arquivo vigente é `~/.local/share/zappe/adapters/<id>.json`. Ele substitui o 
 
 No player o nó do teclado fica exclusivo. Setas, OK e play/pause saem como `Input.dispatchKeyEvent` (`rawKeyDown`, `keyDown`, `keyUp`). OK e play/pause são Espaço (32): Enter pausa em uns serviços e não faz nada em outros. A seta esquerda é `ArrowLeft` (37), dez segundos para trás na maior parte. Na Disney+ as setas são irregulares, então ←/→ mudam `video.currentTime` em 10s. No Globoplay ao vivo as teclas não chegam sem foco: o app clica no `<video>` e controla play/pause e o tempo por script. O vídeo escolhido é o que tem DRM (`mediaKeys`); no Prime o trailer mudo fica de fora.
 
-Voltar no player não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Em seguida o Chrome do catálogo sobe de novo no Xvfb. A janela kiosk existe só enquanto o vídeo está aberto, e só no display do gamescope.
+Voltar no player não manda Escape. Escape só sai do player no Prime e na Apple TV, e ainda deixa a página por baixo. Voltar fecha o Chrome com `Browser.close` e o guia volta para a frente. Enquanto o kiosk está aberto, o app também segura qualquer nó evdev que emita `KEY_BACK` ou backspace, não só o teclado com setas. Sem isso o X entrega `XF86Back` para o Chrome focado e a kiosk cai numa `about:blank` branca. Se o frame principal voltar para `about:blank` depois do vídeo ter aberto, o app fecha o kiosk e devolve o guia. Em seguida o Chrome do catálogo sobe de novo no Xvfb. A janela kiosk existe só enquanto o vídeo está aberto, e só no display do gamescope.
+
+O catálogo (Xvfb) não navega para URL de playback (`/watch`, `/player`, `watch?v=`). Esse navigate só roda quando o Chrome já está na face de player, no gamescope. A queda do CDP do Xvfb, no meio do `present()`, não reanexa no processo que está morrendo: espera o `ready()` do kiosk novo.
 
 Numa view de streaming (as fileiras no Qt, antes do Play), Voltar do controle é `KEY_BACK` (evdev 158), keysym `XF86Back`. Escape não é essa tecla. `xdotool key Escape` cai na janela que estiver focada; se for o Chrome, o site consome a tecla e o guia não fecha. O alvo é a janela do app, cujo título é o nome da marca (o padrão é Zappe):
 
@@ -75,7 +77,9 @@ xdotool key --window "$WID" XF86Back
 
 ## Capas e atualização
 
-Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. Arquivo com menos de 12 horas é reusado. O que falta baixa em segundo plano; até lá o guia usa uma capa gerada. A varredura dos serviços recomeça a cada 20 minutos e não roda enquanto o player está aberto.
+Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. O extrator lê `src`, `srcset`, `data-src`, `data-srcset` e `background-image`, e fica com a maior variante do srcset. Arquivo com menos de 12 horas é reusado. Enquanto a aba daquele serviço ainda está aberta, as que faltam saem por `fetch` com `credentials: 'include'` (os cookies da sessão). O que o fetch não trouxer tenta um GET com o user-agent de Chrome e `Referer` da origem. Até a imagem chegar, o guia usa uma capa gerada. A varredura recomeça a cada 20 minutos e não roda enquanto o player está aberto. Se a mesma URL já está na aba, o app passa por `about:blank` antes de navegar de novo: no YouTube um `Page.navigate` repetido não recarrega e o DOM virtualizado devolve um título. Uma leitura sem merge muito menor que a anterior (a guardada tem pelo menos 4 e a nova tem menos da metade) fica de fora.
+
+OK num título local de um serviço do espelho, sem URL de playback, abre o loading daquele serviço em vez da ficha “No catálogo local”. A fileira local que só repete o serviço some da home quando o espelho existe. A fileira “Atualizando…” aparece antes da página do serviço.
 
 `ZAPPE_MIRROR_DISABLE=1` não abre o Chrome. Sem o binário, o guia segue sem essas fileiras.
 

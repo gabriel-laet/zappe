@@ -40,7 +40,7 @@ public:
     // Aba nova. Não reutiliza a page que outro serviço já está lendo.
     void openPage(int port, const QString &url);
     void navigate(const QString &url);
-    void evaluate(const QString &expression);
+    void evaluate(const QString &expression, bool awaitPromise = false);
     void historyBack();
     void dispatchKey(const QString &key, const QString &code, int virtualKey);
     void dispatchAction(const QString &action);
@@ -56,6 +56,7 @@ signals:
     void failed(const QString &message);
     void navigated();
     void evaluated(const QString &value, bool ok);
+    void frameNavigated(const QString &url);
     void historyResult(bool wentBack);
     void networkResponse(const QString &requestId, const QString &url, const QString &mimeType);
     void networkFinished(const QString &requestId);

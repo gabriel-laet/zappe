@@ -277,7 +277,7 @@ void CdpClient::send(const QString &method, const QJsonObject &params)
     if (!m_socket || !m_connected)
         return;
     const int id = m_nextId++;
-    if (method == QLatin1String("Page.navigate"))
+    if (method == QLatin1String("Page.navigate") || method == QLatin1String("Page.reload"))
         m_pendingNav = id;
     if (method == QLatin1String("Runtime.evaluate") && m_pendingHistory != id)
         m_pendingEval = id;
@@ -297,11 +297,13 @@ void CdpClient::navigate(const QString &url)
     send(QStringLiteral("Page.navigate"), params);
 }
 
-void CdpClient::evaluate(const QString &expression)
+void CdpClient::evaluate(const QString &expression, bool awaitPromise)
 {
     QJsonObject params;
     params.insert(QStringLiteral("expression"), expression);
     params.insert(QStringLiteral("returnByValue"), true);
+    if (awaitPromise)
+        params.insert(QStringLiteral("awaitPromise"), true);
     send(QStringLiteral("Runtime.evaluate"), params);
 }
 
@@ -445,8 +447,11 @@ void CdpClient::onMessage(const QString &message)
             emit networkFinished(params.value(QStringLiteral("requestId")).toString());
         } else if (method == QLatin1String("Page.frameNavigated")) {
             const QJsonObject frame = params.value(QStringLiteral("frame")).toObject();
-            if (!frame.contains(QStringLiteral("parentId")))
-                std::fprintf(stderr, "zappe: cdp frame %s\n", qPrintable(frame.value(QStringLiteral("url")).toString()));
+            if (!frame.contains(QStringLiteral("parentId"))) {
+                const QString url = frame.value(QStringLiteral("url")).toString();
+                std::fprintf(stderr, "zappe: cdp frame %s\n", qPrintable(url));
+                emit frameNavigated(url);
+            }
         }
         return;
     }
@@ -553,7 +558,16 @@ void CdpClient::onMessage(const QString &message)
     }
     if (id == m_pendingEval) {
         m_pendingEval = 0;
-        const QJsonObject result = obj.value(QStringLiteral("result")).toObject().value(QStringLiteral("result")).toObject();
+        const QJsonObject remote = obj.value(QStringLiteral("result")).toObject();
+        if (remote.contains(QStringLiteral("exceptionDetails"))) {
+            const QString text = remote.value(QStringLiteral("exceptionDetails"))
+                                     .toObject()
+                                     .value(QStringLiteral("text"))
+                                     .toString();
+            emit evaluated(text, false);
+            return;
+        }
+        const QJsonObject result = remote.value(QStringLiteral("result")).toObject();
         emit evaluated(result.value(QStringLiteral("value")).toString(), true);
     }
 }

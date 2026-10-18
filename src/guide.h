@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 
 class QQuickWindow;
 
@@ -158,6 +159,7 @@ public:
 
     void openMirror(const QString &serviceId);
     void closeMirror();
+    void setMirrorServiceIds(const QStringList &ids);
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
 
 signals:
@@ -201,6 +203,7 @@ private:
     void setBrandingEnabled(bool on);
     void pulseCard();
     void publishShelves(bool resetFocus);
+    bool localMirrorStandIn(const ShelfData *shelf) const;
     void revealVolume();
     void showToast(const QString &text);
     bool coalesce(const QString &key);
@@ -225,6 +228,7 @@ private:
     QVector<ShelfData> m_baseShelves;
     QVector<ShelfData> m_mirrorShelves;
     QString m_mirrorService;
+    QSet<QString> m_mirrorIds;
     int m_layoutEpoch = 0;
 
     int m_shelf = 0;

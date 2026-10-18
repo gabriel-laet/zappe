@@ -82,6 +82,13 @@ QString mirrorTransportScript(const QString &action);
 QString mirrorSearchUrl(const MirrorAdapter &adapter, const QString &query);
 QString mirrorPlayUrl(const MirrorAdapter &adapter, const QString &href);
 bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href);
+// Home, busca e refresh do catálogo não podem abrir /watch nem watch?v=.
+bool mirrorUrlIsPlayback(const QString &url);
+// OK numa fileira local do serviço abre o espelho, em vez da ficha morta.
+QString mirrorRowService(const QString &service, const QString &href);
+// Leitura nova muito menor que a anterior: fica a página mais rica.
+bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
+QString mirrorCoverFetchScript(const QStringList &urls);
 
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter);
 MirrorPage parseMirrorFeeds(const QVector<NetworkSample> &samples, const MirrorAdapter &adapter);
@@ -148,6 +155,10 @@ private:
     void finishEmpty();
     void applyPage(const MirrorPage &page);
     void downloadNext();
+    bool fetchCoversOrContinue();
+    void finishAccept();
+    void storeCover(const CoverJob &job, const QByteArray &body);
+    void onFrame(const QString &url);
     void showLoading(const QString &serviceId);
     void showError(const QString &serviceId, const QString &detail);
     void armWatch(const QString &serviceId);
@@ -167,6 +178,7 @@ private:
     QString m_navUrl;
     QStringList m_extraLeft;
     QVector<CoverJob> m_covers;
+    QVector<CoverJob> m_coverBatch;
     QVector<NetworkSample> m_samples;
     QHash<QString, QString> m_inflight;
     QHash<QString, QVector<ShelfData>> m_pages;
@@ -191,7 +203,13 @@ private:
     bool m_learnPosted = false;
     bool m_mergePage = false;
     bool m_holdNav = false;
+    bool m_resumeExtra = false;
+    bool m_forceReload = false;
+    bool m_sawPlayback = false;
     int m_epoch = 0;
+    int m_playNavTries = 0;
+    int m_coverGen = 0;
+    qint64 m_coverDeadline = 0;
 };
 
 } // namespace zappe

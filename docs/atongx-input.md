@@ -18,7 +18,7 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 
 Power não desliga o mini-PC: o nó da tecla 116 fica com `EVIOCGRAB`, o logind não a recebe, e o app manda o toggle para a Samsung. Ver [`samsung-tv.md`](samsung-tv.md).
 
-Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player, o app segura o teclado e manda as teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK como Espaço, play/pause). Voltar fecha o Chrome (`Browser.close`) e devolve o guia; não usa Escape. Com a TV aberta, para o mpv e volta ao guia. A tecla não pode encerrar o processo: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
+Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player, o app segura o teclado e qualquer nó que emita `KEY_BACK` (158) ou backspace (14), e manda as outras teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK como Espaço, play/pause). Voltar fecha o Chrome (`Browser.close`) e devolve o guia; não usa Escape e não manda `BrowserBack` para a página. Sem esse grab, o X entrega `XF86Back` ao Chrome focado e a kiosk fica numa `about:blank` branca. Com a TV aberta, para o mpv e volta ao guia. A tecla não pode encerrar o processo: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
 
 ## Voltar pelo xdotool
 
@@ -35,7 +35,7 @@ xdotool key --window "$WID" XF86Back
 
 Se o keysym não existir nessa máquina, o keycode é o mesmo: `xdotool key --window "$WID" 166`.
 
-No player, Voltar não é tecla injetada. O app manda `Browser.close` pelo CDP e o guia volta para a frente. Escape no player só chega no site.
+No player, Voltar não é tecla injetada. O app manda `Browser.close` pelo CDP e o guia volta para a frente, mesmo se o Chrome estiver com o foco. Escape no player só chega no site.
 
 ## Air mouse
 

@@ -30,7 +30,26 @@
 namespace zappe {
 namespace {
 
-enum Job { JobNone = 0, JobExtract = 1, JobSearch = 2, JobPlay = 3, JobProfile = 4, JobLearnDom = 5, JobLearnShot = 6 };
+enum Job {
+    JobNone = 0,
+    JobExtract = 1,
+    JobSearch = 2,
+    JobPlay = 3,
+    JobProfile = 4,
+    JobLearnDom = 5,
+    JobLearnShot = 6,
+    JobCovers = 7
+};
+
+int shelfTitleCount(const QVector<ShelfData> &shelves)
+{
+    int count = 0;
+    for (const ShelfData &shelf : shelves) {
+        if (shelf.status == QLatin1String("ok"))
+            count += shelf.rows.size();
+    }
+    return count;
+}
 
 bool envOn(const char *name)
 {
@@ -568,7 +587,53 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     const text = ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim();
     return (aria || text).replace(/\s+/g, ' ').trim();
   };
-  const artOf = (img) => img ? (img.currentSrc || img.src || img.getAttribute('src') || '') : '';
+  const pickSrc = (value) => {
+    if (!value) return '';
+    const text = String(value).trim();
+    if (!text || text.indexOf('data:') === 0 || text.indexOf('blob:') === 0) return '';
+    let best = '', bestW = -1;
+    for (const part of text.split(',')) {
+      const bits = part.trim().split(/\s+/);
+      const url = bits[0] || '';
+      if (url.indexOf('http') !== 0) continue;
+      const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
+      if (w >= bestW) { bestW = w; best = url; }
+    }
+    return best;
+  };
+  const bgUrl = (el) => {
+    if (!el) return '';
+    const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
+    const match = /url\((['"]?)(https?:[^'")]+)\1\)/.exec(raw);
+    return match ? match[2] : '';
+  };
+  const artOf = (root) => {
+    if (!root) return '';
+    const nodes = [root];
+    if (root.querySelectorAll) {
+      for (const el of root.querySelectorAll('img, source, [style*="background"]')) nodes.push(el);
+    }
+    for (const el of nodes) {
+      if (!el) continue;
+      const vals = [];
+      if (el.getAttribute) {
+        vals.push(el.getAttribute('srcset') || '');
+        vals.push(el.getAttribute('data-srcset') || '');
+        vals.push(el.getAttribute('data-src') || '');
+        vals.push(el.getAttribute('data-lazy-src') || '');
+        vals.push(el.getAttribute('data-original') || '');
+        vals.push(el.getAttribute('src') || '');
+      }
+      if (el.currentSrc) vals.push(el.currentSrc);
+      if (el.src) vals.push(el.src);
+      vals.push(bgUrl(el));
+      for (const value of vals) {
+        const url = pickSrc(value);
+        if (url) return url;
+      }
+    }
+    return '';
+  };
   const progressOf = (el) => {
     if (!el) return 0;
     const now = parseFloat(el.getAttribute('aria-valuenow') || '');
@@ -597,7 +662,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const name = label(link) || label(img) || label(card);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(img), progress: progressOf(card.querySelector(cfg.progress))});
+        rows.push({title: name, href: href, artwork: artOf(card), progress: progressOf(card.querySelector(cfg.progress))});
       }
       if (!rows.length) continue;
       const key = (title || 'row') + ':' + rows[0].href;
@@ -616,7 +681,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const name = label(link) || label(img);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(img), progress: progressOf(link.querySelector(cfg.progress))});
+        rows.push({title: name, href: href, artwork: artOf(link), progress: progressOf(link.querySelector(cfg.progress))});
       }
       if (rows.length)
         shelves.push({title: '', context: 'flatLinks', rows: rows});
@@ -745,6 +810,71 @@ bool mirrorIsPlayable(const MirrorAdapter &adapter, const QString &href)
 {
     const QString play = mirrorPlayUrl(adapter, href);
     return !play.isEmpty() && !play.startsWith(QStringLiteral("zappe://"));
+}
+
+bool mirrorUrlIsPlayback(const QString &url)
+{
+    const QUrl parsed(url.trimmed());
+    if (!parsed.isValid())
+        return false;
+    const QString path = parsed.path().toLower();
+    const QString host = parsed.host().toLower();
+    const QString query = parsed.query().toLower();
+    if (path.contains(QStringLiteral("/watch")) || path.contains(QStringLiteral("/player")))
+        return true;
+    if (host.contains(QStringLiteral("youtube")) && query.contains(QStringLiteral("v=")))
+        return true;
+    return false;
+}
+
+QString mirrorRowService(const QString &service, const QString &href)
+{
+    const QVector<MirrorAdapter> adapters = loadMirrorAdapters();
+    const MirrorAdapter *adapter = findMirrorAdapter(adapters, service);
+    if (!adapter || mirrorIsPlayable(*adapter, href))
+        return {};
+    return adapter->id;
+}
+
+bool mirrorKeepRicherPage(int previousTitles, int incomingTitles)
+{
+    return previousTitles >= 4 && incomingTitles * 2 < previousTitles;
+}
+
+QString mirrorCoverFetchScript(const QStringList &urls)
+{
+    QStringList quoted;
+    for (const QString &url : urls)
+        quoted.append(jsString(url));
+    return QStringLiteral("(() => { const urls = [") + quoted.join(QLatin1Char(','))
+           + QStringLiteral(R"js(];
+  const b64 = (buf) => {
+    const bytes = new Uint8Array(buf);
+    let s = '';
+    const step = 8192;
+    for (let i = 0; i < bytes.length; i += step) {
+      const slice = bytes.subarray(i, Math.min(i + step, bytes.length));
+      s += String.fromCharCode.apply(null, slice);
+    }
+    return btoa(s);
+  };
+  const one = async (url) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    try {
+      const res = await fetch(url, {credentials: 'include', signal: ctrl.signal});
+      if (!res.ok) return {url: url, ok: false};
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength < 32 || buf.byteLength > 500000) return {url: url, ok: false};
+      return {url: url, ok: true, b64: b64(buf)};
+    } catch (e) {
+      return {url: url, ok: false};
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+  return Promise.all(urls.map(one)).then((rows) => JSON.stringify(rows));
+})())js");
 }
 
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
@@ -1018,22 +1148,39 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     connect(m_cdp, &CdpClient::networkFinished, this, &MirrorSession::onNetworkFinished);
     connect(m_cdp, &CdpClient::responseBody, this, &MirrorSession::onResponseBody);
     connect(m_cdp, &CdpClient::screenshotReady, this, &MirrorSession::onScreenshot);
+    connect(m_cdp, &CdpClient::frameNavigated, this, &MirrorSession::onFrame);
     connect(m_cdp, &CdpClient::failed, this, [this](const QString &message) {
         std::fprintf(stderr, "zappe: espelho cdp falhou: %s\n", qPrintable(message));
         if (m_job == JobLearnDom || m_job == JobLearnShot)
             return;
-        // Navegação substituída no mesmo alvo. A extração da navegação nova segue.
-        if (message.contains(QStringLiteral("ERR_ABORTED")))
+        if (m_job == JobCovers) {
+            for (const CoverJob &job : m_coverBatch)
+                m_covers.append(job);
+            m_coverBatch.clear();
+            finishAccept();
             return;
-        const bool down = !m_cdp || !m_cdp->connected();
-        if (m_job == JobPlay)
-            emit failed(message);
-        if (down) {
-            m_holdNav = false;
-            if (m_job == JobPlay) {
-                scheduleAttach();
+        }
+        // Navegação substituída no mesmo alvo. A extração da navegação nova segue.
+        // No player, ERR_ABORTED no watch deixa a kiosk em about:blank.
+        if (message.contains(QStringLiteral("ERR_ABORTED"))) {
+            if (m_job != JobPlay)
+                return;
+            if (m_playNavTries < 1 && m_chrome && m_chrome->face() == ChromeFace::Player && m_cdp && m_cdp->connected()
+                && !m_pendingUrl.isEmpty()) {
+                ++m_playNavTries;
+                std::fprintf(stderr, "zappe: espelho repetindo o navigate do player\n");
+                m_cdp->navigate(m_pendingUrl);
                 return;
             }
+            emit failed(QStringLiteral("player em about:blank"));
+            return;
+        }
+        const bool down = !m_cdp || !m_cdp->connected();
+        if (down) {
+            m_holdNav = false;
+            // O Chrome do Xvfb cai no present(). O navigate do watch espera o kiosk novo.
+            if (m_job == JobPlay)
+                return;
             if ((m_job == JobExtract || m_job == JobSearch) && !m_current.isEmpty())
                 m_queue.prepend(m_current);
             m_busy = false;
@@ -1139,17 +1286,21 @@ void MirrorSession::onAttached()
     m_attachTries = 0;
     if (m_cdp)
         m_cdp->enableNetwork();
+    if (m_job == JobPlay) {
+        if (m_chrome && m_chrome->face() == ChromeFace::Player && m_cdp && !m_pendingUrl.isEmpty())
+            m_cdp->navigate(m_pendingUrl);
+        return;
+    }
     if (m_holdNav) {
         const QString url = m_openUrl;
         m_holdNav = false;
         m_openUrl.clear();
+        if (mirrorUrlIsPlayback(url)) {
+            std::fprintf(stderr, "zappe: espelho recusou URL de playback no catálogo: %s\n", qPrintable(url));
+            return;
+        }
         if (!url.isEmpty() && m_cdp)
             m_cdp->navigate(url);
-        return;
-    }
-    if (!m_pendingUrl.isEmpty() && m_job == JobPlay) {
-        const QString url = m_pendingUrl;
-        m_cdp->navigate(url);
         return;
     }
     if (m_queue.isEmpty()) {
@@ -1269,6 +1420,11 @@ void MirrorSession::play(const QString &serviceId, const QString &href)
     m_job = JobPlay;
     m_playerService = serviceId;
     m_pendingUrl = href;
+    m_holdNav = false;
+    m_openUrl.clear();
+    m_forceReload = false;
+    m_sawPlayback = false;
+    m_playNavTries = 0;
     m_queue.clear();
     m_samples.clear();
     m_inflight.clear();
@@ -1327,6 +1483,14 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
 {
     if (m_player || url.isEmpty())
         return;
+    if ((job == JobExtract || job == JobSearch) && mirrorUrlIsPlayback(url)) {
+        std::fprintf(stderr, "zappe: espelho recusou URL de playback no catálogo: %s\n", qPrintable(url));
+        m_busy = false;
+        m_job = JobNone;
+        m_forceReload = false;
+        QTimer::singleShot(400, this, &MirrorSession::pump);
+        return;
+    }
     if (!m_cdp || !m_chrome) {
         m_queue.removeAll(serviceId);
         m_queue.prepend(serviceId);
@@ -1336,6 +1500,7 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
     }
     ++m_epoch;
     m_current = serviceId;
+    const QString previous = m_navUrl;
     m_navUrl = url;
     if (job == JobSearch)
         m_extraLeft.clear();
@@ -1352,9 +1517,12 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
     // mesmo sem websocket ainda: a primeira home não pode esperar um attach compartilhado.
     const bool sameTab = m_cdp->connected() && m_tabService == serviceId && !m_holdNav;
     if (sameTab) {
-        m_cdp->navigate(url);
+        // Page.navigate da mesma URL é no-op no YouTube e relê um DOM virtualizado.
+        m_forceReload = !previous.isEmpty() && previous == url;
+        m_cdp->navigate(m_forceReload ? QStringLiteral("about:blank") : url);
         return;
     }
+    m_forceReload = false;
     m_tabService = serviceId;
     m_openUrl = url;
     m_holdNav = true;
@@ -1376,6 +1544,12 @@ void MirrorSession::pump()
 
 void MirrorSession::onNavigated()
 {
+    if (m_forceReload) {
+        m_forceReload = false;
+        if (!m_player && m_cdp && m_cdp->connected() && !m_navUrl.isEmpty())
+            m_cdp->navigate(m_navUrl);
+        return;
+    }
     if (m_job == JobPlay) {
         m_busy = false;
         emit playerReady();
@@ -1460,16 +1634,10 @@ void MirrorSession::acceptPage(const MirrorPage &page)
     MirrorPage tagged = page;
     tagHistoryShelves(tagged, m_navUrl, m_current);
     applyPage(tagged);
-    if (extract && !tagged.needsLogin && !m_extraLeft.isEmpty() && !m_player && m_cdp && m_cdp->connected()) {
-        const QString next = m_extraLeft.takeFirst();
-        m_mergePage = true;
-        begin(m_current, next, JobExtract);
-        return;
-    }
-    m_mergePage = false;
-    m_busy = false;
-    m_job = JobNone;
-    QTimer::singleShot(500, this, &MirrorSession::pump);
+    m_resumeExtra = extract && !tagged.needsLogin && !m_extraLeft.isEmpty() && !m_player;
+    m_coverDeadline = QDateTime::currentMSecsSinceEpoch() + 12000;
+    if (!fetchCoversOrContinue())
+        finishAccept();
 }
 
 void MirrorSession::finishEmpty()
@@ -1643,8 +1811,61 @@ void MirrorSession::onScreenshot(const QByteArray &png, bool ok)
     postLearn(ok ? png : QByteArray());
 }
 
+void MirrorSession::onFrame(const QString &url)
+{
+    if (!m_player || m_job != JobPlay)
+        return;
+    const bool blank = url.isEmpty() || url == QLatin1String("about:blank") || url.startsWith(QStringLiteral("about:blank"));
+    if (blank) {
+        if (!m_sawPlayback)
+            return;
+        std::fprintf(stderr, "zappe: player caiu em about:blank; fechando o kiosk\n");
+        emit failed(QStringLiteral("player em about:blank"));
+        return;
+    }
+    if (url.startsWith(QStringLiteral("http://")) || url.startsWith(QStringLiteral("https://")))
+        m_sawPlayback = true;
+}
+
 void MirrorSession::onEvaluated(const QString &value, bool ok)
 {
+    if (m_job == JobCovers) {
+        const int gen = m_coverGen;
+        QHash<QString, QByteArray> got;
+        if (ok) {
+            const QJsonArray rows = QJsonDocument::fromJson(value.toUtf8()).array();
+            for (const QJsonValue &item : rows) {
+                const QJsonObject obj = item.toObject();
+                if (!obj.value(QStringLiteral("ok")).toBool())
+                    continue;
+                const QByteArray body = QByteArray::fromBase64(obj.value(QStringLiteral("b64")).toString().toLatin1());
+                if (body.size() >= 32)
+                    got.insert(obj.value(QStringLiteral("url")).toString(), body);
+            }
+        }
+        if (m_job != JobCovers || m_coverGen != gen)
+            return;
+        ++m_coverGen;
+        int saved = 0;
+        for (const CoverJob &job : m_coverBatch) {
+            const QByteArray body = got.value(job.url);
+            QImage image;
+            if (!body.isEmpty())
+                image.loadFromData(body);
+            if (!image.isNull()) {
+                storeCover(job, body);
+                ++saved;
+            } else {
+                m_covers.append(job);
+            }
+        }
+        std::fprintf(stderr, "zappe: espelho %s capas %d/%d pela aba\n", qPrintable(m_current), saved,
+                     int(m_coverBatch.size()));
+        m_coverBatch.clear();
+        if (!fetchCoversOrContinue())
+            finishAccept();
+        return;
+    }
     if (m_job == JobPlay) {
         if (!ok || !m_cdp)
             return;
@@ -1736,6 +1957,15 @@ void MirrorSession::applyPage(const MirrorPage &page)
     }
     if (shelves.isEmpty())
         return;
+    if (!m_mergePage && !page.needsLogin) {
+        const int previous = shelfTitleCount(m_pages.value(adapter->id));
+        const int incoming = shelfTitleCount(shelves);
+        if (mirrorKeepRicherPage(previous, incoming)) {
+            std::fprintf(stderr, "zappe: espelho %s manteve %d títulos (a leitura nova tem %d)\n", qPrintable(adapter->id),
+                         previous, incoming);
+            return;
+        }
+    }
     paintMissingCovers(shelves, m_cacheDir, QDateTime::currentDateTime());
     m_pages.insert(adapter->id, shelves);
     m_guide->replaceServiceShelves(adapter->id, shelves);
@@ -1749,45 +1979,119 @@ void MirrorSession::applyPage(const MirrorPage &page)
         if (!queued)
             m_covers.append(CoverJob{adapter->id, job.url, job.path});
     }
+}
+
+bool MirrorSession::fetchCoversOrContinue()
+{
+    if (m_player || !m_cdp || !m_cdp->connected() || QDateTime::currentMSecsSinceEpoch() > m_coverDeadline)
+        return false;
+    QVector<CoverJob> batch;
+    QVector<CoverJob> rest;
+    for (const CoverJob &job : m_covers) {
+        if (batch.size() < 4 && job.serviceId == m_current)
+            batch.append(job);
+        else
+            rest.append(job);
+    }
+    if (batch.isEmpty())
+        return false;
+    m_covers = rest;
+    m_coverBatch = batch;
+    QStringList urls;
+    for (const CoverJob &job : batch)
+        urls.append(job.url);
+    const int gen = ++m_coverGen;
+    m_job = JobCovers;
+    m_busy = true;
+    std::fprintf(stderr, "zappe: espelho %s baixando %d capas na aba\n", qPrintable(m_current), int(urls.size()));
+    m_cdp->evaluate(mirrorCoverFetchScript(urls), true);
+    QTimer::singleShot(8000, this, [this, gen] {
+        if (m_job != JobCovers || m_coverGen != gen)
+            return;
+        ++m_coverGen;
+        std::fprintf(stderr, "zappe: espelho capas sem resposta da aba\n");
+        for (const CoverJob &job : m_coverBatch)
+            m_covers.append(job);
+        m_coverBatch.clear();
+        finishAccept();
+    });
+    return true;
+}
+
+void MirrorSession::finishAccept()
+{
+    if (m_player)
+        return;
+    if (m_resumeExtra && !m_extraLeft.isEmpty() && m_cdp && m_cdp->connected()) {
+        const QString next = m_extraLeft.takeFirst();
+        m_mergePage = true;
+        begin(m_current, next, JobExtract);
+        return;
+    }
+    m_resumeExtra = false;
+    m_mergePage = false;
+    m_busy = false;
+    m_job = JobNone;
     downloadNext();
+    if (!m_cdp || !m_cdp->connected()) {
+        schedulePump();
+        return;
+    }
+    QTimer::singleShot(500, this, &MirrorSession::pump);
+}
+
+void MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
+{
+    QDir().mkpath(QFileInfo(job.path).absolutePath());
+    QFile out(job.path);
+    if (!out.open(QIODevice::WriteOnly))
+        return;
+    out.write(body);
+    QVector<ShelfData> shelves = m_pages.value(job.serviceId);
+    bool changed = false;
+    for (ShelfData &shelf : shelves) {
+        for (RowData &row : shelf.rows) {
+            if (row.artworkSpec == job.url) {
+                row.artwork = job.path;
+                changed = true;
+            }
+        }
+    }
+    if (changed && m_guide) {
+        m_pages.insert(job.serviceId, shelves);
+        m_guide->replaceServiceShelves(job.serviceId, shelves);
+    }
 }
 
 void MirrorSession::downloadNext()
 {
-    if (m_downloading || m_covers.isEmpty())
+    if (m_downloading || m_covers.isEmpty() || m_job == JobCovers)
         return;
     m_downloading = true;
     const CoverJob job = m_covers.takeFirst();
     QNetworkRequest request{QUrl(job.url)};
-    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Zappe"));
+    request.setHeader(QNetworkRequest::UserAgentHeader, chromeCatalogUserAgent());
+    request.setRawHeader("Accept", "image/avif,image/webp,image/apng,image/*,*/*;q=0.8");
+    const QUrl coverUrl(job.url);
+    if (!coverUrl.host().isEmpty()) {
+        QUrl origin;
+        origin.setScheme(coverUrl.scheme());
+        origin.setHost(coverUrl.host());
+        if (coverUrl.port() > 0)
+            origin.setPort(coverUrl.port());
+        request.setRawHeader("Referer", (origin.toString(QUrl::FullyEncoded) + QStringLiteral("/")).toUtf8());
+    }
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     QNetworkReply *reply = m_http->get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply, job] {
         const QByteArray body = reply->readAll();
         const bool httpOk = reply->error() == QNetworkReply::NoError;
         reply->deleteLater();
         QImage image;
-        if (httpOk)
+        if (httpOk && body.size() >= 32)
             image.loadFromData(body);
-        if (!image.isNull()) {
-            QDir().mkpath(QFileInfo(job.path).absolutePath());
-            QFile out(job.path);
-            if (out.open(QIODevice::WriteOnly))
-                out.write(body);
-            QVector<ShelfData> shelves = m_pages.value(job.serviceId);
-            bool changed = false;
-            for (ShelfData &shelf : shelves) {
-                for (RowData &row : shelf.rows) {
-                    if (row.artworkSpec == job.url) {
-                        row.artwork = job.path;
-                        changed = true;
-                    }
-                }
-            }
-            if (changed && m_guide) {
-                m_pages.insert(job.serviceId, shelves);
-                m_guide->replaceServiceShelves(job.serviceId, shelves);
-            }
-        }
+        if (!image.isNull())
+            storeCover(job, body);
         m_downloading = false;
         downloadNext();
     });

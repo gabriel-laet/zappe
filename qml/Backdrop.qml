@@ -12,8 +12,8 @@ Item {
         opacity: 0.58
         Behavior on color {
             ColorAnimation {
-                duration: 680
-                easing.type: Easing.InOutCubic
+                duration: Motion.screenMs
+                easing.type: Motion.ease
             }
         }
     }
@@ -54,8 +54,8 @@ Item {
             opacity: plates.showA ? 0.84 : 0
             Behavior on opacity {
                 NumberAnimation {
-                    duration: 560
-                    easing.type: Easing.InOutCubic
+                    duration: Motion.screenMs
+                    easing.type: Motion.ease
                 }
             }
         }
@@ -69,8 +69,8 @@ Item {
             opacity: plates.showA ? 0 : 0.84
             Behavior on opacity {
                 NumberAnimation {
-                    duration: 560
-                    easing.type: Easing.InOutCubic
+                    duration: Motion.screenMs
+                    easing.type: Motion.ease
                 }
             }
         }

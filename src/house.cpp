@@ -165,6 +165,10 @@ House::House(QObject *parent)
         openService(serviceId);
     });
     connect(m_mirror, &MirrorSession::failed, this, [this](const QString &message) {
+        if (m_player && message.contains(QStringLiteral("about:blank"))) {
+            cancelLoading();
+            return;
+        }
         if (m_player && m_loading && !m_loadingFailed)
             failLoading(message);
         else if (!m_loading)
@@ -199,6 +203,12 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
         beginLoading(preview, m_guide->focusArtwork(), QStringLiteral("ota"));
     m_remote->start();
     m_mirror->start(m_guide, m_chrome, dataDir);
+    if (m_guide) {
+        QStringList ids;
+        for (const MirrorAdapter &adapter : loadMirrorAdapters(dataDir))
+            ids.append(adapter.id);
+        m_guide->setMirrorServiceIds(ids);
+    }
     auto *front = new QTimer(this);
     front->setInterval(1000);
     connect(front, &QTimer::timeout, this, [this] {
@@ -446,9 +456,9 @@ void House::showMirror(const QString &serviceId)
     }
     if (m_player)
         leavePlayer();
+    m_mirror->refresh(serviceId);
     if (m_guide)
         m_guide->openMirror(serviceId);
-    m_mirror->refresh(serviceId);
     showGuide();
 }
 

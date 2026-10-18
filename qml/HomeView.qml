@@ -13,7 +13,7 @@ Item {
         height: 112
         opacity: guide.detailOpen ? 0 : 1
         Behavior on opacity {
-            NumberAnimation { duration: 220 }
+            NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease }
         }
 
         Text {
@@ -82,19 +82,14 @@ Item {
         boundsBehavior: Flickable.StopAtBounds
         opacity: guide.detailOpen ? 0.28 : 1
         Behavior on opacity {
-            NumberAnimation { duration: 240 }
+            NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease }
         }
 
         property real scrollY: 0
         property bool armed: false
         Behavior on scrollY {
             enabled: scroller.armed
-            SpringAnimation {
-                spring: 1.7
-                damping: 0.76
-                mass: 0.95
-                epsilon: 0.8
-            }
+            NumberAnimation { duration: Motion.scrollMs; easing.type: Motion.ease }
         }
         onScrollYChanged: contentY = scrollY
 

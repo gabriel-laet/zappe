@@ -216,7 +216,7 @@ int Guide::shelfCount() const
 bool Guide::shelfShown(int index) const
 {
     const ShelfData *shelf = m_shelves->shelfAt(index);
-    if (!shelf)
+    if (!shelf || localMirrorStandIn(shelf))
         return false;
     if (m_page == QLatin1String("settings"))
         return false;
@@ -499,6 +499,13 @@ void Guide::activate()
         emit profileRequested(currentRow()->service, QUrl::fromPercentEncoding(encoded.toUtf8()));
         return;
     }
+    if (!m_focusLive) {
+        const QString service = mirrorRowService(currentRow()->service, currentRow()->href);
+        if (!service.isEmpty()) {
+            emit serviceRequested(service);
+            return;
+        }
+    }
     if (m_focusLive) {
         pulseCard();
         emit playRequested(m_focusTitle, m_focusService, m_focusHref);
@@ -625,6 +632,30 @@ void Guide::publishShelves(bool resetFocus)
     }
     clampFocusToPage();
     syncFocusFields();
+    emit focusChanged();
+}
+
+bool Guide::localMirrorStandIn(const ShelfData *shelf) const
+{
+    if (!shelf || shelf->id == QLatin1String("apps") || shelf->rows.isEmpty() || m_mirrorIds.isEmpty())
+        return false;
+    if (shelf->skillId.startsWith(QStringLiteral("mirror:")))
+        return false;
+    for (const RowData &row : shelf->rows) {
+        if (!m_mirrorIds.contains(row.service.trimmed().toLower()))
+            return false;
+    }
+    return true;
+}
+
+void Guide::setMirrorServiceIds(const QStringList &ids)
+{
+    m_mirrorIds.clear();
+    for (const QString &id : ids)
+        m_mirrorIds.insert(id.trimmed().toLower());
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    clampFocusToPage();
     emit focusChanged();
 }
 

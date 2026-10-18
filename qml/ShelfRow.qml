@@ -35,7 +35,7 @@ Item {
             font.pixelSize: 22
             font.weight: 500
             Behavior on color {
-                ColorAnimation { duration: 200 }
+                ColorAnimation { duration: Motion.fadeMs; easing.type: Motion.ease }
             }
         }
         Text {
@@ -70,12 +70,7 @@ Item {
         property bool armed: false
         Behavior on scrollX {
             enabled: flick.armed
-            SpringAnimation {
-                spring: 1.85
-                damping: 0.73
-                mass: 0.9
-                epsilon: 0.6
-            }
+            NumberAnimation { duration: Motion.scrollMs; easing.type: Motion.ease }
         }
         onScrollXChanged: contentX = scrollX
 

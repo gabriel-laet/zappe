@@ -9,7 +9,7 @@ Item {
     z: 12
     opacity: guide.volumeHud ? 1 : 0
     visible: opacity > 0.01
-    Behavior on opacity { NumberAnimation { duration: 160 } }
+    Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
 
     Rectangle {
         anchors.fill: parent
@@ -43,7 +43,7 @@ Item {
                 height: parent.height
                 radius: 4
                 color: guide.accent
-                Behavior on width { NumberAnimation { duration: 120 } }
+                Behavior on width { NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease } }
             }
         }
         Text {

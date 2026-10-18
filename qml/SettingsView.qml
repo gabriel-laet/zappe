@@ -4,7 +4,7 @@ Item {
     opacity: guide.page === "settings" && !guide.detailOpen ? 1 : 0
     visible: opacity > 0.01
     Behavior on opacity {
-        NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: Motion.screenMs; easing.type: Motion.ease }
     }
 
     Text {
@@ -47,7 +47,7 @@ Item {
             return Math.max(0, Math.min(target, maxY))
         }
         Behavior on contentY {
-            NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+            NumberAnimation { duration: Motion.scrollMs; easing.type: Motion.ease }
         }
 
         Column {
@@ -168,12 +168,7 @@ Item {
                             x: guide.brandingOn ? 32 : 4
                             color: "#f5f5f7"
                             Behavior on x {
-                                SpringAnimation {
-                                    spring: 3.2
-                                    damping: 0.62
-                                    mass: 0.6
-                                    epsilon: 0.2
-                                }
+                                NumberAnimation { duration: Motion.focusMs; easing.type: Motion.ease }
                             }
                         }
                     }

@@ -364,6 +364,23 @@ int runLogicSelfCheck()
     if (youtube->homeUrl.contains(QStringLiteral("/feed/subscriptions")) || !youtube->homeUrl.contains(QStringLiteral("youtube.com"))
         || youtube->extraUrls.isEmpty() || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
         return fail("youtube home");
+    if (!netflixScript.contains(QStringLiteral("data-src")) || !netflixScript.contains(QStringLiteral("srcset"))
+        || !netflixScript.contains(QStringLiteral("backgroundImage")))
+        return fail("cover art extract");
+    if (!mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("credentials: 'include'"))
+        || !mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("8192")))
+        return fail("cover fetch script");
+    if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))
+        || !mirrorUrlIsPlayback(QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
+        || mirrorUrlIsPlayback(netflix->homeUrl) || mirrorUrlIsPlayback(youtube->homeUrl)
+        || mirrorUrlIsPlayback(youtube->extraUrls.at(0)))
+        return fail("catalog refuses watch urls");
+    if (mirrorRowService(QStringLiteral("netflix"), QString()) != QStringLiteral("netflix")
+        || !mirrorRowService(QStringLiteral("netflix"), QStringLiteral("https://www.netflix.com/watch/80100172")).isEmpty()
+        || !mirrorRowService(QStringLiteral("library"), QString()).isEmpty())
+        return fail("local mirror row opens the service");
+    if (!mirrorKeepRicherPage(10, 1) || mirrorKeepRicherPage(10, 6) || mirrorKeepRicherPage(3, 1))
+        return fail("keep richer youtube page");
     const MirrorAdapter *disney = findMirrorAdapter(mirrors, QStringLiteral("disney"));
     const MirrorAdapter *globoplay = findMirrorAdapter(mirrors, QStringLiteral("globoplay"));
     if (!disney || disney->playerSeek != QLatin1String("script")
@@ -529,11 +546,11 @@ int runLogicSelfCheck()
       "rowSelector": "learned-row"
     })json"));
     overlayFile.close();
-    const MirrorAdapter *overlaid = findMirrorAdapter(loadMirrorAdapters(dir.filePath(QStringLiteral("overlay"))), QStringLiteral("netflix"));
-    if (!overlaid || overlaid->rowSelector != QLatin1String("learned-row")
-        || findMirrorAdapter(loadMirrorAdapters(dir.filePath(QStringLiteral("overlay"))), QStringLiteral("youtube"))->kind
-               != QLatin1String("youtube")
-        || loadMirrorAdapters(dir.filePath(QStringLiteral("overlay"))).size() != 7)
+    const QVector<MirrorAdapter> overlaidAdapters = loadMirrorAdapters(dir.filePath(QStringLiteral("overlay")));
+    const MirrorAdapter *overlaid = findMirrorAdapter(overlaidAdapters, QStringLiteral("netflix"));
+    const MirrorAdapter *overlaidYoutube = findMirrorAdapter(overlaidAdapters, QStringLiteral("youtube"));
+    if (!overlaid || !overlaidYoutube || overlaid->rowSelector != QLatin1String("learned-row")
+        || overlaidYoutube->kind != QLatin1String("youtube") || overlaidAdapters.size() != 7)
         return fail("adapter overlay");
 
     const QString learnRoot = dir.filePath(QStringLiteral("learn"));
@@ -587,8 +604,8 @@ int runLogicSelfCheck()
     const QString applyRoot = dir.filePath(QStringLiteral("apply"));
     if (!applyLearnResponse(applyRoot, *netflix, {netflixSample}, fenced))
         return fail("apply learn");
-    const MirrorAdapter *saved =
-        findMirrorAdapter(loadMirrorAdapters(applyRoot), QStringLiteral("netflix"));
+    const QVector<MirrorAdapter> savedAdapters = loadMirrorAdapters(applyRoot);
+    const MirrorAdapter *saved = findMirrorAdapter(savedAdapters, QStringLiteral("netflix"));
     if (!saved || saved->rowSelector != QLatin1String(".learned") || saved->version != 1 || saved->kind != QLatin1String("netflix"))
         return fail("learned overlay");
     const QByteArray domResponse = QByteArrayLiteral("```json\n{\"id\":\"netflix\",\"rowSelector\":\".sumiu\"}\n```");
