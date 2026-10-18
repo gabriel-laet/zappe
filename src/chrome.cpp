@@ -74,6 +74,39 @@ QString x11SocketPath(const QString &display)
     return QStringLiteral("/tmp/.X11-unix/X") + bareDisplay(display);
 }
 
+QString chromeExitCause(int exitCode, int exitStatus)
+{
+    if (exitStatus == int(QProcess::CrashExit))
+        return QStringLiteral("signal %1").arg(exitCode);
+    return QStringLiteral("code %1").arg(exitCode);
+}
+
+int chromeWatchBackoffMs(int attempt)
+{
+    int delay = 1000;
+    for (int i = 0; i < attempt && delay < 30000; ++i)
+        delay *= 2;
+    if (delay > 30000)
+        delay = 30000;
+    return delay;
+}
+
+bool chromeCatalogDown(bool wanted, ChromeFace face, bool running, bool portOpen)
+{
+    if (!wanted || face != ChromeFace::Hidden)
+        return false;
+    return !running || !portOpen;
+}
+
+bool chromeDisplayDown(bool wanted, bool socketExists, bool tracked, bool xvfbRunning)
+{
+    if (!wanted)
+        return false;
+    if (!socketExists)
+        return true;
+    return tracked && !xvfbRunning;
+}
+
 QProcessEnvironment chromeFaceEnvironment(ChromeFace face, const QProcessEnvironment &base, const QString &guideDisplay,
                                           const QString &guideWayland, const QString &catalogDisplay)
 {
@@ -178,8 +211,17 @@ bool ChromeSession::ensurePrivateDisplay()
         emit failed(QStringLiteral("Xvfb não encontrado. Instale xorg-server-xvfb."));
         return false;
     }
-    if (!m_xvfb)
+    if (!m_xvfb) {
         m_xvfb = new QProcess(this);
+        connect(m_xvfb, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+            if (m_xvfbStopping)
+                return;
+            std::fprintf(stderr, "zappe: xvfb %s saiu %s\n", qPrintable(m_catalogDisplay),
+                         qPrintable(chromeExitCause(code, int(status))));
+            if (m_catalogWanted && m_face == ChromeFace::Hidden)
+                scheduleRevive();
+        });
+    }
     if (m_xvfb->state() == QProcess::NotRunning) {
         QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         env.remove(QStringLiteral("DISPLAY"));
@@ -204,6 +246,24 @@ bool ChromeSession::ensurePrivateDisplay()
     std::fprintf(stderr, "zappe: xvfb %s não abriu %s\n", qPrintable(m_catalogDisplay), qPrintable(socket));
     emit failed(QStringLiteral("Xvfb não abriu o display do catálogo."));
     return false;
+}
+
+void ChromeSession::restartPrivateDisplay()
+{
+    if (m_catalogDisplay.isEmpty())
+        m_catalogDisplay = chromeCatalogDisplay(m_guideDisplay);
+    const bool tracked = m_xvfb != nullptr;
+    if (tracked && m_xvfb->state() != QProcess::NotRunning) {
+        m_xvfbStopping = true;
+        m_xvfb->terminate();
+        if (!m_xvfb->waitForFinished(800))
+            m_xvfb->kill();
+        m_xvfb->waitForFinished(400);
+        m_xvfbStopping = false;
+    }
+    const QString socket = x11SocketPath(m_catalogDisplay);
+    if (tracked && QFile::exists(socket))
+        QFile::remove(socket);
 }
 
 void ChromeSession::startProcess()
@@ -231,21 +291,35 @@ void ChromeSession::startProcess()
     connect(process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
         emit failed(QStringLiteral("Chrome não iniciou."));
     });
-    connect(process, &QProcess::finished, this, [this, process] {
-        if (m_process == process)
+    connect(process, &QProcess::finished, this, [this, process](int code, QProcess::ExitStatus status) {
+        const bool current = m_process == process;
+        if (current)
             m_process = nullptr;
         m_devtoolsReady = false;
         ++m_probeGen;
+        const bool stopping = m_stopping;
+        m_stopping = false;
         process->deleteLater();
         emit exited();
-        if (!m_relaunchHidden || m_dataDir.isEmpty())
+        if (!current)
             return;
-        m_relaunchHidden = false;
-        m_face = ChromeFace::Hidden;
-        QTimer::singleShot(250, this, [this] {
-            if (!running())
-                startProcess();
-        });
+        if (m_relaunchHidden && !m_dataDir.isEmpty()) {
+            m_relaunchHidden = false;
+            m_face = ChromeFace::Hidden;
+            m_catalogWanted = true;
+            QTimer::singleShot(250, this, [this] {
+                if (!running())
+                    startProcess();
+            });
+            return;
+        }
+        if (stopping)
+            return;
+        const bool catalog = m_face == ChromeFace::Hidden;
+        std::fprintf(stderr, "zappe: chrome %s saiu %s\n", catalog ? "catálogo" : "player",
+                     qPrintable(chromeExitCause(code, int(status))));
+        if (catalog && m_catalogWanted)
+            scheduleRevive();
     });
     if (m_face == ChromeFace::Player) {
         std::fprintf(stderr, "zappe: chrome %s port %d player no gamescope DISPLAY=%s WAYLAND_DISPLAY=%s\n",
@@ -277,6 +351,8 @@ void ChromeSession::probeDevTools(int attempt)
             return;
         if (ok) {
             m_devtoolsReady = true;
+            m_watchAttempt = 0;
+            m_portMisses = 0;
             std::fprintf(stderr, "zappe: chrome cdp pronto na porta %d\n", port);
             emit ready();
             return;
@@ -295,6 +371,8 @@ void ChromeSession::probeDevTools(int attempt)
 void ChromeSession::ensure(const QString &dataDir)
 {
     m_dataDir = dataDir;
+    m_catalogWanted = true;
+    armWatch();
     if (running()) {
         if (m_devtoolsReady)
             emit ready();
@@ -308,6 +386,7 @@ void ChromeSession::ensure(const QString &dataDir)
 void ChromeSession::present(const QString &dataDir)
 {
     m_dataDir = dataDir;
+    m_catalogWanted = false;
     m_relaunchHidden = false;
     if (running() && m_face == ChromeFace::Player) {
         if (m_devtoolsReady)
@@ -322,6 +401,8 @@ void ChromeSession::present(const QString &dataDir)
 
 void ChromeSession::relaunchHidden()
 {
+    m_catalogWanted = true;
+    armWatch();
     m_relaunchHidden = true;
     if (!running()) {
         m_relaunchHidden = false;
@@ -335,13 +416,118 @@ void ChromeSession::relaunchHidden()
     });
 }
 
+void ChromeSession::reviveCatalog()
+{
+    if (m_dataDir.isEmpty() || m_face != ChromeFace::Hidden)
+        return;
+    m_catalogWanted = true;
+    armWatch();
+    if (m_revivePending)
+        return;
+    if (running() && m_devtoolsReady)
+        m_devtoolsReady = false;
+    scheduleRevive();
+}
+
+void ChromeSession::armWatch()
+{
+    if (m_watch)
+        return;
+    m_watch = new QTimer(this);
+    m_watch->setInterval(5000);
+    connect(m_watch, &QTimer::timeout, this, &ChromeSession::checkCatalog);
+    m_watch->start();
+}
+
+void ChromeSession::checkCatalog()
+{
+    if (!m_catalogWanted || m_face != ChromeFace::Hidden || m_dataDir.isEmpty() || m_revivePending)
+        return;
+    if (m_catalogDisplay.isEmpty())
+        m_catalogDisplay = chromeCatalogDisplay(m_guideDisplay);
+    const bool socket = QFile::exists(x11SocketPath(m_catalogDisplay));
+    const bool tracked = m_xvfb != nullptr;
+    const bool xvfbRunning = tracked && m_xvfb->state() != QProcess::NotRunning;
+    if (chromeDisplayDown(true, socket, tracked, xvfbRunning)) {
+        std::fprintf(stderr, "zappe: xvfb %s fora do ar\n", qPrintable(m_catalogDisplay));
+        scheduleRevive();
+        return;
+    }
+    if (chromeCatalogDown(m_catalogWanted, m_face, running(), true)) {
+        scheduleRevive();
+        return;
+    }
+    if (!running() || !m_devtoolsReady || m_portProbe)
+        return;
+    m_portProbe = true;
+    const int generation = m_probeGen;
+    const int port = m_launch.port;
+    auto *http = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("http://127.0.0.1:%1/json/version").arg(port)));
+    request.setTransferTimeout(800);
+    QNetworkReply *reply = http->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, http, generation, port] {
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        reply->deleteLater();
+        http->deleteLater();
+        m_portProbe = false;
+        if (generation != m_probeGen || !m_catalogWanted || m_face != ChromeFace::Hidden)
+            return;
+        if (ok) {
+            m_portMisses = 0;
+            return;
+        }
+        ++m_portMisses;
+        if (m_portMisses < 2)
+            return;
+        m_devtoolsReady = false;
+        m_portMisses = 0;
+        std::fprintf(stderr, "zappe: chrome catálogo porta %d fechada\n", port);
+        scheduleRevive();
+    });
+}
+
+void ChromeSession::scheduleRevive()
+{
+    if (m_revivePending || m_dataDir.isEmpty() || !m_catalogWanted || m_face != ChromeFace::Hidden)
+        return;
+    m_revivePending = true;
+    const int delay = chromeWatchBackoffMs(m_watchAttempt);
+    ++m_watchAttempt;
+    std::fprintf(stderr, "zappe: chrome catálogo relança em %d ms (tentativa %d)\n", delay, m_watchAttempt);
+    QTimer::singleShot(delay, this, [this] { reviveNow(); });
+}
+
+void ChromeSession::reviveNow()
+{
+    m_revivePending = false;
+    if (!m_catalogWanted || m_face != ChromeFace::Hidden || m_dataDir.isEmpty())
+        return;
+    if (m_catalogDisplay.isEmpty())
+        m_catalogDisplay = chromeCatalogDisplay(m_guideDisplay);
+    const bool socket = QFile::exists(x11SocketPath(m_catalogDisplay));
+    const bool tracked = m_xvfb != nullptr;
+    const bool xvfbRunning = tracked && m_xvfb->state() != QProcess::NotRunning;
+    if (chromeDisplayDown(true, socket, tracked, xvfbRunning))
+        restartPrivateDisplay();
+    else if (running() && m_devtoolsReady)
+        return;
+    if (running())
+        stop();
+    m_face = ChromeFace::Hidden;
+    startProcess();
+}
+
 void ChromeSession::stop()
 {
     if (!m_process)
         return;
+    m_stopping = true;
     m_process->terminate();
-    if (!m_process->waitForFinished(800))
+    if (!m_process->waitForFinished(800)) {
         m_process->kill();
+        m_process->waitForFinished(400);
+    }
 }
 
 } // namespace zappe

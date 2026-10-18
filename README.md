@@ -16,7 +16,7 @@ zappe-kiosk.service   (systemd de sistema, tty1, seat0)
                  perfil ~/.local/share/zappe/chrome-profile
 ```
 
-Não há segundo gamescope. O gamescope ignora posição de janela e mostra o que tem foco, então o Chrome do catálogo não pode nascer nesse display. O app abre um Xvfb (`:99`, ou `ZAPPE_CATALOG_DISPLAY`) e aponta só esse Chrome para lá, com user-agent normal. No Play o app fecha essa instância — o perfil não aceita duas ao mesmo tempo — e sobe o Chrome `--kiosk` no display do gamescope. Ao sair do vídeo, o catálogo volta para o Xvfb.
+Não há segundo gamescope. O gamescope ignora posição de janela e mostra o que tem foco, então o Chrome do catálogo não pode nascer nesse display. O app abre um Xvfb (`:99`, ou `ZAPPE_CATALOG_DISPLAY`) e aponta só esse Chrome para lá, com user-agent normal. No Play o app fecha essa instância — o perfil não aceita duas ao mesmo tempo — e sobe o Chrome `--kiosk` no display do gamescope. Ao sair do vídeo, o catálogo volta para o Xvfb. Se esse Chrome ou o Xvfb caem, o app relança os dois com espera (1s, dobrando até 30s) e registra o código ou o sinal da saída.
 
 | Peça | Função |
 | --- | --- |

@@ -1816,6 +1816,7 @@ void MirrorSession::onChromeReady()
     if (!m_cdp || !m_chrome)
         return;
     m_attachTries = 0;
+    m_cdpGaveUp = false;
     m_tabService.clear();
     if (m_job == JobPlay) {
         scheduleAttach();
@@ -1835,7 +1836,7 @@ void MirrorSession::scheduleAttach()
     if (!m_cdp || !m_chrome || m_cdp->connected())
         return;
     if (m_attachTries >= 12) {
-        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        noteCdpDown();
         return;
     }
     const int attempt = m_attachTries++;
@@ -1859,7 +1860,7 @@ void MirrorSession::schedulePump()
     if (!m_cdp || !m_chrome || m_busy)
         return;
     if (m_attachTries >= 12) {
-        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        noteCdpDown();
         return;
     }
     const int attempt = m_attachTries++;
@@ -1871,6 +1872,16 @@ void MirrorSession::schedulePump()
         if (!m_busy)
             pump();
     });
+}
+
+void MirrorSession::noteCdpDown()
+{
+    if (m_cdpGaveUp || !m_chrome)
+        return;
+    m_cdpGaveUp = true;
+    std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+    if (m_chrome->face() == ChromeFace::Hidden)
+        m_chrome->reviveCatalog();
 }
 
 void MirrorSession::onAttached()

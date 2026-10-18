@@ -227,6 +227,7 @@ private:
     void armWatch(const QString &serviceId);
     void scheduleAttach();
     void schedulePump();
+    void noteCdpDown();
 
     Guide *m_guide = nullptr;
     ChromeSession *m_chrome = nullptr;
@@ -264,6 +265,7 @@ private:
     int m_lastDomTitles = -1;
     int m_job = 0;
     int m_attachTries = 0;
+    bool m_cdpGaveUp = false;
     qint64 m_busySince = 0;
     bool m_busy = false;
     bool m_player = false;

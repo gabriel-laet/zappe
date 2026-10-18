@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QProcess>
+#include <QTimer>
 #include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
@@ -29,6 +30,14 @@ QString x11SocketPath(const QString &display);
 // Catálogo: DISPLAY do Xvfb, sem WAYLAND_DISPLAY. Player: o display do gamescope.
 QProcessEnvironment chromeFaceEnvironment(ChromeFace face, const QProcessEnvironment &base, const QString &guideDisplay,
                                           const QString &guideWayland, const QString &catalogDisplay);
+// "code 0" ou "signal 9". CrashExit do Qt traz o sinal no código.
+QString chromeExitCause(int exitCode, int exitStatus);
+// Primeira relançada espera 1s; dobra até 30s.
+int chromeWatchBackoffMs(int attempt);
+// Catálogo que deveria estar no ar, com processo morto ou porta fechada. O player não entra.
+bool chromeCatalogDown(bool wanted, ChromeFace face, bool running, bool portOpen);
+// Socket sumiu, ou o Xvfb que o app subiu morreu.
+bool chromeDisplayDown(bool wanted, bool socketExists, bool tracked, bool xvfbRunning);
 
 class ChromeSession : public QObject {
     Q_OBJECT
@@ -42,6 +51,8 @@ public:
     void present(const QString &dataDir);
     // Fecha o kiosk e sobe de novo no Xvfb. O perfil não abre duas instâncias.
     void relaunchHidden();
+    // Processo morto ou porta fechada: sobe o catálogo de novo, com espera.
+    void reviveCatalog();
     void stop();
 
 signals:
@@ -52,8 +63,13 @@ signals:
 private:
     void rememberGuideDisplay();
     bool ensurePrivateDisplay();
+    void restartPrivateDisplay();
     void startProcess();
     void probeDevTools(int attempt);
+    void armWatch();
+    void checkCatalog();
+    void scheduleRevive();
+    void reviveNow();
 
     ChromeLaunch m_launch;
     QProcess *m_process = nullptr;
@@ -66,7 +82,15 @@ private:
     bool m_guideCaptured = false;
     bool m_relaunchHidden = false;
     bool m_devtoolsReady = false;
+    bool m_catalogWanted = false;
+    bool m_stopping = false;
+    bool m_revivePending = false;
+    bool m_portProbe = false;
+    bool m_xvfbStopping = false;
     int m_probeGen = 0;
+    int m_watchAttempt = 0;
+    int m_portMisses = 0;
+    QTimer *m_watch = nullptr;
 };
 
 } // namespace zappe

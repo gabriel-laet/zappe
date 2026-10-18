@@ -317,6 +317,22 @@ int runLogicSelfCheck()
         || chromeCatalogDisplay(QStringLiteral(":99")) != QLatin1String(":98")
         || x11SocketPath(QStringLiteral(":99")) != QLatin1String("/tmp/.X11-unix/X99"))
         return fail("catalog display");
+    if (chromeWatchBackoffMs(0) != 1000 || chromeWatchBackoffMs(1) != 2000 || chromeWatchBackoffMs(2) != 4000
+        || chromeWatchBackoffMs(4) != 16000 || chromeWatchBackoffMs(5) != 30000 || chromeWatchBackoffMs(12) != 30000)
+        return fail("chrome watch backoff");
+    if (chromeExitCause(0, int(QProcess::NormalExit)) != QLatin1String("code 0")
+        || chromeExitCause(9, int(QProcess::CrashExit)) != QLatin1String("signal 9")
+        || chromeExitCause(1, int(QProcess::NormalExit)) != QLatin1String("code 1"))
+        return fail("chrome exit cause");
+    if (!chromeCatalogDown(true, ChromeFace::Hidden, false, false)
+        || !chromeCatalogDown(true, ChromeFace::Hidden, true, false)
+        || chromeCatalogDown(true, ChromeFace::Hidden, true, true)
+        || chromeCatalogDown(true, ChromeFace::Player, false, false)
+        || chromeCatalogDown(false, ChromeFace::Hidden, false, false))
+        return fail("chrome catalog down");
+    if (!chromeDisplayDown(true, false, false, false) || !chromeDisplayDown(true, true, true, false)
+        || chromeDisplayDown(true, true, false, false) || chromeDisplayDown(false, false, true, false))
+        return fail("chrome display down");
     QProcessEnvironment guideEnv;
     guideEnv.insert(QStringLiteral("DISPLAY"), QStringLiteral(":1"));
     guideEnv.insert(QStringLiteral("WAYLAND_DISPLAY"), QStringLiteral("wayland-0"));
