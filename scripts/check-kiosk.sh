@@ -31,6 +31,22 @@ if ! grep -q 'PAMName=login' "${root}/packaging/appliance/zappe-kiosk.service"; 
   echo "check-kiosk: system unit must join seat0 via PAMName=login" >&2
   exit 1
 fi
+unit="${root}/packaging/appliance/zappe-kiosk.service"
+if grep -vE '^[[:space:]]*#' "${unit}" | grep -q '%h\|%U'; then
+  echo "check-kiosk: system unit must not use %h or %U" >&2
+  exit 1
+fi
+if ! grep -q 'Environment=HOME=/home/YOUR_USER' "${unit}" \
+  || ! grep -q 'Environment=USER=YOUR_USER' "${unit}" \
+  || ! grep -q 'ExecStart=/home/YOUR_USER/bin/zappe-kiosk.sh' "${unit}" \
+  || ! grep -q '^User=YOUR_USER$' "${unit}"; then
+  echo "check-kiosk: system unit must pin YOUR_USER, HOME and USER" >&2
+  exit 1
+fi
+if ! grep -q 'XDG_RUNTIME_DIR' "${kiosk}"; then
+  echo "check-kiosk: kiosk script must set the user runtime dir" >&2
+  exit 1
+fi
 if ! grep -q 'while true' "${kiosk}"; then
   echo "check-kiosk: kiosk script must relaunch zappe" >&2
   exit 1

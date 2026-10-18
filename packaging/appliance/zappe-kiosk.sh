@@ -9,6 +9,15 @@
 # O espelho HDMI baseado em gpu-screen-recorder, em clipes de 2s, foi removido.
 set -u
 
+# HOME e USER vêm da unit de sistema (User= explícito). O runtime do
+# usuário sai do PAM; se a sessão não exportou, usa o uid real.
+if [[ -z "${XDG_RUNTIME_DIR:-}" ]]; then
+  export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+fi
+if [[ -z "${DBUS_SESSION_BUS_ADDRESS:-}" && -S "${XDG_RUNTIME_DIR}/bus" ]]; then
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+fi
+
 export PATH="${HOME}/bin:/usr/local/bin:${PATH}"
 
 DATA="${ZAPPE_DATA_DIR:-${HOME}/.local/share/zappe}"

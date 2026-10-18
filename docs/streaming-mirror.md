@@ -1,6 +1,8 @@
 # Espelho dos streamings
 
-O Chrome não aparece para navegar. Fora do Play ele sobe sem janela (`--headless=new`), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`). O guia pede ao CDP as respostas JSON/GraphQL da página e desenha fileiras, capas e continuar assistindo. O DOM entra quando a rede não traz título reproduzível; perfis e busca por seletor saem dessa leitura. O Chrome só vem para a frente no Play, em tela cheia.
+O Chrome não aparece para navegar. Fora do Play ele sobe sem janela (`--headless=new`), no mesmo perfil de sempre (`~/.local/share/zappe/chrome-profile`), com `--window-size=1920,1080` e `--ozone-override-screen-size=1920,1080`. Sem o segundo argumento o headless põe a tela virtual em 800×600 e ela briga com a janela. O guia pede ao CDP as respostas JSON/GraphQL da página e desenha fileiras, capas e continuar assistindo. O DOM entra quando a rede não traz título reproduzível; perfis e busca por seletor saem dessa leitura. O Chrome só vem para a frente no Play, em tela cheia.
+
+O processo do Chrome fica pronto antes da porta de depuração. O app espera `/json/version`, escolhe a primeira aba `page` em `/json/list` (ou cria uma com `/json/new` se não houver) e só então manda `Page.enable`, `Network.enable` e `Page.navigate` para a home. Cada passo sai no stderr (`zappe: cdp …`, `zappe: espelho …`). Se a home não abre em 20 segundos, a fileira deixa o “Atualizando…” e mostra um card de erro. OK nesse card é “Tentar de novo”.
 
 ## Adaptadores
 

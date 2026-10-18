@@ -254,8 +254,22 @@ int runLogicSelfCheck()
         || !joined.contains(QStringLiteral("--headless=new")) || !joined.contains(QStringLiteral("--remote-debugging-port="))
         || !joined.contains(QStringLiteral("chrome-profile")) || joined.contains(QStringLiteral("gamescope")))
         return fail("chrome args");
+    if (!joined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
+        || !joined.contains(QStringLiteral("--window-size=1920,1080")) || joined.contains(QStringLiteral("800,600")))
+        return fail("chrome screen");
     if (!playerJoined.contains(QStringLiteral("--kiosk")) || playerJoined.contains(QStringLiteral("--headless")))
         return fail("chrome player");
+    if (!playerJoined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
+        || !playerJoined.contains(QStringLiteral("--window-size=1920,1080")))
+        return fail("chrome player screen");
+    QString retryService;
+    if (!mirrorShelfRetries(QStringLiteral("error"), QStringLiteral("mirror:netflix"), retryService)
+        || retryService != QLatin1String("netflix")
+        || mirrorShelfRetries(QStringLiteral("loading"), QStringLiteral("mirror:netflix"), retryService)
+        || mirrorShelfRetries(QStringLiteral("error"), QStringLiteral("apps"), retryService))
+        return fail("mirror retry");
+    if (mirrorLoadTimeoutMs() < 10000 || mirrorLoadTimeoutMs() > 60000)
+        return fail("mirror load timeout");
     if (!cdpCommand(7, QStringLiteral("Page.navigate"), QJsonObject{{QStringLiteral("url"), QStringLiteral("https://example")}})
              .contains("Page.navigate"))
         return fail("cdp command");

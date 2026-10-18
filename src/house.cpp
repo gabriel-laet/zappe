@@ -186,6 +186,10 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
     if (m_guide->page() == QLatin1String("settings"))
         m_samsung->refresh();
     connect(m_guide, &Guide::serviceRequested, this, &House::showMirror);
+    connect(m_guide, &Guide::mirrorRetryRequested, this, [this](const QString &service) {
+        if (m_mirror)
+            m_mirror->refresh(service);
+    });
     connect(m_guide, &Guide::profileRequested, this, [this](const QString &service, const QString &name) {
         showMirror(service);
         m_mirror->chooseProfile(service, name);

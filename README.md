@@ -84,6 +84,8 @@ ZAPPE_AUDIO_DISABLE=1 ./build/zappe --windowed
 
 O gamescope sobe numa **unit de sistema**, no tty1, dentro da sessão do usuário no seat0. Sem essa sessão o PipeWire do usuário não aparece e o HDMI fica mudo. O `getty@tty1` fica mascarado.
 
+Na unit de sistema, `%h` vira `/root` e `%U` vira `0`. O `ExecStart` não existe e o systemd fica em 203/EXEC. O arquivo do repo usa o placeholder `YOUR_USER` e `Environment=HOME` / `Environment=USER` com caminho fixo. O `sed` abaixo troca o placeholder pelo usuário da TV antes de habilitar.
+
 ```bash
 sudo usermod -aG video,input,render "$USER"
 loginctl enable-linger "$USER"
@@ -130,16 +132,20 @@ pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:hdmi-stereo
 
 ## Chrome e roteiros de login
 
-O app lança:
+Fora do Play o app lança o Chrome sem janela. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`: sem isso o headless injeta uma tela virtual de 800×600.
 
 ```bash
 google-chrome-stable \
   --user-data-dir="$HOME/.local/share/zappe/chrome-profile" \
   --remote-debugging-port=9222 \
   --remote-allow-origins=* \
-  --kiosk \
+  --headless=new \
+  --ozone-override-screen-size=1920,1080 \
+  --window-size=1920,1080 \
   about:blank
 ```
+
+No Play a mesma tela entra com `--kiosk` no lugar de `--headless=new`.
 
 `data/logins.json` descreve cada streaming: `homeUrl`, `readySelector` e passos `navigate`, `click` e `ask`. Um `ask` pede `email`, `password`, `code` ou `profile`.
 

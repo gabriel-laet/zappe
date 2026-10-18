@@ -180,6 +180,7 @@ signals:
     void playRequested(const QString &title, const QString &service, const QString &href);
     void serviceRequested(const QString &service);
     void profileRequested(const QString &service, const QString &name);
+    void mirrorRetryRequested(const QString &service);
     void layoutChanged();
 
 private:

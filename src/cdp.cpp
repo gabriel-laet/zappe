@@ -124,28 +124,83 @@ CdpClient::CdpClient(QObject *parent)
 void CdpClient::attach(int port)
 {
     m_port = port;
-    const QUrl url(QStringLiteral("http://127.0.0.1:%1/json/list").arg(port));
+    const int generation = ++m_attachGen;
+    std::fprintf(stderr, "zappe: cdp listando 127.0.0.1:%d/json/list\n", port);
+    requestTargets(generation, false);
+}
+
+void CdpClient::requestTargets(int generation, bool created)
+{
+    const QUrl url(QStringLiteral("http://127.0.0.1:%1/json/list").arg(m_port));
     QNetworkReply *reply = m_http->get(QNetworkRequest(url));
-    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation, created] {
+        if (generation != m_attachGen) {
+            reply->deleteLater();
+            return;
+        }
         const QByteArray body = reply->readAll();
         const QString error = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
         reply->deleteLater();
         if (!error.isEmpty()) {
+            std::fprintf(stderr, "zappe: cdp http %s\n", qPrintable(error));
             emit failed(error);
             return;
         }
         const QJsonDocument doc = QJsonDocument::fromJson(body);
         QString ws;
+        QString pageId;
+        QString pageUrl;
         for (const QJsonValue &value : doc.array()) {
             const QJsonObject obj = value.toObject();
-            if (obj.value(QStringLiteral("type")).toString() == QLatin1String("page")) {
-                ws = obj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
-                if (!ws.isEmpty())
-                    break;
-            }
+            if (obj.value(QStringLiteral("type")).toString() != QLatin1String("page"))
+                continue;
+            const QString candidate = obj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+            if (candidate.isEmpty())
+                continue;
+            ws = candidate;
+            pageId = obj.value(QStringLiteral("id")).toString();
+            pageUrl = obj.value(QStringLiteral("url")).toString();
+            break;
         }
         if (ws.isEmpty()) {
+            if (!created) {
+                std::fprintf(stderr, "zappe: cdp sem aba page, criando target\n");
+                createTarget(generation);
+                return;
+            }
+            std::fprintf(stderr, "zappe: cdp sem aba page\n");
             emit failed(QStringLiteral("CDP sem aba page"));
+            return;
+        }
+        std::fprintf(stderr, "zappe: cdp alvo %s url %s\n", qPrintable(pageId), qPrintable(pageUrl));
+        openSocket(ws);
+    });
+}
+
+void CdpClient::createTarget(int generation)
+{
+    const QUrl url(QStringLiteral("http://127.0.0.1:%1/json/new?about:blank").arg(m_port));
+    QNetworkReply *reply = m_http->put(QNetworkRequest(url), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {
+        if (generation != m_attachGen) {
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray body = reply->readAll();
+        const QString error = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
+        reply->deleteLater();
+        if (!error.isEmpty()) {
+            std::fprintf(stderr, "zappe: cdp criar target %s\n", qPrintable(error));
+            emit failed(error);
+            return;
+        }
+        const QJsonObject obj = QJsonDocument::fromJson(body).object();
+        const QString ws = obj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+        std::fprintf(stderr, "zappe: cdp alvo novo %s url %s\n",
+                     qPrintable(obj.value(QStringLiteral("id")).toString()),
+                     qPrintable(obj.value(QStringLiteral("url")).toString()));
+        if (ws.isEmpty()) {
+            requestTargets(generation, true);
             return;
         }
         openSocket(ws);
@@ -160,16 +215,37 @@ void CdpClient::openSocket(const QString &url)
     }
     m_connected = false;
     m_socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
-    connect(m_socket, &QWebSocket::connected, this, [this] {
+    QWebSocket *socket = m_socket;
+    connect(socket, &QWebSocket::connected, this, [this, socket] {
+        if (m_socket != socket)
+            return;
         m_connected = true;
+        std::fprintf(stderr, "zappe: cdp conectado\n");
+        m_pendingPage = m_nextId++;
+        socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingPage, QStringLiteral("Page.enable"), QJsonObject())));
         emit attached();
     });
-    connect(m_socket, &QWebSocket::textMessageReceived, this, &CdpClient::onMessage);
-    connect(m_socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error), this,
-            [this](QAbstractSocket::SocketError) {
-                emit failed(m_socket ? m_socket->errorString() : QStringLiteral("websocket CDP"));
+    connect(socket, &QWebSocket::textMessageReceived, this, &CdpClient::onMessage);
+    connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error), this,
+            [this, socket](QAbstractSocket::SocketError) {
+                if (m_socket != socket)
+                    return;
+                m_connected = false;
+                const QString message = socket->errorString().isEmpty() ? QStringLiteral("websocket CDP") : socket->errorString();
+                std::fprintf(stderr, "zappe: cdp websocket %s\n", qPrintable(message));
+                emit failed(message);
             });
-    m_socket->open(QUrl(url));
+    connect(socket, &QWebSocket::disconnected, this, [this, socket] {
+        if (m_socket != socket)
+            return;
+        const bool was = m_connected;
+        m_connected = false;
+        std::fprintf(stderr, "zappe: cdp websocket fechado\n");
+        if (was)
+            emit failed(QStringLiteral("CDP desconectou"));
+    });
+    std::fprintf(stderr, "zappe: cdp websocket %s\n", qPrintable(url));
+    socket->open(QUrl(url));
 }
 
 void CdpClient::send(const QString &method, const QJsonObject &params)
@@ -186,6 +262,12 @@ void CdpClient::send(const QString &method, const QJsonObject &params)
 
 void CdpClient::navigate(const QString &url)
 {
+    std::fprintf(stderr, "zappe: cdp Page.navigate %s\n", qPrintable(url));
+    if (!m_socket || !m_connected) {
+        std::fprintf(stderr, "zappe: cdp Page.navigate sem conexão\n");
+        emit failed(QStringLiteral("CDP sem conexão"));
+        return;
+    }
     QJsonObject params;
     params.insert(QStringLiteral("url"), url);
     send(QStringLiteral("Page.navigate"), params);
@@ -247,8 +329,11 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
 
 void CdpClient::enableNetwork()
 {
-    if (!m_socket || !m_connected)
+    std::fprintf(stderr, "zappe: cdp Network.enable\n");
+    if (!m_socket || !m_connected) {
+        std::fprintf(stderr, "zappe: cdp Network.enable sem conexão\n");
         return;
+    }
     m_pendingEnable = m_nextId++;
     m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingEnable, QStringLiteral("Network.enable"), QJsonObject())));
 }
@@ -334,6 +419,10 @@ void CdpClient::onMessage(const QString &message)
                                  response.value(QStringLiteral("mimeType")).toString());
         } else if (method == QLatin1String("Network.loadingFinished")) {
             emit networkFinished(params.value(QStringLiteral("requestId")).toString());
+        } else if (method == QLatin1String("Page.frameNavigated")) {
+            const QJsonObject frame = params.value(QStringLiteral("frame")).toObject();
+            if (!frame.contains(QStringLiteral("parentId")))
+                std::fprintf(stderr, "zappe: cdp frame %s\n", qPrintable(frame.value(QStringLiteral("url")).toString()));
         }
         return;
     }
@@ -364,15 +453,27 @@ void CdpClient::onMessage(const QString &message)
         emit screenshotReady(png, !png.isEmpty());
         return;
     }
-    if (id == m_pendingEnable || id == m_pendingClose) {
+    if (id == m_pendingEnable || id == m_pendingClose || id == m_pendingPage) {
+        const bool enable = id == m_pendingEnable;
+        const bool page = id == m_pendingPage;
         if (id == m_pendingEnable)
             m_pendingEnable = 0;
         if (id == m_pendingClose)
             m_pendingClose = 0;
+        if (id == m_pendingPage)
+            m_pendingPage = 0;
+        if (obj.contains(QStringLiteral("error"))) {
+            const QString text = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
+            std::fprintf(stderr, "zappe: cdp %s erro %s\n", page ? "Page.enable" : (enable ? "Network.enable" : "Browser.close"),
+                         qPrintable(text));
+        } else if (enable) {
+            std::fprintf(stderr, "zappe: cdp Network.enable ok\n");
+        }
         return;
     }
     if (obj.contains(QStringLiteral("error"))) {
         const QString text = obj.value(QStringLiteral("error")).toObject().value(QStringLiteral("message")).toString();
+        std::fprintf(stderr, "zappe: cdp erro id %d %s\n", id, qPrintable(text));
         if (id == m_pendingHistory) {
             if (m_historyStage == 1) {
                 sendHistoryEval(historyBackScript());
@@ -391,6 +492,15 @@ void CdpClient::onMessage(const QString &message)
     }
     if (id == m_pendingNav) {
         m_pendingNav = 0;
+        const QJsonObject result = obj.value(QStringLiteral("result")).toObject();
+        const QString errorText = result.value(QStringLiteral("errorText")).toString();
+        if (!errorText.isEmpty()) {
+            std::fprintf(stderr, "zappe: cdp Page.navigate erro %s\n", qPrintable(errorText));
+            emit failed(errorText);
+            return;
+        }
+        std::fprintf(stderr, "zappe: cdp Page.navigate ok frame %s\n",
+                     qPrintable(result.value(QStringLiteral("frameId")).toString()));
         emit navigated();
         return;
     }
