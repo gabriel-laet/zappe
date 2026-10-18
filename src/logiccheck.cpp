@@ -429,8 +429,25 @@ int runLogicSelfCheck()
     if (!coverFetchIsBlocked(QStringLiteral("Failed to fetch")) || coverFetchIsBlocked(QStringLiteral("http 404")))
         return fail("cover fetch stops on cors");
     if (!coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg?r=1"), QStringLiteral("https://cdn.example/a/box.jpg?r=2"))
-        || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg")))
+        || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg"))
+        || coverUrlsMatch(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg"),
+                          QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/bb/source/640x360bb.jpg"))
+        || coverUrlsMatch(QStringLiteral("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"),
+                          QStringLiteral("https://i.ytimg.com/vi/zzzzzzzzzzz/hqdefault.jpg"))
+        || !coverUrlsMatch(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg?a=1"),
+                           QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg?a=2")))
         return fail("cover url match");
+    const QString amazonToken = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc123def4567890xyz.jpg"));
+    const QString amazonSized = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc123def4567890xyz._SX640_.jpg"));
+    const QString amazonOther = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/zzz9876543210abcdef.jpg"));
+    const QString hboToken = coverLooseToken(QStringLiteral(
+        "https://images.cdn.prd.api.discomax.com/2024/01/aa11bb22cc33dd44ee55ff6677889900.jpeg"));
+    if (amazonToken.size() < 16 || amazonToken != amazonSized || amazonToken == amazonOther || hboToken.size() < 16
+        || !coverLooseToken(QStringLiteral("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg")).isEmpty())
+        return fail("cover token");
     const QString queryA = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?r=1"));
     const QString queryB = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?token=2"));
     const QString otherArt = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/other.jpg"));
@@ -468,10 +485,13 @@ int runLogicSelfCheck()
     const QString appleArt = expandCoverUrl(
         QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/{w}x{h}{c}.{f}"));
     const QString encodedArt = expandCoverUrl(QStringLiteral("https://cdn.example/a.jpg?w=%7Bwidth%7D"));
+    const QString amazonArt =
+        expandCoverUrl(QStringLiteral("https://m.media-amazon.com/images/I/abc._SX{width}_SY{height}_.jpg"));
     if (hboArt.contains(QLatin1Char('{')) || !hboArt.contains(QStringLiteral("w=640"))
         || !hboArt.contains(QStringLiteral("h=360"))
         || appleArt != QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/640x360bb.jpg")
-        || encodedArt.contains(QLatin1Char('{')) || !encodedArt.contains(QStringLiteral("w=640")))
+        || encodedArt.contains(QLatin1Char('{')) || !encodedArt.contains(QStringLiteral("w=640"))
+        || !amazonArt.contains(QStringLiteral("._SX640_SY360_")))
         return fail("cover template");
     QImage solid(40, 30, QImage::Format_RGB32);
     solid.fill(Qt::red);
@@ -496,9 +516,42 @@ int runLogicSelfCheck()
     if (webpJpeg.size() < 32 || static_cast<unsigned char>(webpJpeg.at(0)) != 0xFF
         || static_cast<unsigned char>(webpJpeg.at(1)) != 0xD8)
         return fail("webp cover becomes jpeg");
+    QByteArray fakeAvif;
+    fakeAvif.append("\x00\x00\x00\x20", 4);
+    fakeAvif.append("ftyp");
+    fakeAvif.append("mif1");
+    fakeAvif.append("\x00\x00\x00\x00", 4);
+    fakeAvif.append("mif1");
+    fakeAvif.append("avif");
+    fakeAvif.append(QByteArray(16, '\0'));
+    QString avifDetail;
+    const QByteArray avifJpeg = coverJpegFromBody(fakeAvif, &avifDetail, QStringLiteral("image/avif"));
+    if (avifJpeg.size() < 32 && !avifDetail.startsWith(QStringLiteral("avif")))
+        return fail("avif magic");
+    const QString avifPath = QDir::temp().filePath(QStringLiteral("zappe-cover.avif"));
+    QProcess avif;
+    avif.start(QStringLiteral("ffmpeg"),
+               {QStringLiteral("-y"), QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("color=c=blue:s=32x24"), QStringLiteral("-frames:v"), QStringLiteral("1"),
+                QStringLiteral("-c:v"), QStringLiteral("libaom-av1"), QStringLiteral("-still-picture"),
+                QStringLiteral("1"), avifPath});
+    if (avif.waitForStarted(2000) && avif.waitForFinished(15000) && avif.exitCode() == 0) {
+        QFile avifFile(avifPath);
+        if (!avifFile.open(QIODevice::ReadOnly))
+            return fail("avif sample open");
+        QString avifBodyDetail;
+        const QByteArray avifBody = avifFile.readAll();
+        const QByteArray avifOut = coverJpegFromBody(avifBody, &avifBodyDetail, QStringLiteral("image/avif"));
+        if (avifOut.size() < 32 || static_cast<unsigned char>(avifOut.at(0)) != 0xFF
+            || static_cast<unsigned char>(avifOut.at(1)) != 0xD8)
+            return fail("avif cover becomes jpeg");
+    }
     if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect"))
         || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
-                .contains(QStringLiteral("aria-label")))
+                .contains(QStringLiteral("aria-label"))
+        || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
+                .contains(QStringLiteral("title.length >= 6")))
         return fail("cover clip script");
     if (!coverUrlIsPlaceholder(QStringLiteral("https://tv.apple.com/assets/1x1.gif"))
         || !coverUrlIsPlaceholder(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/a/1x1bb.gif"))
@@ -519,6 +572,8 @@ int runLogicSelfCheck()
         return fail("local mirror row opens the service");
     if (!mirrorKeepRicherPage(10, 1) || mirrorKeepRicherPage(10, 6) || mirrorKeepRicherPage(3, 1))
         return fail("keep richer youtube page");
+    if (!mirrorHoldLoading(0, 0) || mirrorHoldLoading(0, 26) || mirrorHoldLoading(10, 0))
+        return fail("hold loading until first read");
     const MirrorAdapter *disney = findMirrorAdapter(mirrors, QStringLiteral("disney"));
     const MirrorAdapter *globoplay = findMirrorAdapter(mirrors, QStringLiteral("globoplay"));
     if (!disney || disney->playerSeek != QLatin1String("script")
@@ -592,7 +647,8 @@ int runLogicSelfCheck()
     if (!mirrorLiveHero(QStringLiteral("Assistir ao vivo: Copa do Mundo"), QStringLiteral("https://globoplay.globo.com/v/1"))
         || !mirrorLiveHero(QStringLiteral("Ao vivo: Jornal"), QStringLiteral("https://globoplay.globo.com/v/2"))
         || mirrorLiveHero(QStringLiteral("Dark"), QStringLiteral("https://globoplay.globo.com/v/3"))
-        || !mirrorLiveHero(QStringLiteral("Copa"), QStringLiteral("https://globoplay.globo.com/ao-vivo/copa")))
+        || mirrorLiveHero(QStringLiteral("Copa"), QStringLiteral("https://globoplay.globo.com/ao-vivo/copa"))
+        || mirrorLiveHero(QStringLiteral("Novela"), QStringLiteral("https://globoplay.globo.com/ao-vivo/novela")))
         return fail("live hero");
     const MirrorPage globoLive = parseMirrorPage(QByteArray(R"json({
       "shelves": [{
@@ -600,13 +656,15 @@ int runLogicSelfCheck()
         "context": "continuar",
         "rows": [
           {"title": "Assistir ao vivo: Copa do Mundo Feminina Sub-17", "href": "https://globoplay.globo.com/ao-vivo/copa", "artwork": "https://example.test/live.jpg"},
-          {"title": "Novela", "href": "https://globoplay.globo.com/v/123", "artwork": "https://example.test/novela.jpg"}
+          {"title": "Novela", "href": "https://globoplay.globo.com/v/123", "artwork": "https://example.test/novela.jpg"},
+          {"title": "Jornal Nacional", "href": "https://globoplay.globo.com/ao-vivo/jornal", "artwork": "https://example.test/jornal.jpg"}
         ]
       }]
     })json"),
                                                        *globoplay);
-    if (!globoplay || globoLive.shelves.isEmpty() || globoLive.shelves.at(0).rows.size() != 1
-        || globoLive.shelves.at(0).rows.at(0).title != QLatin1String("Novela"))
+    if (!globoplay || globoLive.shelves.isEmpty() || globoLive.shelves.at(0).rows.size() != 2
+        || globoLive.shelves.at(0).rows.at(0).title != QLatin1String("Novela")
+        || globoLive.shelves.at(0).rows.at(1).title != QLatin1String("Jornal Nacional"))
         return fail("globoplay live hero dropped");
     NetworkSample primeSample;
     primeSample.url = QStringLiteral("https://www.primevideo.com/api/enrichItemMetadata");

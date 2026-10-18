@@ -171,7 +171,7 @@
       "searchUrl": "https://globoplay.globo.com/busca/?q={q}",
       "rowSelector": "[class*='carousel'], section, [class*='slider']",
       "rowTitleSelector": "h2, [data-testid*='title']",
-      "cardSelector": "[class*='card'], a[href*='/v/'], a[href*='/ao-vivo/']",
+      "cardSelector": "a[href*='/v/'], a[href*='/t/'], a[href*='/ao-vivo/'], [class*='card']",
       "linkSelector": "a[href*='/v/'], a[href*='/ao-vivo/'], a[href*='/t/']",
       "imageSelector": "img",
       "progressSelector": "[role='progressbar']",

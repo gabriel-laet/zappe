@@ -88,7 +88,9 @@ bool mirrorUrlIsPlayback(const QString &url);
 QString mirrorRowService(const QString &service, const QString &href);
 // Leitura nova muito menor que a anterior: fica a página mais rica.
 bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
-// Hero de canal ao vivo não entra na fileira do guia.
+// Ainda não há fileira: a tela segue em «Atualizando…», sem «Nada nesta página».
+bool mirrorHoldLoading(int previousTitles, int incomingTitles);
+// Hero de canal ao vivo não entra na fileira do guia. O href sozinho não descarta.
 bool mirrorLiveHero(const QString &title, const QString &href);
 // GIF 1×1 e pixel de rastreio não são capa.
 bool coverUrlIsPlaceholder(const QString &url);
@@ -104,12 +106,16 @@ QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles
 // Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
 QString coverMatchKey(const QString &url);
 bool coverUrlsMatch(const QString &wanted, const QString &loaded);
+// Trecho longo e único do path. Casa a imagem que o Chrome baixou quando o GET direto erra.
+QString coverLooseToken(const QString &url);
 // Referer do serviço (https://www.netflix.com/...), não o host do CDN.
 QString coverDownloadReferer(const QString &homeUrl);
 // Troca {width}, {w}x{h}{c}.{f} e afins por um tamanho real. Idempotente.
 QString expandCoverUrl(const QString &url);
 // JPEG pronto para o card. detail descreve o corpo quando a conversão falha.
-QByteArray coverJpegFromBody(const QByteArray &body, QString *detail);
+// mime (Content-Type) acompanha o GET direto. AVIF cai no ffmpeg por arquivo
+// temporário: o pipe não busca o átomo e -f avif não é demuxer.
+QByteArray coverJpegFromBody(const QByteArray &body, QString *detail, const QString &mime = {});
 QString coverBodyLabel(const QByteArray &body);
 // TypeError de CORS/rede: repetir o fetch não traz a imagem.
 bool coverFetchIsBlocked(const QString &error);
