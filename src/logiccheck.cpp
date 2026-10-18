@@ -134,7 +134,8 @@ int runLogicSelfCheck()
     if (resolveChannelName(QStringLiteral("SBT"), names) != QLatin1String("SBT HD"))
         return fail("sbt hd");
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
-    if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv")))
+    if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
+        || !script.contains(QStringLiteral("XF86Back quit")))
         return fail("ota pipeline");
     if (otaFrameIntervalMs() != 3 * 60 * 1000)
         return fail("ota frame interval");
@@ -154,7 +155,7 @@ int runLogicSelfCheck()
     liveRow.title = QStringLiteral("Globo HD");
     liveRow.live = true;
     assignOtaFrame(liveRow, frameDir.path(), frameNow);
-    if (liveRow.artworkSpec != framePath)
+    if (liveRow.artworkSpec != framePath || !liveRow.frame)
         return fail("ota frame assigned");
     QFile frameFile(framePath);
     if (!frameFile.open(QIODevice::ReadWrite))

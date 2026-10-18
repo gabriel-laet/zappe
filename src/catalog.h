@@ -19,6 +19,7 @@ struct RowData {
     QString color;
     bool wide = false;
     bool live = false;
+    bool frame = false;
     double progress = 0;
 };
 
@@ -54,6 +55,7 @@ public:
         ColorRole,
         WideRole,
         LiveRole,
+        FrameRole,
         ProgressRole,
     };
 

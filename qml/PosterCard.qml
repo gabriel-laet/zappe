@@ -10,6 +10,7 @@ Item {
     required property string color
     required property bool wide
     required property bool live
+    required property bool frame
     required property real progress
     required property int shelfIndex
     required property Flickable view
@@ -135,7 +136,7 @@ Item {
                 }
                 Item {
                     anchors.fill: parent
-                    visible: card.live
+                    visible: card.live && !card.frame
                     clip: true
 
                     Image {

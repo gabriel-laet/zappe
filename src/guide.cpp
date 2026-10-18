@@ -604,6 +604,7 @@ void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QSt
             row.artwork = artwork;
             row.ambient = ambient;
             row.color = color;
+            row.frame = true;
             changed = true;
         }
     }

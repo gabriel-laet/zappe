@@ -115,6 +115,8 @@ QVariant RowModel::data(const QModelIndex &index, int role) const
         return row.wide;
     case LiveRole:
         return row.live;
+    case FrameRole:
+        return row.frame;
     case ProgressRole:
         return row.progress;
     default:
@@ -134,6 +136,7 @@ QHash<int, QByteArray> RowModel::roleNames() const
         {ColorRole, "color"},
         {WideRole, "wide"},
         {LiveRole, "live"},
+        {FrameRole, "frame"},
         {ProgressRole, "progress"},
     };
 }

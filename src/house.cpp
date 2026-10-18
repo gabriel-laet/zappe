@@ -511,7 +511,9 @@ void House::setPlaying(bool playing)
 
 void House::updateKeyHold()
 {
-    m_remote->setHoldKeyboard(chromeFocused());
+    // O mpv em tela cheia fica com o foco. Sem o grab, XF86Back vai para ele
+    // e não fecha o canal. Escape o mpv já trata como quit.
+    m_remote->setHoldKeyboard(chromeFocused() || (m_ota && m_ota->playing()));
 }
 
 bool House::chromeFocused() const

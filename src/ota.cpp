@@ -268,10 +268,12 @@ bool mpvPlaybackStarted(const QByteArray &ipcLine)
 
 QString otaPipelineScript(const QString &conf, const QString &channel)
 {
-    return QStringLiteral("set -o pipefail; dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
+    return QStringLiteral("set -o pipefail; input=$(mktemp); "
+                          "printf '%s\\n' 'XF86Back quit' 'XF86_BACK quit' > \"$input\"; "
+                          "dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
                           "mpv --hwdec=no --vo=gpu --demuxer-lavf-format=mpegts "
                           "--demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal "
-                          "--input-ipc-server=%3 -")
+                          "--input-conf=\"$input\" --input-ipc-server=%3 -")
         .arg(shellQuote(conf), shellQuote(channel), shellQuote(QDir(resolveDataDir()).filePath(QStringLiteral("mpv.sock"))));
 }
 
@@ -348,8 +350,10 @@ void assignOtaFrame(RowData &row, const QString &dataDir, const QDateTime &now)
     if (!row.live || row.title.isEmpty())
         return;
     const QString path = otaFramePath(dataDir, row.title);
-    if (otaFrameIsFresh(path, now))
+    if (otaFrameIsFresh(path, now)) {
         row.artworkSpec = path;
+        row.frame = true;
+    }
 }
 
 OtaPlayer::OtaPlayer(QObject *parent)
