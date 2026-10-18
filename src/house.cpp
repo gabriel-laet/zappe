@@ -125,8 +125,10 @@ House::House(QObject *parent)
         m_guide->noteLiveFrame(QStringLiteral("zappe://ota/") + channel, art.artwork, art.ambient, art.color);
     });
     connect(m_ota, &OtaPlayer::stopped, this, [this] {
-        if (!m_chrome->running())
-            setPlaying(false);
+        if (m_player && m_chrome->running())
+            return;
+        setPlaying(false);
+        showGuide();
     });
     connect(m_samsung, &SamsungClient::failed, this, [this](int key, const QString &message) {
         const auto tvKey = TvKey(key);
@@ -511,8 +513,9 @@ void House::setPlaying(bool playing)
 
 void House::updateKeyHold()
 {
-    // O mpv em tela cheia fica com o foco. Sem o grab, XF86Back vai para ele
-    // e não fecha o canal. Escape o mpv já trata como quit.
+    // O mpv em tela cheia fica com o foco. O teclado do controle fica exclusivo
+    // para Back e Escape fecharem o canal mesmo assim. O input.conf do mpv
+    // também sai nessas teclas; o fim do processo devolve o guia.
     m_remote->setHoldKeyboard(chromeFocused() || (m_ota && m_ota->playing()));
 }
 

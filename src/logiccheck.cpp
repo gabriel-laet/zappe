@@ -54,8 +54,8 @@ int runLogicSelfCheck()
         || actionForEvdev(105) != RemoteAction::Left || actionForEvdev(106) != RemoteAction::Right)
         return fail("arrows");
     if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Back
-        || actionForEvdev(14) != RemoteAction::Back)
-        return fail("ok/home/del");
+        || actionForEvdev(14) != RemoteAction::Back || actionForEvdev(1) != RemoteAction::Back)
+        return fail("ok/home/del/escape");
     if (actionForEvdev(127) != RemoteAction::Menu || actionForEvdev(104) != RemoteAction::PageUp
         || actionForEvdev(109) != RemoteAction::PageDown)
         return fail("menu/page");
@@ -135,7 +135,8 @@ int runLogicSelfCheck()
         return fail("sbt hd");
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
     if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
-        || !script.contains(QStringLiteral("XF86Back quit")))
+        || !script.contains(QStringLiteral("ESC quit")) || !script.contains(QStringLiteral("XF86Back quit"))
+        || !script.contains(QStringLiteral("pkill -TERM -P")) || !script.contains(QStringLiteral("exec setsid")))
         return fail("ota pipeline");
     if (otaFrameIntervalMs() != 3 * 60 * 1000)
         return fail("ota frame interval");

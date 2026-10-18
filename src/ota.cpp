@@ -268,13 +268,20 @@ bool mpvPlaybackStarted(const QByteArray &ipcLine)
 
 QString otaPipelineScript(const QString &conf, const QString &channel)
 {
-    return QStringLiteral("set -o pipefail; input=$(mktemp); "
-                          "printf '%s\\n' 'XF86Back quit' 'XF86_BACK quit' > \"$input\"; "
-                          "dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
-                          "mpv --hwdec=no --vo=gpu --demuxer-lavf-format=mpegts "
-                          "--demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal "
-                          "--input-conf=\"$input\" --input-ipc-server=%3 -")
-        .arg(shellQuote(conf), shellQuote(channel), shellQuote(QDir(resolveDataDir()).filePath(QStringLiteral("mpv.sock"))));
+    // setsid deixa o shell como líder do grupo. Back/Escape no mpv saem por
+    // input.conf; o app também manda TERM para os filhos (dvbv5-zap | mpv).
+    const QString run = QStringLiteral(
+                            "set -o pipefail; input=$(mktemp); "
+                            "printf '%s\\n' 'ESC quit' 'XF86Back quit' 'XF86_Back quit' 'XF86_BACK quit' > \"$input\"; "
+                            "trap 'pkill -TERM -P $$ >/dev/null 2>&1 || true' TERM INT; "
+                            "dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
+                            "mpv --hwdec=no --vo=gpu --demuxer-lavf-format=mpegts "
+                            "--demuxer-lavf-analyzeduration=5 --cache=yes --fs --no-terminal "
+                            "--input-conf=\"$input\" --input-ipc-server=%3 -; "
+                            "status=$?; rm -f \"$input\"; exit $status")
+                            .arg(shellQuote(conf), shellQuote(channel),
+                                 shellQuote(QDir(resolveDataDir()).filePath(QStringLiteral("mpv.sock"))));
+    return QStringLiteral("exec setsid sh -c %1").arg(shellQuote(run));
 }
 
 QVector<OtaChannel> listOtaChannels()
@@ -361,6 +368,19 @@ OtaPlayer::OtaPlayer(QObject *parent)
 {
 }
 
+namespace {
+
+void signalPipeline(qint64 pid, const QString &sig)
+{
+    if (pid <= 1)
+        return;
+    const QString id = QString::number(pid);
+    QProcess::execute(QStringLiteral("pkill"), {sig, QStringLiteral("-P"), id});
+    QProcess::execute(QStringLiteral("kill"), {sig, QStringLiteral("--"), QStringLiteral("-") + id});
+}
+
+} // namespace
+
 void OtaPlayer::stop()
 {
     m_userStop = true;
@@ -373,19 +393,25 @@ void OtaPlayer::stop()
         m_ipc->deleteLater();
         m_ipc = nullptr;
     }
-    if (!m_process) {
+    QProcess *process = m_process;
+    if (!process) {
         m_channel.clear();
         return;
     }
-    const qint64 pid = m_process->processId();
-    m_process->terminate();
-    if (!m_process->waitForFinished(400))
-        m_process->kill();
-    m_process->deleteLater();
-    m_process = nullptr;
-    if (pid > 0) {
-        QProcess::execute(QStringLiteral("kill"), {QStringLiteral("-TERM"), QStringLiteral("-") + QString::number(pid)});
+    const qint64 pid = process->processId();
+    signalPipeline(pid, QStringLiteral("-TERM"));
+    process->terminate();
+    if (m_process == process && !process->waitForFinished(1200)) {
+        signalPipeline(pid, QStringLiteral("-KILL"));
+        if (m_process == process)
+            process->kill();
+        if (m_process == process)
+            process->waitForFinished(500);
     }
+    if (m_process != process)
+        return;
+    m_process = nullptr;
+    process->deleteLater();
     m_channel.clear();
     emit stopped();
 }
@@ -482,7 +508,7 @@ void OtaPlayer::play(const QString &requested)
         process->deleteLater();
         if (!picture && !userStop)
             emit failed(QStringLiteral("A sintonia caiu antes da imagem."));
-        if (picture)
+        else
             emit stopped();
     });
     if (!qEnvironmentVariable("ZAPPE_OTA_FAKE").isEmpty()) {
