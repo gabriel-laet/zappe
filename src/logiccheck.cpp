@@ -754,6 +754,22 @@ int runLogicSelfCheck()
         return fail("globoplay extractor is not isolated");
     if (ytScript.contains(QStringLiteral("querySelectorAll('*')")) || !ytScript.contains(QStringLiteral("shadowRoot")))
         return fail("youtube shadow extract");
+    if (!mirrorDomReaderFirst(QStringLiteral("netflix")) || mirrorDomReaderFirst(QStringLiteral("prime"))
+        || mirrorDomReaderFirst(QStringLiteral("youtube")) || mirrorDomReaderFirst(QStringLiteral("globoplay"))
+        || mirrorDomReaderFirst(QStringLiteral("hbo")))
+        return fail("netflix dom reader stays first");
+    if (mirrorFeedReplacesDom(QStringLiteral("netflix"), 90, 90, 40, 40)
+        || !mirrorFeedReplacesDom(QStringLiteral("netflix"), 90, 0, 40, 40)
+        || !mirrorFeedReplacesDom(QStringLiteral("netflix"), 0, 0, 40, 0)
+        || mirrorFeedReplacesDom(QStringLiteral("prime"), 35, 35, 10, 10)
+        || !mirrorFeedReplacesDom(QStringLiteral("prime"), 2, 2, 30, 30))
+        return fail("feed must not hide netflix covers");
+    const QString clipScript =
+        mirrorCoverClipScript({QStringLiteral("https://occ.example/nf/box.jpg")}, {QStringLiteral("Dark")});
+    if (!clipScript.contains(QStringLiteral("for (let i = 0; i < light.length; i++) nodes.push(light[i]);"))
+        || !clipScript.contains(QStringLiteral("shadowRoot"))
+        || clipScript.contains(QStringLiteral("nodes.length < 120")))
+        return fail("netflix clip scans every image");
     const auto runDom = [](const QString &base, const QString &tree, const QString &script, QString *error) {
         QJSEngine engine;
         const QString source = QStringLiteral(R"js(

@@ -98,6 +98,11 @@ bool mirrorBadgeTitle(const QString &title);
 QString mirrorYoutubeArtwork(const QString &href);
 // 401/403: o CDN recusou o GET sem o cookie da aba. A página busca de novo.
 bool coverHttpNeedsPage(int status);
+// Netflix fica no leitor de DOM do 1032fcb. Um feed com arte não pode pular esse leitor:
+// a URL da capa mudaria e o cache (sha1 do host+path) não cola no card.
+bool mirrorDomReaderFirst(const QString &serviceId);
+// true quando a página do feed substitui a do DOM. Na Netflix a regra é a de 1032fcb.
+bool mirrorFeedReplacesDom(const QString &serviceId, int domTitles, int domArt, int feedTitles, int feedArt);
 // GIF 1×1 e pixel de rastreio não são capa.
 bool coverUrlIsPlaceholder(const QString &url);
 // YouTube não tem perfis. "Account menu" também não é um perfil.

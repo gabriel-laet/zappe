@@ -260,6 +260,41 @@ int runSelfCheck()
     if (!guide.mirrorService().isEmpty() || guide.page() != QLatin1String("home")
         || guide.focusTitle() == QLatin1String("Account menu"))
         return fail("back leaves account menu");
+    const QStringList services = {QStringLiteral("netflix"), QStringLiteral("prime"),  QStringLiteral("apple"),
+                                  QStringLiteral("disney"),  QStringLiteral("hbo"),    QStringLiteral("globoplay"),
+                                  QStringLiteral("youtube")};
+    for (const QString &id : services) {
+        guide.openMirror(id);
+        guide.toggleMenu();
+        if (!guide.menuOpen() || guide.page() != QLatin1String("streaming") || guide.menuIndex() != 2)
+            return fail("service menu");
+        guide.move(1, 0);
+        if (guide.page() != QLatin1String("settings") || guide.menuIndex() != 3)
+            return fail("menu reaches settings");
+        const int volume = guide.volume();
+        guide.back();
+        if (guide.menuOpen() || guide.page() != QLatin1String("home") || guide.menuIndex() != 0
+            || !guide.mirrorService().isEmpty() || guide.focusTitle().trimmed().isEmpty()
+            || guide.focusHref().trimmed().isEmpty() || !guide.shelfShown(guide.shelf())) {
+            const QByteArray msg = QStringLiteral("home from %1").arg(id).toUtf8();
+            return fail(msg.constData());
+        }
+        guide.move(1, 0);
+        guide.move(0, 1);
+        guide.move(0, -1);
+        if (guide.menuOpen() || guide.page() != QLatin1String("home") || guide.menuIndex() != 0
+            || guide.volume() != volume || guide.focusTitle().trimmed().isEmpty()) {
+            const QByteArray msg = QStringLiteral("grid keeps keys from %1").arg(id).toUtf8();
+            return fail(msg.constData());
+        }
+        guide.openMirror(id);
+        guide.back();
+        if (guide.menuOpen() || guide.page() != QLatin1String("home") || guide.menuIndex() != 0
+            || guide.focusHref().trimmed().isEmpty() || !guide.shelfShown(guide.shelf())) {
+            const QByteArray msg = QStringLiteral("back from %1").arg(id).toUtf8();
+            return fail(msg.constData());
+        }
+    }
     guide.adjustVolume(5);
     if (guide.volume() != 45 || !guide.volumeHud())
         return fail("volume");

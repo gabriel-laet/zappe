@@ -2069,21 +2069,25 @@ QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles
     return bits.join(' ');
   };
   const nodes = [];
+  try {
+    const light = document.querySelectorAll('img, source, [style*="background"]');
+    for (let i = 0; i < light.length; i++) nodes.push(light[i]);
+  } catch (e) {}
   const walkArt = (root, depth) => {
-    if (!root || depth > 6 || nodes.length >= 120) return;
-    try {
-      if (root.querySelectorAll) {
-        const list = root.querySelectorAll('img, source, picture, [style*="background"]');
-        for (let i = 0; i < list.length && nodes.length < 120; i++) nodes.push(list[i]);
-      }
-    } catch (e) {}
+    if (!root || depth > 6) return;
     const queue = [root];
     let seen = 0;
-    while (queue.length && nodes.length < 120 && seen < 80) {
+    while (queue.length && seen < 80) {
       const el = queue.shift();
       if (!el) continue;
       seen++;
-      try { if (el.shadowRoot) walkArt(el.shadowRoot, depth + 1); } catch (e) {}
+      try {
+        if (el.shadowRoot) {
+          const list = el.shadowRoot.querySelectorAll('img, source, [style*="background"]');
+          for (let i = 0; i < list.length; i++) nodes.push(list[i]);
+          walkArt(el.shadowRoot, depth + 1);
+        }
+      } catch (e) {}
       try {
         const kids = el.children || [];
         for (let i = 0; i < kids.length && queue.length < 80; i++) queue.push(kids[i]);
@@ -2121,7 +2125,7 @@ QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles
         const prefix = name === title || name.indexOf(title) === 0;
         const contains = title.length >= 6 && name.indexOf(title) >= 0;
         if (!prefix && !contains) continue;
-        let img = card.querySelector && card.querySelector('img, source, picture');
+        let img = card.querySelector && card.querySelector('img, source');
         if (!img) {
           for (const node of nodes) {
             let p = node;
@@ -2216,6 +2220,36 @@ QString mirrorYoutubeArtwork(const QString &href)
 bool coverHttpNeedsPage(int status)
 {
     return status == 401 || status == 403;
+}
+
+bool mirrorDomReaderFirst(const QString &serviceId)
+{
+    return serviceId.compare(QLatin1String("netflix"), Qt::CaseInsensitive) == 0;
+}
+
+bool mirrorFeedReplacesDom(const QString &serviceId, int domTitles, int domArt, int feedTitles, int feedArt)
+{
+    const bool feedHasTitles = feedTitles > 0;
+    if (mirrorDomReaderFirst(serviceId)) {
+        // 1032fcb: o feed só entra se o DOM não trouxe arte, ou se o DOM não trouxe títulos.
+        if (domArt == 0 && feedArt > 0)
+            return true;
+        if (domTitles <= 0 && feedHasTitles)
+            return true;
+        if (domArt == 0 && feedArt == 0 && feedTitles > domTitles)
+            return true;
+        return false;
+    }
+    const bool thinDom = domTitles < 4 && feedTitles > domTitles && feedHasTitles;
+    if (thinDom)
+        return true;
+    if (domArt == 0 && feedArt > 0 && domTitles == 0)
+        return true;
+    if (domTitles <= 0 && feedHasTitles)
+        return true;
+    if (domArt == 0 && feedArt == 0 && feedTitles > domTitles)
+        return true;
+    return false;
 }
 
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
@@ -3085,7 +3119,7 @@ void MirrorSession::considerExtract()
         std::fprintf(stderr, "zappe: espelho %s feed %d títulos em %s\n", qPrintable(m_current), n,
                      qPrintable(sample.url.left(180)));
     }
-    if (mirrorPageHasTitles(network) && httpArtworkCount(network) > 0) {
+    if (!mirrorDomReaderFirst(m_current) && mirrorPageHasTitles(network) && httpArtworkCount(network) > 0) {
         m_feedPending = false;
         acceptPage(network);
         return;
@@ -3093,7 +3127,10 @@ void MirrorSession::considerExtract()
     if (mirrorPageHasTitles(network)) {
         m_feedPage = network;
         m_feedPending = true;
-        std::fprintf(stderr, "zappe: espelho %s feed sem arte; extrator DOM\n", qPrintable(m_current));
+        if (httpArtworkCount(network) == 0)
+            std::fprintf(stderr, "zappe: espelho %s feed sem arte; extrator DOM\n", qPrintable(m_current));
+        else
+            std::fprintf(stderr, "zappe: espelho %s feed com arte; leitor DOM\n", qPrintable(m_current));
     } else {
         m_feedPending = false;
     }
@@ -3637,10 +3674,7 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
         const int feedArt = httpArtworkCount(m_feedPage);
         const int domTitles = mirrorTitleCount(page);
         const int feedTitles = mirrorTitleCount(m_feedPage);
-        const bool thinDom = domTitles < 4 && feedTitles > domTitles && mirrorPageHasTitles(m_feedPage);
-        if (thinDom || (domArt == 0 && feedArt > 0 && domTitles == 0)
-            || (!mirrorPageHasTitles(page) && mirrorPageHasTitles(m_feedPage))
-            || (domArt == 0 && feedArt == 0 && feedTitles > domTitles))
+        if (mirrorFeedReplacesDom(m_current, domTitles, domArt, feedTitles, feedArt))
             page = m_feedPage;
         m_feedPending = false;
     }

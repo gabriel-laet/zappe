@@ -660,13 +660,39 @@ void Guide::ensureFocusableShelf()
     }
 }
 
+void Guide::leaveToGuide()
+{
+    const bool menuWasOpen = m_menuOpen;
+    const bool detailWasOpen = m_detailOpen;
+    m_menuOpen = false;
+    m_detailOpen = false;
+    m_mirrorService.clear();
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    else {
+        const bool menuMoved = menuWasOpen || m_menuIndex != 0;
+        m_menuIndex = 0;
+        ++m_layoutEpoch;
+        emit layoutChanged();
+        clampFocusToPage();
+        emit focusChanged();
+        if (menuMoved)
+            emit menuChanged();
+    }
+    if (detailWasOpen)
+        emit detailChanged();
+    ensureFocusableShelf();
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))
         return;
-    if (m_menuOpen) {
-        m_menuOpen = false;
-        emit menuChanged();
+    // Home/Back num serviço, ou em Ajustes, volta para a grade. Fechar só o menu
+    // deixava o índice em Ajustes: a tecla seguinte muda volume e HDMI da TV.
+    const bool inService = !m_mirrorService.isEmpty() || m_page == QLatin1String("streaming");
+    if (inService || m_page == QLatin1String("settings")) {
+        leaveToGuide();
         return;
     }
     if (m_detailOpen) {
@@ -675,17 +701,9 @@ void Guide::back()
         emit focusChanged();
         return;
     }
-    // Uma view de streaming, mesmo vazia ou só com card vazio, sempre sai.
-    if (!m_mirrorService.isEmpty() || m_page == QLatin1String("streaming")) {
-        m_mirrorService.clear();
-        if (m_page != QLatin1String("home"))
-            setPage(QStringLiteral("home"));
-        else {
-            ++m_layoutEpoch;
-            emit layoutChanged();
-            clampFocusToPage();
-            emit focusChanged();
-        }
+    if (m_menuOpen) {
+        m_menuOpen = false;
+        emit menuChanged();
         ensureFocusableShelf();
         return;
     }

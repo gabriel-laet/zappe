@@ -203,6 +203,7 @@ private:
     void applyBrand(const Branding &branding);
     void setPage(const QString &page);
     void setMenuIndex(int index);
+    void leaveToGuide();
     void clampFocusToPage();
     void clampIndex();
     void ensureFocusableShelf();
