@@ -341,6 +341,17 @@ bool wantNetworkBody(const QVector<MirrorAdapter> &adapters, const QString &serv
     return json;
 }
 
+bool imageResponse(const QString &url, const QString &mime)
+{
+    const QString mimeLower = mime.toLower();
+    if (mimeLower.startsWith(QStringLiteral("image/")))
+        return true;
+    const QString urlLower = url.toLower();
+    return urlLower.contains(QStringLiteral(".jpg")) || urlLower.contains(QStringLiteral(".jpeg"))
+           || urlLower.contains(QStringLiteral(".png")) || urlLower.contains(QStringLiteral(".webp"))
+           || urlLower.contains(QStringLiteral(".avif")) || urlLower.contains(QStringLiteral(".gif"));
+}
+
 QJsonArray stringArray(const QStringList &values)
 {
     QJsonArray array;
@@ -607,11 +618,21 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     const match = /url\((['"]?)(https?:[^'")]+)\1\)/.exec(raw);
     return match ? match[2] : '';
   };
+  const httpUrl = (value) => {
+    const url = pickSrc(value);
+    return url && url.indexOf('http') === 0 ? url : '';
+  };
   const artOf = (root) => {
     if (!root) return '';
-    const nodes = [root];
+    const nodes = [];
     if (root.querySelectorAll) {
       for (const el of root.querySelectorAll('img, source, [style*="background"]')) nodes.push(el);
+    }
+    nodes.push(root);
+    for (const el of nodes) {
+      if (!el) continue;
+      const loaded = httpUrl(el.currentSrc) || httpUrl(el.src) || httpUrl(el.getAttribute && el.getAttribute('src'));
+      if (loaded) return loaded;
     }
     for (const el of nodes) {
       if (!el) continue;
@@ -622,17 +643,30 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         vals.push(el.getAttribute('data-src') || '');
         vals.push(el.getAttribute('data-lazy-src') || '');
         vals.push(el.getAttribute('data-original') || '');
-        vals.push(el.getAttribute('src') || '');
       }
-      if (el.currentSrc) vals.push(el.currentSrc);
-      if (el.src) vals.push(el.src);
       vals.push(bgUrl(el));
       for (const value of vals) {
-        const url = pickSrc(value);
+        const url = httpUrl(value);
         if (url) return url;
       }
     }
     return '';
+  };
+  const synopsisOf = (root, title) => {
+    if (!root || !root.querySelectorAll) return '';
+    let text = '';
+    for (const el of root.querySelectorAll('p, span, div')) {
+      const cls = ((el.className && el.className.toString) ? el.className.toString() : '')
+        + ' ' + ((el.getAttribute && (el.getAttribute('data-testid') || el.getAttribute('data-uia') || '')) || '');
+      if (!/synopsis|description|overview|plot/i.test(cls)) continue;
+      text = label(el);
+      if (text && text !== title) break;
+      text = '';
+    }
+    text = (text || '').replace(/\s+/g, ' ').trim();
+    if (!text || text === title) return '';
+    if (text.length > 280) text = text.slice(0, 277) + '…';
+    return text;
   };
   const progressOf = (el) => {
     if (!el) return 0;
@@ -662,7 +696,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const name = label(link) || label(img) || label(card);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(card), progress: progressOf(card.querySelector(cfg.progress))});
+        rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
       }
       if (!rows.length) continue;
       const key = (title || 'row') + ':' + rows[0].href;
@@ -681,7 +715,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const name = label(link) || label(img);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(link), progress: progressOf(link.querySelector(cfg.progress))});
+        rows.push({title: name, href: href, artwork: artOf(link), synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
       }
       if (rows.length)
         shelves.push({title: '', context: 'flatLinks', rows: rows});
@@ -863,17 +897,110 @@ QString mirrorCoverFetchScript(const QStringList &urls)
     const timer = setTimeout(() => ctrl.abort(), 4000);
     try {
       const res = await fetch(url, {credentials: 'include', signal: ctrl.signal});
-      if (!res.ok) return {url: url, ok: false};
+      if (!res.ok) return {url: url, ok: false, err: 'http ' + res.status};
       const buf = await res.arrayBuffer();
-      if (buf.byteLength < 32 || buf.byteLength > 500000) return {url: url, ok: false};
+      if (buf.byteLength < 32 || buf.byteLength > 500000) return {url: url, ok: false, err: 'tamanho ' + buf.byteLength};
       return {url: url, ok: true, b64: b64(buf)};
     } catch (e) {
-      return {url: url, ok: false};
+      return {url: url, ok: false, err: String((e && e.message) || e)};
     } finally {
       clearTimeout(timer);
     }
   };
   return Promise.all(urls.map(one)).then((rows) => JSON.stringify(rows));
+})())js");
+}
+
+QString coverMatchKey(const QString &url)
+{
+    const QUrl parsed(url);
+    if (!parsed.isValid() || parsed.host().isEmpty())
+        return url.left(200);
+    return parsed.host().toLower() + parsed.path();
+}
+
+bool coverUrlsMatch(const QString &wanted, const QString &loaded)
+{
+    if (wanted.isEmpty() || loaded.isEmpty())
+        return false;
+    if (wanted == loaded)
+        return true;
+    if (coverMatchKey(wanted) == coverMatchKey(loaded))
+        return true;
+    const QString file = QUrl(wanted).fileName();
+    return file.size() >= 12 && QUrl(loaded).fileName() == file;
+}
+
+bool coverFetchIsBlocked(const QString &error)
+{
+    const QString text = error.toLower();
+    return text.contains(QStringLiteral("failed to fetch")) || text.contains(QStringLiteral("networkerror"))
+           || text.contains(QStringLiteral("load failed")) || text.contains(QStringLiteral("access-control"))
+           || text.contains(QStringLiteral("cors")) || text.contains(QStringLiteral("opaque"));
+}
+
+QString mirrorCoverClipScript(const QStringList &urls)
+{
+    QStringList quoted;
+    for (const QString &url : urls)
+        quoted.append(jsString(url));
+    return QStringLiteral("(() => { const urls = [") + quoted.join(QLatin1Char(','))
+           + QStringLiteral(R"js(];
+  const tail = (url) => {
+    try {
+      const path = new URL(url, location.href).pathname || '';
+      const parts = path.split('/');
+      return parts[parts.length - 1] || '';
+    } catch (e) { return ''; }
+  };
+  const blobOf = (el) => {
+    if (!el) return '';
+    const bits = [];
+    if (el.currentSrc) bits.push(el.currentSrc);
+    if (el.src) bits.push(el.src);
+    if (el.getAttribute) {
+      bits.push(el.getAttribute('src') || '');
+      bits.push(el.getAttribute('srcset') || '');
+      bits.push(el.getAttribute('data-src') || '');
+      bits.push(el.getAttribute('data-srcset') || '');
+    }
+    bits.push((el.style && el.style.backgroundImage) || '');
+    return bits.join(' ');
+  };
+  const nodes = [...document.querySelectorAll('img, source, [style*="background"]')];
+  const vw = window.innerWidth || 1920;
+  const vh = window.innerHeight || 1080;
+  const rects = [];
+  for (const url of urls) {
+    if (rects.length >= 6) break;
+    const key = tail(url);
+    const bare = String(url).split('?')[0];
+    let el = null;
+    for (const node of nodes) {
+      const blob = blobOf(node);
+      if (!blob) continue;
+      if (blob.indexOf(url) >= 0 || (bare.length > 12 && blob.indexOf(bare) >= 0)
+          || (key.length >= 12 && blob.indexOf(key) >= 0)) {
+        el = node;
+        break;
+      }
+    }
+    if (!el) continue;
+    let r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 40) {
+      const parent = el.parentElement;
+      if (parent) r = parent.getBoundingClientRect();
+    }
+    if (r.width < 40 || r.height < 40) continue;
+    if (r.bottom < 8 || r.top > vh - 8 || r.right < 8 || r.left > vw - 8) continue;
+    const x = Math.max(0, Math.round(r.left));
+    const y = Math.max(0, Math.round(r.top));
+    const w = Math.round(Math.min(r.width, vw - x));
+    const h = Math.round(Math.min(r.height, vh - y));
+    if (w < 40 || h < 40) continue;
+    rects.push({url: url, x: x, y: y, w: w, h: h});
+  }
+  return JSON.stringify({rects: rects});
 })())js");
 }
 
@@ -935,6 +1062,11 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             row.serviceLabel = adapter.name;
             row.href = href;
             row.artworkSpec = rowObj.value(QStringLiteral("artwork")).toString();
+            row.synopsis = rowObj.value(QStringLiteral("synopsis")).toString().simplified();
+            if (row.synopsis.compare(name, Qt::CaseInsensitive) == 0)
+                row.synopsis.clear();
+            if (row.synopsis.size() > 280)
+                row.synopsis = row.synopsis.left(277) + QStringLiteral("…");
             row.wide = cont;
             row.progress = rowObj.value(QStringLiteral("progress")).toDouble();
             if (row.progress < 0)
@@ -1154,10 +1286,17 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
         if (m_job == JobLearnDom || m_job == JobLearnShot)
             return;
         if (m_job == JobCovers) {
-            for (const CoverJob &job : m_coverBatch)
-                m_covers.append(job);
+            if (!m_coverFetchGaveUp) {
+                for (const CoverJob &job : m_coverBatch)
+                    m_covers.append(job);
+                for (const CoverJob &job : m_clipJobs)
+                    m_covers.append(job);
+            }
             m_coverBatch.clear();
-            finishAccept();
+            m_clipJobs.clear();
+            if (m_coverError.isEmpty())
+                m_coverError = message.left(140);
+            finishCoverPass();
             return;
         }
         // Navegação substituída no mesmo alvo. A extração da navegação nova segue.
@@ -1428,6 +1567,8 @@ void MirrorSession::play(const QString &serviceId, const QString &href)
     m_queue.clear();
     m_samples.clear();
     m_inflight.clear();
+    m_images.clear();
+    m_imageInflight.clear();
     if (m_chrome)
         m_chrome->present(m_dataDir);
 }
@@ -1510,6 +1651,11 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
     m_learnPosted = false;
     m_samples.clear();
     m_inflight.clear();
+    m_images.clear();
+    m_imageInflight.clear();
+    m_coverAttempted.clear();
+    m_artLogged.remove(serviceId);
+    m_coverLogged.remove(serviceId);
     m_lastFeedTitles = -1;
     m_lastDomTitles = -1;
     std::fprintf(stderr, "zappe: espelho %s -> %s\n", qPrintable(serviceId), qPrintable(url));
@@ -1633,11 +1779,27 @@ void MirrorSession::acceptPage(const MirrorPage &page)
     }
     MirrorPage tagged = page;
     tagHistoryShelves(tagged, m_navUrl, m_current);
-    applyPage(tagged);
     m_resumeExtra = extract && !tagged.needsLogin && !m_extraLeft.isEmpty() && !m_player;
-    m_coverDeadline = QDateTime::currentMSecsSinceEpoch() + 12000;
-    if (!fetchCoversOrContinue())
+    if (!applyPage(tagged)) {
         finishAccept();
+        return;
+    }
+    noteArtwork(tagged);
+    m_coverClosed = false;
+    m_coverFromNet = 0;
+    m_coverFromFetch = 0;
+    m_coverFromClip = 0;
+    m_coverFetched = 0;
+    m_coverFetchGaveUp = false;
+    m_coverError.clear();
+    m_coverSample.clear();
+    m_coverPhase = 0;
+    m_clipJobs.clear();
+    m_shots.clear();
+    m_shotIndex = 0;
+    m_coverBatch.clear();
+    if (!fetchNextCoverBatch())
+        finishCoverPass();
 }
 
 void MirrorSession::finishEmpty()
@@ -1749,8 +1911,19 @@ void MirrorSession::postLearn(const QByteArray &png)
 
 void MirrorSession::onNetworkResponse(const QString &requestId, const QString &url, const QString &mimeType)
 {
-    if (requestId.isEmpty() || m_player)
+    if (requestId.isEmpty() || m_player || url.isEmpty())
         return;
+    if (imageResponse(url, mimeType) && !url.startsWith(QStringLiteral("data:")) && !url.startsWith(QStringLiteral("blob:"))) {
+        const QString lower = url.toLower();
+        if (lower.contains(QStringLiteral("1x1")) || lower.contains(QStringLiteral("pixel"))
+            || lower.contains(QStringLiteral("analytics")))
+            return;
+        if (m_images.size() + m_imageInflight.size() >= 40)
+            return;
+        if (!m_imageInflight.contains(requestId))
+            m_imageInflight.insert(requestId, url.left(500));
+        return;
+    }
     if (m_job != JobExtract && m_job != JobSearch && m_job != JobLearnDom && m_job != JobLearnShot)
         return;
     if (!wantNetworkBody(m_adapters, m_current, url, mimeType))
@@ -1778,13 +1951,20 @@ void MirrorSession::onNetworkResponse(const QString &requestId, const QString &u
 
 void MirrorSession::onNetworkFinished(const QString &requestId)
 {
-    if (!m_inflight.contains(requestId) || !m_cdp)
+    if (!m_cdp)
         return;
-    m_cdp->getResponseBody(requestId);
+    if (m_inflight.contains(requestId) || m_imageInflight.contains(requestId))
+        m_cdp->getResponseBody(requestId);
 }
 
 void MirrorSession::onResponseBody(const QString &requestId, const QByteArray &body, bool ok)
 {
+    if (m_imageInflight.contains(requestId)) {
+        const QString imageUrl = m_imageInflight.take(requestId);
+        if (ok && !imageUrl.isEmpty())
+            rememberImage(imageUrl, body);
+        return;
+    }
     const QString url = m_inflight.take(requestId);
     if (!ok || url.isEmpty() || body.isEmpty())
         return;
@@ -1806,9 +1986,26 @@ void MirrorSession::onResponseBody(const QString &requestId, const QByteArray &b
 
 void MirrorSession::onScreenshot(const QByteArray &png, bool ok)
 {
-    if (m_job != JobLearnShot)
+    if (m_job == JobLearnShot) {
+        postLearn(ok ? png : QByteArray());
         return;
-    postLearn(ok ? png : QByteArray());
+    }
+    if (m_job != JobCovers || m_coverPhase != 3)
+        return;
+    if (m_shotIndex >= 0 && m_shotIndex < m_shots.size()) {
+        const CoverJob job = m_shots.at(m_shotIndex).job;
+        QImage image;
+        if (ok && png.size() >= 32)
+            image.loadFromData(png);
+        if (!image.isNull() && image.width() >= 20 && image.height() >= 20) {
+            storeCover(job, png);
+            ++m_coverFromClip;
+        } else if (!m_coverFetchGaveUp) {
+            m_covers.append(job);
+        }
+        ++m_shotIndex;
+    }
+    shootNextClip();
 }
 
 void MirrorSession::onFrame(const QString &url)
@@ -1831,22 +2028,85 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
 {
     if (m_job == JobCovers) {
         const int gen = m_coverGen;
-        QHash<QString, QByteArray> got;
-        if (ok) {
-            const QJsonArray rows = QJsonDocument::fromJson(value.toUtf8()).array();
-            for (const QJsonValue &item : rows) {
+        if (m_coverPhase == 2) {
+            const QJsonObject root = QJsonDocument::fromJson(value.toUtf8()).object();
+            const QJsonArray rects = root.value(QStringLiteral("rects")).toArray();
+            QSet<QString> hit;
+            m_shots.clear();
+            for (const QJsonValue &item : rects) {
+                if (m_shots.size() >= 6)
+                    break;
                 const QJsonObject obj = item.toObject();
-                if (!obj.value(QStringLiteral("ok")).toBool())
+                const QString url = obj.value(QStringLiteral("url")).toString();
+                const int w = obj.value(QStringLiteral("w")).toInt();
+                const int h = obj.value(QStringLiteral("h")).toInt();
+                if (url.isEmpty() || w < 40 || h < 40)
                     continue;
-                const QByteArray body = QByteArray::fromBase64(obj.value(QStringLiteral("b64")).toString().toLatin1());
-                if (body.size() >= 32)
-                    got.insert(obj.value(QStringLiteral("url")).toString(), body);
+                for (const CoverJob &job : m_clipJobs) {
+                    if (job.url != url)
+                        continue;
+                    CoverShot shot;
+                    shot.job = job;
+                    shot.x = obj.value(QStringLiteral("x")).toInt();
+                    shot.y = obj.value(QStringLiteral("y")).toInt();
+                    shot.w = w;
+                    shot.h = h;
+                    m_shots.append(shot);
+                    hit.insert(url);
+                    break;
+                }
             }
+            for (const CoverJob &job : m_clipJobs) {
+                if (!hit.contains(job.url) && !m_coverFetchGaveUp)
+                    m_covers.append(job);
+            }
+            m_clipJobs.clear();
+            if (!ok && m_coverError.isEmpty())
+                m_coverError = QStringLiteral("recorte sem resposta");
+            if (m_coverGen != gen)
+                return;
+            if (m_shots.isEmpty()) {
+                finishCoverPass();
+                return;
+            }
+            m_coverPhase = 3;
+            m_shotIndex = 0;
+            shootNextClip();
+            return;
+        }
+        QHash<QString, QByteArray> got;
+        QHash<QString, QString> errors;
+        bool parsed = false;
+        if (ok) {
+            const QJsonDocument doc = QJsonDocument::fromJson(value.toUtf8());
+            if (doc.isArray()) {
+                parsed = true;
+                for (const QJsonValue &item : doc.array()) {
+                    const QJsonObject obj = item.toObject();
+                    const QString url = obj.value(QStringLiteral("url")).toString();
+                    if (!obj.value(QStringLiteral("ok")).toBool()) {
+                        const QString err = obj.value(QStringLiteral("err")).toString();
+                        if (!url.isEmpty() && !err.isEmpty())
+                            errors.insert(url, err);
+                        continue;
+                    }
+                    const QByteArray body = QByteArray::fromBase64(obj.value(QStringLiteral("b64")).toString().toLatin1());
+                    if (body.size() >= 32)
+                        got.insert(url, body);
+                }
+            } else if (m_coverError.isEmpty()) {
+                m_coverError = value.trimmed().left(160);
+                if (m_coverError.isEmpty())
+                    m_coverError = QStringLiteral("avaliacao vazia");
+            }
+        } else if (m_coverError.isEmpty()) {
+            m_coverError = QStringLiteral("avaliacao sem resultado");
         }
         if (m_job != JobCovers || m_coverGen != gen)
             return;
         ++m_coverGen;
         int saved = 0;
+        bool blocked = !ok || !parsed;
         for (const CoverJob &job : m_coverBatch) {
             const QByteArray body = got.value(job.url);
             QImage image;
@@ -1856,14 +2116,20 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
                 storeCover(job, body);
                 ++saved;
             } else {
-                m_covers.append(job);
+                m_clipJobs.append(job);
+                const QString err = errors.value(job.url);
+                if (m_coverError.isEmpty() && !err.isEmpty())
+                    m_coverError = err;
+                if (coverFetchIsBlocked(err))
+                    blocked = true;
             }
         }
-        std::fprintf(stderr, "zappe: espelho %s capas %d/%d pela aba\n", qPrintable(m_current), saved,
-                     int(m_coverBatch.size()));
+        m_coverFromFetch += saved;
         m_coverBatch.clear();
-        if (!fetchCoversOrContinue())
-            finishAccept();
+        if (saved == 0 && blocked)
+            m_coverFetchGaveUp = true;
+        if (!fetchNextCoverBatch())
+            finishCoverPass();
         return;
     }
     if (m_job == JobPlay) {
@@ -1928,13 +2194,13 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
     beginRepair();
 }
 
-void MirrorSession::applyPage(const MirrorPage &page)
+bool MirrorSession::applyPage(const MirrorPage &page)
 {
     if (!m_guide || m_current.isEmpty())
-        return;
+        return false;
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_current);
     if (!adapter)
-        return;
+        return false;
     m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     QVector<ShelfData> shelves = page.shelves;
     if (m_mergePage) {
@@ -1956,14 +2222,14 @@ void MirrorSession::applyPage(const MirrorPage &page)
         shelves.append(empty);
     }
     if (shelves.isEmpty())
-        return;
+        return false;
     if (!m_mergePage && !page.needsLogin) {
         const int previous = shelfTitleCount(m_pages.value(adapter->id));
         const int incoming = shelfTitleCount(shelves);
         if (mirrorKeepRicherPage(previous, incoming)) {
             std::fprintf(stderr, "zappe: espelho %s manteve %d títulos (a leitura nova tem %d)\n", qPrintable(adapter->id),
                          previous, incoming);
-            return;
+            return false;
         }
     }
     paintMissingCovers(shelves, m_cacheDir, QDateTime::currentDateTime());
@@ -1979,43 +2245,236 @@ void MirrorSession::applyPage(const MirrorPage &page)
         if (!queued)
             m_covers.append(CoverJob{adapter->id, job.url, job.path});
     }
+    return true;
 }
 
-bool MirrorSession::fetchCoversOrContinue()
+void MirrorSession::noteArtwork(const MirrorPage &page)
 {
-    if (m_player || !m_cdp || !m_cdp->connected() || QDateTime::currentMSecsSinceEpoch() > m_coverDeadline)
+    if (m_artLogged.contains(m_current))
+        return;
+    m_artLogged.insert(m_current);
+    int http = 0;
+    int empty = 0;
+    QStringList samples;
+    for (const ShelfData &shelf : page.shelves) {
+        if (shelf.id.endsWith(QStringLiteral(":profiles")))
+            continue;
+        for (const RowData &row : shelf.rows) {
+            if (row.artworkSpec.startsWith(QStringLiteral("http"))) {
+                ++http;
+                if (samples.size() < 3)
+                    samples.append(row.artworkSpec.left(120));
+            } else if (!row.title.isEmpty()) {
+                ++empty;
+            }
+        }
+    }
+    if (m_coverSample.isEmpty())
+        m_coverSample = samples.join(QLatin1Char(' '));
+    std::fprintf(stderr, "zappe: espelho %s artes %d http, %d sem url%s\n", qPrintable(m_current), http, empty,
+                 samples.isEmpty() ? "" : qPrintable(QStringLiteral("; amostra ") + samples.join(QLatin1Char(' '))));
+}
+
+QByteArray MirrorSession::heldImage(const QString &url) const
+{
+    const QString key = coverMatchKey(url);
+    const QString file = QUrl(url).fileName();
+    QByteArray byFile;
+    int fileHits = 0;
+    for (const HeldImage &image : m_images) {
+        if (image.url == url || image.key == key)
+            return image.body;
+        if (file.size() >= 12 && image.file == file) {
+            byFile = image.body;
+            ++fileHits;
+        }
+    }
+    if (fileHits == 1)
+        return byFile;
+    return {};
+}
+
+void MirrorSession::rememberImage(const QString &url, const QByteArray &body)
+{
+    if (url.isEmpty() || body.size() < 32 || body.size() > 500000 || m_images.size() >= 40)
+        return;
+    const QString key = coverMatchKey(url);
+    for (const HeldImage &image : m_images) {
+        if (image.key == key)
+            return;
+    }
+    QImage probe;
+    if (!probe.loadFromData(body) || probe.width() < 80 || probe.height() < 80)
+        return;
+    HeldImage held;
+    held.url = url.left(500);
+    held.key = key;
+    held.file = QUrl(url).fileName();
+    held.body = body;
+    m_images.append(held);
+}
+
+int MirrorSession::takeHeldCovers()
+{
+    int saved = 0;
+    QVector<CoverJob> left;
+    for (const CoverJob &job : m_covers) {
+        if (job.serviceId != m_current) {
+            left.append(job);
+            continue;
+        }
+        const QByteArray body = heldImage(job.url);
+        QImage image;
+        if (!body.isEmpty())
+            image.loadFromData(body);
+        if (!image.isNull()) {
+            storeCover(job, body);
+            ++saved;
+        } else {
+            left.append(job);
+        }
+    }
+    m_covers = left;
+    return saved;
+}
+
+void MirrorSession::dropCurrentCoverJobs()
+{
+    QVector<CoverJob> keep;
+    for (const CoverJob &job : m_covers) {
+        if (job.serviceId != m_current)
+            keep.append(job);
+    }
+    m_covers = keep;
+}
+
+void MirrorSession::logCoverSummary()
+{
+    if (m_current.isEmpty() || m_coverLogged.contains(m_current))
+        return;
+    const int saved = m_coverFromNet + m_coverFromFetch + m_coverFromClip;
+    if (saved == 0 && m_coverFetched == 0 && m_coverError.isEmpty())
+        return;
+    m_coverLogged.insert(m_current);
+    QString extra;
+    if (!m_coverSample.isEmpty())
+        extra += QStringLiteral(" amostra ") + m_coverSample.left(180);
+    if (!m_coverError.isEmpty())
+        extra += QStringLiteral(" erro ") + m_coverError.left(160);
+    std::fprintf(stderr, "zappe: espelho %s capas %d salvas (rede %d, aba %d, recorte %d)%s\n", qPrintable(m_current),
+                 saved, m_coverFromNet, m_coverFromFetch, m_coverFromClip, qPrintable(extra));
+}
+
+bool MirrorSession::fetchNextCoverBatch()
+{
+    if (m_player || !m_cdp || !m_cdp->connected())
         return false;
+    m_coverFromNet += takeHeldCovers();
+    if (m_coverFetchGaveUp || m_coverFetched >= 8) {
+        if (m_coverFetchGaveUp)
+            dropCurrentCoverJobs();
+        return startCoverClips();
+    }
     QVector<CoverJob> batch;
     QVector<CoverJob> rest;
     for (const CoverJob &job : m_covers) {
-        if (batch.size() < 4 && job.serviceId == m_current)
+        if (batch.size() < 4 && job.serviceId == m_current && !m_coverAttempted.contains(job.url))
             batch.append(job);
         else
             rest.append(job);
     }
     if (batch.isEmpty())
-        return false;
+        return startCoverClips();
+    for (const CoverJob &job : batch)
+        m_coverAttempted.insert(job.url);
     m_covers = rest;
     m_coverBatch = batch;
+    m_coverFetched += int(batch.size());
+    if (m_coverSample.isEmpty())
+        m_coverSample = batch.first().url.left(160);
     QStringList urls;
     for (const CoverJob &job : batch)
         urls.append(job.url);
     const int gen = ++m_coverGen;
+    m_coverPhase = 1;
     m_job = JobCovers;
     m_busy = true;
-    std::fprintf(stderr, "zappe: espelho %s baixando %d capas na aba\n", qPrintable(m_current), int(urls.size()));
     m_cdp->evaluate(mirrorCoverFetchScript(urls), true);
-    QTimer::singleShot(8000, this, [this, gen] {
-        if (m_job != JobCovers || m_coverGen != gen)
-            return;
-        ++m_coverGen;
-        std::fprintf(stderr, "zappe: espelho capas sem resposta da aba\n");
-        for (const CoverJob &job : m_coverBatch)
-            m_covers.append(job);
-        m_coverBatch.clear();
-        finishAccept();
-    });
+    QTimer::singleShot(8000, this, [this, gen] { coverTimedOut(gen); });
     return true;
+}
+
+bool MirrorSession::startCoverClips()
+{
+    if (m_player || m_clipJobs.isEmpty() || !m_cdp || !m_cdp->connected())
+        return false;
+    if (m_clipJobs.size() > 6) {
+        QVector<CoverJob> extra;
+        while (m_clipJobs.size() > 6)
+            extra.append(m_clipJobs.takeLast());
+        if (!m_coverFetchGaveUp) {
+            for (const CoverJob &job : extra)
+                m_covers.append(job);
+        }
+    }
+    QStringList urls;
+    for (const CoverJob &job : m_clipJobs)
+        urls.append(job.url);
+    const int gen = ++m_coverGen;
+    m_coverPhase = 2;
+    m_job = JobCovers;
+    m_busy = true;
+    m_cdp->evaluate(mirrorCoverClipScript(urls), false);
+    QTimer::singleShot(12000, this, [this, gen] { coverTimedOut(gen); });
+    return true;
+}
+
+void MirrorSession::shootNextClip()
+{
+    if (m_job != JobCovers || m_coverPhase != 3 || !m_cdp || !m_cdp->connected() || m_shotIndex >= m_shots.size()) {
+        finishCoverPass();
+        return;
+    }
+    const CoverShot &shot = m_shots.at(m_shotIndex);
+    m_cdp->captureScreenshot(shot.x, shot.y, shot.w, shot.h);
+}
+
+void MirrorSession::coverTimedOut(int gen)
+{
+    if (m_job != JobCovers || m_coverGen != gen)
+        return;
+    ++m_coverGen;
+    if (m_coverError.isEmpty())
+        m_coverError = QStringLiteral("sem resposta da aba");
+    if (m_coverPhase == 1) {
+        for (const CoverJob &job : m_coverBatch)
+            m_clipJobs.append(job);
+        m_coverBatch.clear();
+        m_coverFetchGaveUp = true;
+        dropCurrentCoverJobs();
+        if (startCoverClips())
+            return;
+    }
+    for (const CoverJob &job : m_clipJobs) {
+        if (!m_coverFetchGaveUp)
+            m_covers.append(job);
+    }
+    m_clipJobs.clear();
+    finishCoverPass();
+}
+
+void MirrorSession::finishCoverPass()
+{
+    if (m_coverClosed)
+        return;
+    m_coverClosed = true;
+    m_coverPhase = 0;
+    ++m_coverGen;
+    m_coverBatch.clear();
+    m_clipJobs.clear();
+    m_shots.clear();
+    logCoverSummary();
+    finishAccept();
 }
 
 void MirrorSession::finishAccept()

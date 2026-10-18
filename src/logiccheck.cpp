@@ -365,11 +365,22 @@ int runLogicSelfCheck()
         || youtube->extraUrls.isEmpty() || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
         return fail("youtube home");
     if (!netflixScript.contains(QStringLiteral("data-src")) || !netflixScript.contains(QStringLiteral("srcset"))
-        || !netflixScript.contains(QStringLiteral("backgroundImage")))
+        || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis")))
         return fail("cover art extract");
+    if (netflixScript.indexOf(QStringLiteral("el.currentSrc")) < 0
+        || netflixScript.indexOf(QStringLiteral("el.currentSrc")) > netflixScript.indexOf(QStringLiteral("srcset")))
+        return fail("cover prefers loaded image");
     if (!mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("credentials: 'include'"))
-        || !mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("8192")))
+        || !mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("8192"))
+        || !mirrorCoverFetchScript({QStringLiteral("https://example.test/a.jpg")}).contains(QStringLiteral("err:")))
         return fail("cover fetch script");
+    if (!coverFetchIsBlocked(QStringLiteral("Failed to fetch")) || coverFetchIsBlocked(QStringLiteral("http 404")))
+        return fail("cover fetch stops on cors");
+    if (!coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg?r=1"), QStringLiteral("https://cdn.example/a/box.jpg?r=2"))
+        || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg")))
+        return fail("cover url match");
+    if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect")))
+        return fail("cover clip script");
     if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))
         || !mirrorUrlIsPlayback(QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
         || mirrorUrlIsPlayback(netflix->homeUrl) || mirrorUrlIsPlayback(youtube->homeUrl)
@@ -406,7 +417,7 @@ int runLogicSelfCheck()
         "title": "Continuar assistindo",
         "context": "continueWatching",
         "rows": [
-          {"title": "Dark", "href": "https://www.netflix.com/title/80100172", "artwork": "https://example.test/dark.jpg", "progress": 0.42},
+          {"title": "Dark", "href": "https://www.netflix.com/title/80100172", "artwork": "https://example.test/dark.jpg", "synopsis": "Dois mundos.", "progress": 0.42},
           {"title": "Dois", "href": "https://www.netflix.com/title/2", "artwork": "https://example.test/2.jpg", "progress": 0},
           {"title": "Tres", "href": "https://www.netflix.com/title/3", "artwork": "", "progress": 0}
         ]
@@ -420,7 +431,8 @@ int runLogicSelfCheck()
     }
     if (!page.ok || page.profiles.size() != 1 || !continued || continued->rows.size() != 2
         || continued->rows.at(0).href != QStringLiteral("https://www.netflix.com/watch/80100172")
-        || continued->rows.at(0).progress < 0.4         || !continued->rows.at(0).wide)
+        || continued->rows.at(0).progress < 0.4 || !continued->rows.at(0).wide
+        || continued->rows.at(0).synopsis != QStringLiteral("Dois mundos."))
         return fail("mirror page");
     MirrorAdapter primeFilter = *prime;
     primeFilter.limitCards = 8;

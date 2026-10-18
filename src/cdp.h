@@ -46,7 +46,8 @@ public:
     void dispatchAction(const QString &action);
     void enableNetwork();
     void getResponseBody(const QString &requestId);
-    void captureScreenshot();
+    // Sem clip, a página inteira. Com largura e altura, só o retângulo do card.
+    void captureScreenshot(int x = 0, int y = 0, int width = 0, int height = 0);
     void closeBrowser();
     void dispatchMouseClick(int x, int y);
     bool connected() const { return m_connected; }

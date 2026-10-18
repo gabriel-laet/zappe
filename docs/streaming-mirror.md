@@ -77,9 +77,15 @@ xdotool key --window "$WID" XF86Back
 
 ## Capas e atualização
 
-Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. O extrator lê `src`, `srcset`, `data-src`, `data-srcset` e `background-image`, e fica com a maior variante do srcset. Arquivo com menos de 12 horas é reusado. Enquanto a aba daquele serviço ainda está aberta, as que faltam saem por `fetch` com `credentials: 'include'` (os cookies da sessão). O que o fetch não trouxer tenta um GET com o user-agent de Chrome e `Referer` da origem. Até a imagem chegar, o guia usa uma capa gerada. A varredura recomeça a cada 20 minutos e não roda enquanto o player está aberto. Se a mesma URL já está na aba, o app passa por `about:blank` antes de navegar de novo: no YouTube um `Page.navigate` repetido não recarrega e o DOM virtualizado devolve um título. Uma leitura sem merge muito menor que a anterior (a guardada tem pelo menos 4 e a nova tem menos da metade) fica de fora.
+Cada URL de capa vai para `~/.cache/…/art/covers/<sha1>.img`. O extrator prefere `currentSrc` (a imagem que o browser de fato carregou) e, se ela for `blob:` ou vazia, cai para `src`, `srcset`, `data-src` e `background-image`. Arquivo com menos de 12 horas é reusado.
 
-OK num título local de um serviço do espelho, sem URL de playback, abre o loading daquele serviço em vez da ficha “No catálogo local”. A fileira local que só repete o serviço some da home quando o espelho existe. A fileira “Atualizando…” aparece antes da página do serviço.
+Enquanto a página carrega, cada resposta `image/*` grande o bastante é guardada com `Network.getResponseBody`. Isso não depende de CORS: o corpo já está no Chrome. A URL do card e a da rede casam sem a query (o CDN assinado troca o token). O que sobrar tenta um `fetch` na aba, com `credentials: 'include'`, no máximo 8 URLs e uma vez cada. `Failed to fetch` (CORS) encerra essa tentativa na hora. Os cards visíveis que ainda faltam saem de um `Page.captureScreenshot` com o retângulo do elemento. O GET solto, com user-agent de Chrome, só roda para o que o fetch não classificou como bloqueio de rede. Até a imagem chegar, o guia usa uma capa gerada.
+
+O log é uma linha por serviço (`artes N http, M sem url` e, se houve o que baixar, `capas N salvas (rede …, aba …, recorte …)`), com até três URLs de amostra e o primeiro erro. Não repete o lote.
+
+A varredura recomeça a cada 20 minutos e não roda enquanto o player está aberto. Se a mesma URL já está na aba, o app passa por `about:blank` antes de navegar de novo: no YouTube um `Page.navigate` repetido não recarrega e o DOM virtualizado devolve um título. Uma leitura sem merge muito menor que a anterior (a guardada tem pelo menos 4 e a nova tem menos da metade) fica de fora.
+
+OK num título local de um serviço do espelho, sem URL de playback, abre o loading daquele serviço em vez da ficha “No catálogo local”. A fileira local que só repete o serviço some da home quando o espelho existe. A fileira “Atualizando…” aparece antes da página do serviço. Um título que já tem URL de playback abre a ficha com o nome, a capa e a sinopse se o card trouxer uma. Essa ficha não lista episódios fictícios e não diz que o guia só navega. Assistir continua mandando o Play.
 
 `ZAPPE_MIRROR_DISABLE=1` não abre o Chrome. Sem o binário, o guia segue sem essas fileiras.
 

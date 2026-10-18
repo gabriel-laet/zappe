@@ -13,6 +13,7 @@ struct RowData {
     QString href;
     QString skillId;
     QString artworkSpec;
+    QString synopsis;
     QString artwork;
     QString ambient;
     QString color;

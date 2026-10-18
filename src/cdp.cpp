@@ -400,14 +400,23 @@ void CdpClient::dispatchMouseClick(int x, int y)
     }
 }
 
-void CdpClient::captureScreenshot()
+void CdpClient::captureScreenshot(int x, int y, int width, int height)
 {
     if (!m_socket || !m_connected)
         return;
     m_pendingShot = m_nextId++;
     QJsonObject params;
     params.insert(QStringLiteral("format"), QStringLiteral("jpeg"));
-    params.insert(QStringLiteral("quality"), 40);
+    params.insert(QStringLiteral("quality"), width > 8 && height > 8 ? 72 : 40);
+    if (width > 8 && height > 8) {
+        QJsonObject clip;
+        clip.insert(QStringLiteral("x"), x);
+        clip.insert(QStringLiteral("y"), y);
+        clip.insert(QStringLiteral("width"), width);
+        clip.insert(QStringLiteral("height"), height);
+        clip.insert(QStringLiteral("scale"), 1);
+        params.insert(QStringLiteral("clip"), clip);
+    }
     m_socket->sendTextMessage(QString::fromUtf8(cdpCommand(m_pendingShot, QStringLiteral("Page.captureScreenshot"), params)));
 }
 

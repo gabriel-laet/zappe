@@ -44,6 +44,8 @@ class Guide : public QObject {
     Q_PROPERTY(QString focusHref READ focusHref NOTIFY focusChanged)
     Q_PROPERTY(qreal focusProgress READ focusProgress NOTIFY focusChanged)
     Q_PROPERTY(bool focusLive READ focusLive NOTIFY focusChanged)
+    Q_PROPERTY(bool focusMirrored READ focusMirrored NOTIFY focusChanged)
+    Q_PROPERTY(QString focusSynopsis READ focusSynopsis NOTIFY focusChanged)
 
     Q_PROPERTY(QString brandName READ brandName NOTIFY brandingChanged)
     Q_PROPERTY(QString accent READ accent NOTIFY brandingChanged)
@@ -117,6 +119,8 @@ public:
     QString focusHref() const { return m_focusHref; }
     qreal focusProgress() const { return m_focusProgress; }
     bool focusLive() const { return m_focusLive; }
+    bool focusMirrored() const { return m_focusMirrored; }
+    QString focusSynopsis() const { return m_focusSynopsis; }
 
     QString brandName() const { return m_brand.name; }
     QString accent() const { return m_brand.accent; }
@@ -275,6 +279,8 @@ private:
     QString m_focusHref;
     qreal m_focusProgress = 0;
     bool m_focusLive = false;
+    bool m_focusMirrored = false;
+    QString m_focusSynopsis;
 };
 
 QString cacheDir();

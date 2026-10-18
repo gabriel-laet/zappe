@@ -63,9 +63,10 @@ Item {
         }
         Text {
             width: 720
+            visible: guide.focusLive || !guide.focusMirrored || guide.focusSynopsis.length > 0
             text: guide.focusLive
                   ? "Canal no ar. A prévia é um desenho, sem vídeo."
-                  : "No catálogo local. Este guia só navega."
+                  : (guide.focusMirrored ? guide.focusSynopsis : "No catálogo local. Este guia só navega.")
             color: "#d1d1d6"
             font.family: guide.uiFont
             font.pixelSize: 22
@@ -120,6 +121,7 @@ Item {
 
             Rectangle {
                 id: trailer
+                visible: !guide.focusMirrored
                 width: 176
                 height: 64
                 radius: 32
@@ -202,6 +204,7 @@ Item {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 36
         spacing: 14
+        visible: !guide.focusMirrored
 
         Text {
             leftPadding: 88
