@@ -169,8 +169,12 @@ Window {
         z: 8
     }
 
+    LoadingView {
+        z: 13
+    }
+
     LoginPrompt {
-        z: 12
+        z: 15
     }
 
     Rectangle {
@@ -199,8 +203,15 @@ Window {
         id: keys
         anchors.fill: parent
         focus: true
-        z: 7
+        z: 20
         Keys.onPressed: function (event) {
+            const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Back
+                    || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home
+                    || event.key === Qt.Key_HomePage
+            if (backKey && event.isAutoRepeat) {
+                event.accepted = true
+                return
+            }
             if (win.splashOn) {
                 win.splashOn = false
                 event.accepted = true
@@ -215,9 +226,25 @@ Window {
                 event.accepted = true
                 return
             }
+            if (house.loading) {
+                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Backspace
+                        || event.key === Qt.Key_Home || event.key === Qt.Key_HomePage)
+                    house.cancelLoading()
+                else if (house.loadingFailed && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                        || event.key === Qt.Key_Select))
+                    house.retryLoading()
+                else if (event.key === Qt.Key_VolumeUp)
+                    guide.adjustVolume(5)
+                else if (event.key === Qt.Key_VolumeDown)
+                    guide.adjustVolume(-5)
+                else if (event.key === Qt.Key_VolumeMute)
+                    guide.toggleMute()
+                event.accepted = true
+                return
+            }
             if (house.playing && (event.key === Qt.Key_Escape || event.key === Qt.Key_Back
                     || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home || event.key === Qt.Key_HomePage)) {
-                house.stopPlayback()
+                house.goBack()
                 event.accepted = true
                 return
             }
@@ -244,7 +271,7 @@ Window {
             case Qt.Key_Backspace:
             case Qt.Key_Home:
             case Qt.Key_HomePage:
-                guide.back()
+                house.goBack()
                 break
             case Qt.Key_Menu:
             case Qt.Key_Multi_key:

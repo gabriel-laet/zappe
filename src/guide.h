@@ -63,6 +63,7 @@ class Guide : public QObject {
     Q_PROPERTY(bool volumeHud READ volumeHud NOTIFY hudChanged)
     Q_PROPERTY(QString toastText READ toastText NOTIFY toastChanged)
     Q_PROPERTY(bool toastOn READ toastOn NOTIFY toastChanged)
+    Q_PROPERTY(bool cardDown READ cardDown NOTIFY cardDownChanged)
 
     Q_PROPERTY(bool showFps READ showFps CONSTANT)
     Q_PROPERTY(int fps READ fps NOTIFY fpsChanged)
@@ -133,6 +134,7 @@ public:
     bool volumeHud() const { return m_volumeHud; }
     QString toastText() const { return m_toastText; }
     bool toastOn() const { return m_toastOn; }
+    bool cardDown() const { return m_cardDown; }
 
     bool showFps() const { return m_showFps; }
     int fps() const { return m_fps; }
@@ -166,6 +168,7 @@ signals:
     void volumeChanged();
     void hudChanged();
     void toastChanged();
+    void cardDownChanged();
     void playRequested(const QString &title, const QString &service, const QString &href);
 
 private:
@@ -184,6 +187,7 @@ private:
     void toggleSaved();
     void nudgeResolution(int direction);
     void setBrandingEnabled(bool on);
+    void pulseCard();
     void revealVolume();
     void showToast(const QString &text);
     bool coalesce(const QString &key);
@@ -230,6 +234,7 @@ private:
     bool m_pinVolume = false;
     int m_volumeGen = 0;
     QString m_toastText;
+    bool m_cardDown = false;
     bool m_toastOn = false;
     bool m_pinToast = false;
     int m_toastGen = 0;

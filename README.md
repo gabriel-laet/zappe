@@ -7,12 +7,11 @@ O nome padrão é **Zappe**. Marca, logo e splash vêm de um arquivo na máquina
 ## Arquitetura
 
 ```text
-tty1 autologin
-  └─ zappe-kiosk.service
-       └─ gamescope 1920×1080
-            ├─ zappe          guia Qt Quick
-            └─ google-chrome  --kiosk --remote-debugging-port=9222
-                 perfil ~/.local/share/zappe/chrome-profile
+zappe-kiosk.service   (systemd de sistema, tty1, seat0)
+  └─ gamescope 1920×1080
+       ├─ zappe          guia Qt Quick
+       └─ google-chrome  --kiosk --remote-debugging-port=9222
+            perfil ~/.local/share/zappe/chrome-profile
 ```
 
 Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY` / `DISPLAY` do gamescope.
@@ -28,7 +27,7 @@ Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY`
 | Samsung | Power, volume, mudo, HDMI e estado da UN43TU7020. |
 | Voz | Whisper pt-BR, modelo base e, se não houver, tiny. |
 | Áudio | PipeWire `output:hdmi-stereo` no card `alsa_card.pci-0000_00_1f.3`. |
-| Update | `zappe-update` recompila com CMake e reinicia `zappe-kiosk.service`. |
+| Update | `zappe-update` recompila com CMake e reinicia a unit de sistema `zappe-kiosk.service`. |
 
 ## O que saiu
 
@@ -83,37 +82,45 @@ ZAPPE_AUDIO_DISABLE=1 ./build/zappe --windowed
 
 ## Deploy no aparelho
 
-O gamescope sobe pelo autologin do tty1, dentro de `zappe-kiosk.service`, para o updater conseguir reiniciar.
+O gamescope sobe numa **unit de sistema**, no tty1, dentro da sessão do usuário no seat0. Sem essa sessão o PipeWire do usuário não aparece e o HDMI fica mudo. O `getty@tty1` fica mascarado.
 
 ```bash
-# uma vez
 sudo usermod -aG video,input,render "$USER"
 loginctl enable-linger "$USER"
 
-sudo mkdir -p /etc/systemd/system/getty@tty1.service.d
-sudo cp packaging/appliance/tty1-autologin.conf \
-  /etc/systemd/system/getty@tty1.service.d/autologin.conf
-# troque YOUR_USER no arquivo
+install -D -m 755 packaging/appliance/zappe-kiosk.sh "$HOME/bin/zappe-kiosk.sh"
+# ou um wrapper: exec "$HOME/src/zappe/packaging/appliance/zappe-kiosk.sh"
 
+sudo cp packaging/appliance/zappe-kiosk.service /etc/systemd/system/zappe-kiosk.service
+sudo sed -i "s/YOUR_USER/$USER/g" /etc/systemd/system/zappe-kiosk.service
+sudo systemctl daemon-reload
+sudo systemctl mask getty@tty1.service
+sudo systemctl enable --now zappe-kiosk.service
+```
+
+O updater reinicia com `sudo -n systemctl restart zappe-kiosk.service` quando essa unit existe. Sem senha:
+
+```bash
+sudo tee /etc/sudoers.d/zappe >/dev/null <<EOF
+$USER ALL=(root) NOPASSWD: /usr/bin/systemctl restart zappe-kiosk.service, /usr/bin/systemctl daemon-reload
+EOF
+sudo chmod 440 /etc/sudoers.d/zappe
+```
+
+O timer de update continua na sessão do usuário:
+
+```bash
 mkdir -p ~/.config/systemd/user
-cp packaging/appliance/zappe-kiosk.service \
-   packaging/appliance/zappe-update.service \
+cp packaging/appliance/zappe-update.service \
    packaging/appliance/zappe-update.timer \
    ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now zappe-update.timer
-systemctl --user enable --now zappe-kiosk.service
 ```
 
-No `~/.bash_profile` do usuário da sala:
+Se a unit de sistema não existir, `zappe-tty1.sh` (autologin do tty1) ainda sobe a unit de usuário `zappe-kiosk.user.service`. O padrão do repo é a unit de sistema.
 
-```bash
-if [[ "$(tty)" == /dev/tty1 ]]; then
-  exec "$HOME/src/zappe/packaging/appliance/zappe-tty1.sh"
-fi
-```
-
-`zappe-tty1.sh` sobe `zappe-kiosk.service` e segura o tty. O script do kiosk lê `~/.local/share/zappe/display.json`: sem arquivo, ou com `1080p`, o gamescope fica em 1920×1080. `"resolution": "4K"` sobe em 3840×2160 no próximo início.
+O script do kiosk lê `~/.local/share/zappe/display.json`: sem arquivo, ou com `1080p`, o gamescope fica em 1920×1080. `"resolution": "4K"` sobe em 3840×2160 no próximo início. Se o `zappe` sair, o script abre de novo; se o script sair, `Restart=always` sobe a unit outra vez.
 
 Áudio, antes do gamescope e de novo no app:
 
@@ -151,7 +158,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar encerra o Chrome ou o mpv e mostra o guia de novo.
+Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. Com o Chrome aberto, volta uma página; sem histórico, volta para o guia. Na TV aberta, volta para o guia.
 
 ## Controle
 
@@ -163,7 +170,7 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Play / Pause | 164 | play/pause |
 | Setas | 103, 108, 105, 106 | foco |
 | OK | 28 | ativar |
-| Home | 158 | voltar |
+| Home | 158 | voltar (não fecha o app) |
 | Menu | 127 | menu |
 | Page Up / Down | 104, 109 | troca de fileira |
 | Volume | 115, 114 | Samsung |
@@ -179,6 +186,10 @@ IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo se
 
 Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Nomes 1Seg saem. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
 
+OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar. Abrir um streaming no Chrome usa o mesmo overlay.
+
+Uma fileira antiga do harvest com `status` `error`, `teach` ou `harvesting`, ou com texto de AT-SPI (`no Chrome/Chromium application on the AT-SPI bus`), sai do catálogo e não aparece no guia. `Continue watching` com títulos de verdade continua.
+
 ## Voz
 
 Mic 582 grava com `arecord` e transcreve com `whisper-cli -l pt`. A ordem do modelo é `ggml-base.bin`, depois `ggml-tiny.bin`. `ZAPPE_WHISPER_MODEL` aponta outro arquivo. `ZAPPE_VOICE_FAKE="abrir netflix"` pula o microfone. Frases: abrir um streaming, voltar, volume, mudo, ir para Globo / Record / SBT. Ver [`docs/voice.md`](docs/voice.md).
@@ -189,7 +200,7 @@ Mic 582 grava com `arecord` e transcreve com `whisper-cli -l pt`. A ordem do mod
 
 ## Update
 
-`zappe-update.timer` olha `origin/main` a cada 20 minutos. Árvore suja não é atualizada. O build é `cmake --build`. O binário vai para `~/bin/zappe`. A unit reiniciada é `zappe-kiosk.service`. O perfil do Chrome não é tocado.
+`zappe-update.timer` olha `origin/main` a cada 20 minutos. Árvore suja não é atualizada. O build é `cmake --build`. O binário vai para `~/bin/zappe`. Se existir a unit de sistema `zappe-kiosk.service`, o restart é `sudo -n systemctl restart zappe-kiosk.service`. Sem ela, reinicia a unit de usuário. O perfil do Chrome não é tocado.
 
 ```bash
 systemctl --user start zappe-update.service

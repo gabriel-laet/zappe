@@ -476,6 +476,11 @@ void Guide::activate()
     }
     if (!currentRow())
         return;
+    if (m_focusLive) {
+        pulseCard();
+        emit playRequested(m_focusTitle, m_focusService, m_focusHref);
+        return;
+    }
     m_detailOpen = true;
     m_detailZone = 0;
     m_detailButton = 0;
@@ -485,9 +490,20 @@ void Guide::activate()
     emit focusChanged();
 }
 
+void Guide::pulseCard()
+{
+    m_cardDown = true;
+    emit cardDownChanged();
+    QTimer::singleShot(160, this, [this] {
+        m_cardDown = false;
+        emit cardDownChanged();
+    });
+}
+
 void Guide::activateDetail()
 {
     if (m_detailZone == 0 && m_detailButton == 0) {
+        pulseCard();
         emit playRequested(m_focusTitle, m_focusService, m_focusHref);
         return;
     }

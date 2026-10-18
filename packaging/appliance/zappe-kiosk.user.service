@@ -1,0 +1,15 @@
+# Fallback antigo: unit de usuário, se o aparelho ainda não usa a unit de sistema.
+# O deploy padrão é packaging/appliance/zappe-kiosk.service em /etc/systemd/system/.
+[Unit]
+Description=Zappe kiosk (one gamescope, Qt guide, Chrome inside)
+After=pipewire.service pipewire-pulse.service
+
+[Service]
+Type=simple
+Environment=PATH=%h/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/src/zappe/packaging/appliance/zappe-kiosk.sh
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

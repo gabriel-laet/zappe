@@ -12,6 +12,10 @@ public:
     explicit RemoteWatcher(QObject *parent = nullptr);
     ~RemoteWatcher() override;
     void start();
+    // Enquanto o Chrome está na frente, o nó do teclado fica exclusivo.
+    // O Home não chega no navegador (senão volta duas páginas) e as setas
+    // são reenviadas por CDP.
+    void setHoldKeyboard(bool hold);
 
 signals:
     void action(int remoteAction);
@@ -19,6 +23,7 @@ signals:
 private:
     class Worker;
     Worker *m_worker = nullptr;
+    bool m_holdKeyboard = false;
 };
 
 bool hidDisabled();

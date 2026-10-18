@@ -108,6 +108,7 @@ public:
         m_stop.store(true);
         wait(1500);
     }
+    void setHoldKeyboard(bool hold) { m_holdKeyboard.store(hold); }
 
 protected:
     void run() override
@@ -120,6 +121,7 @@ protected:
         }
         QVector<int> fds;
         QVector<pollfd> polls;
+        QVector<int> keyboardFds;
         for (const Node &node : nodes) {
             const int fd = ::open(node.path.toUtf8().constData(), O_RDONLY | O_NONBLOCK);
             if (fd < 0) {
@@ -140,14 +142,35 @@ protected:
                 std::fprintf(stderr, "zappe: grab exclusivo %s\n", qPrintable(node.path));
             else if (node.grab)
                 std::fprintf(stderr, "zappe: não consegui grab em %s\n", qPrintable(node.path));
+            if (!grab && hasUp)
+                keyboardFds.append(fd);
             fds.append(fd);
             pollfd slot{};
             slot.fd = fd;
             slot.events = POLLIN;
             polls.append(slot);
         }
+        bool held = false;
+        int holdFails = 0;
         while (!m_stop.load()) {
-            const int ready = ::poll(polls.data(), nfds_t(polls.size()), 400);
+            const bool wantHold = m_holdKeyboard.load();
+            if (wantHold != held) {
+                bool ok = true;
+                for (int fd : keyboardFds) {
+                    if (ioctl(fd, EVIOCGRAB, wantHold ? 1 : 0) != 0)
+                        ok = false;
+                }
+                if (ok) {
+                    held = wantHold;
+                    holdFails = 0;
+                    if (wantHold && !keyboardFds.isEmpty())
+                        std::fprintf(stderr,
+                                     "zappe: teclado do controle exclusivo enquanto o Chrome está aberto\n");
+                } else if (wantHold && holdFails++ % 20 == 0) {
+                    std::fprintf(stderr, "zappe: não consegui segurar o teclado do controle\n");
+                }
+            }
+            const int ready = ::poll(polls.data(), nfds_t(polls.size()), 100);
             if (ready <= 0)
                 continue;
             for (int i = 0; i < polls.size(); ++i) {
@@ -184,6 +207,7 @@ protected:
 private:
     RemoteWatcher *m_owner = nullptr;
     std::atomic<bool> m_stop{false};
+    std::atomic<bool> m_holdKeyboard{false};
 };
 
 RemoteWatcher::RemoteWatcher(QObject *parent)
@@ -204,7 +228,15 @@ void RemoteWatcher::start()
     if (hidDisabled() || m_worker)
         return;
     m_worker = new Worker(this);
+    m_worker->setHoldKeyboard(m_holdKeyboard);
     m_worker->start();
+}
+
+void RemoteWatcher::setHoldKeyboard(bool hold)
+{
+    m_holdKeyboard = hold;
+    if (m_worker)
+        m_worker->setHoldKeyboard(hold);
 }
 
 } // namespace zappe

@@ -58,7 +58,7 @@ Item {
         id: visual
         anchors.fill: parent
         transformOrigin: Item.Center
-        scale: card.focused ? guide.focusScale : 1
+        scale: card.focused ? guide.focusScale * (guide.cardDown ? 0.92 : 1) : 1
         Behavior on scale {
             SpringAnimation {
                 spring: 2.4

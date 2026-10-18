@@ -5,8 +5,12 @@
 #include <QDir>
 #include <QFile>
 #include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLocalSocket>
 #include <QProcess>
 #include <QRegularExpression>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -247,6 +251,18 @@ QString resolveChannelName(const QString &requested, const QStringList &names)
     return ranked.first();
 }
 
+bool mpvPlaybackStarted(const QByteArray &ipcLine)
+{
+    const QByteArray trimmed = ipcLine.trimmed();
+    if (trimmed.isEmpty())
+        return false;
+    const QJsonDocument doc = QJsonDocument::fromJson(trimmed);
+    if (!doc.isObject())
+        return false;
+    const QJsonValue data = doc.object().value(QStringLiteral("data"));
+    return data.isDouble() && data.toDouble() >= 0;
+}
+
 QString otaPipelineScript(const QString &conf, const QString &channel)
 {
     return QStringLiteral("set -o pipefail; dvbv5-zap -a 0 -c %1 -p %2 -r -o - | "
@@ -309,8 +325,18 @@ OtaPlayer::OtaPlayer(QObject *parent)
 
 void OtaPlayer::stop()
 {
-    if (!m_process)
+    m_userStop = true;
+    if (m_pictureTimer)
+        m_pictureTimer->stop();
+    if (m_ipc) {
+        m_ipc->abort();
+        m_ipc->deleteLater();
+        m_ipc = nullptr;
+    }
+    if (!m_process) {
+        m_channel.clear();
         return;
+    }
     const qint64 pid = m_process->processId();
     m_process->terminate();
     if (!m_process->waitForFinished(400))
@@ -322,6 +348,37 @@ void OtaPlayer::stop()
     }
     m_channel.clear();
     emit stopped();
+}
+
+void OtaPlayer::pollPicture()
+{
+    if (!m_process || m_sawPicture || m_socket.isEmpty())
+        return;
+    if (m_ipc) {
+        m_ipc->abort();
+        m_ipc->deleteLater();
+    }
+    m_ipc = new QLocalSocket(this);
+    connect(m_ipc, &QLocalSocket::readyRead, this, [this] {
+        if (!m_ipc || m_sawPicture)
+            return;
+        const QByteArray payload = m_ipc->readAll();
+        for (const QByteArray &line : payload.split('\n')) {
+            if (!mpvPlaybackStarted(line))
+                continue;
+            m_sawPicture = true;
+            if (m_pictureTimer)
+                m_pictureTimer->stop();
+            emit started(m_channel);
+            return;
+        }
+    });
+    connect(m_ipc, &QLocalSocket::connected, this, [this] {
+        if (!m_ipc)
+            return;
+        m_ipc->write("{\"command\":[\"get_property\",\"playback-time\"]}\n");
+    });
+    m_ipc->connectToServer(m_socket);
 }
 
 void OtaPlayer::play(const QString &requested)
@@ -370,15 +427,33 @@ void OtaPlayer::play(const QString &requested)
     }
     m_process = process;
     m_channel = resolved;
-    connect(process, &QProcess::finished, this, [this, process] {
+    m_userStop = false;
+    m_sawPicture = false;
+    connect(process, &QProcess::finished, this, [this, process](int, QProcess::ExitStatus) {
         if (m_process != process)
             return;
         m_process = nullptr;
+        const bool picture = m_sawPicture;
+        const bool userStop = m_userStop;
         m_channel.clear();
         process->deleteLater();
-        emit stopped();
+        if (!picture && !userStop)
+            emit failed(QStringLiteral("A sintonia caiu antes da imagem."));
+        if (picture)
+            emit stopped();
     });
-    emit started(resolved);
+    if (!qEnvironmentVariable("ZAPPE_OTA_FAKE").isEmpty()) {
+        m_sawPicture = true;
+        emit started(resolved);
+        return;
+    }
+    if (!m_pictureTimer) {
+        m_pictureTimer = new QTimer(this);
+        m_pictureTimer->setInterval(300);
+        connect(m_pictureTimer, &QTimer::timeout, this, &OtaPlayer::pollPicture);
+    }
+    m_pictureTimer->start();
+    pollPicture();
 }
 
 void OtaPlayer::togglePause()

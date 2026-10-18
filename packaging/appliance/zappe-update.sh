@@ -7,7 +7,9 @@
 # Env:
 #   ZAPPE_SRC       repo checkout (default: ~/src/zappe)
 #   ZAPPE_DATA_DIR  state/log dir (default: ~/.local/share/zappe)
-#   ZAPPE_UNIT      systemd user unit to restart (default: zappe-kiosk.service)
+#   ZAPPE_UNIT      unit to restart (default: zappe-kiosk.service)
+#                   system unit wins: sudo -n systemctl restart
+#                   otherwise the user unit, if it exists
 set -euo pipefail
 
 ZAPPE_SRC="${ZAPPE_SRC:-${HOME}/src/zappe}"
@@ -129,9 +131,18 @@ else
   log "sudo -n unavailable; skipped ${SYSTEM_BIN} (kiosk PATH uses ${HOME}/bin)"
 fi
 
-mkdir -p "${HOME}/.config/systemd/user"
-if [[ -f "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.service" ]]; then
-  cp "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.service" \
+mkdir -p "${HOME}/.config/systemd/user" "${HOME}/bin"
+if [[ ! -x "${HOME}/bin/zappe-kiosk.sh" && -f "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.sh" ]]; then
+  cat > "${HOME}/bin/zappe-kiosk.sh" <<EOF
+#!/bin/bash
+exec "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.sh"
+EOF
+  chmod 755 "${HOME}/bin/zappe-kiosk.sh"
+  log "installed ${HOME}/bin/zappe-kiosk.sh"
+fi
+if [[ -f "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.user.service" \
+   && ! -f "${HOME}/.config/systemd/user/zappe-kiosk.service" ]]; then
+  cp "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.user.service" \
     "${HOME}/.config/systemd/user/zappe-kiosk.service"
 fi
 if [[ -f "${ZAPPE_SRC}/packaging/appliance/zappe-update.service" ]]; then
@@ -143,11 +154,17 @@ systemctl --user daemon-reload || true
 printf '%s\n' "${remote_sha}" > "${INSTALLED_SHA}"
 log "wrote ${INSTALLED_SHA}"
 
-if systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
-  if systemctl --user restart "${ZAPPE_UNIT}"; then
-    log "restarted ${ZAPPE_UNIT}"
+if systemctl cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
+  if sudo -n systemctl restart "${ZAPPE_UNIT}"; then
+    log "restarted system ${ZAPPE_UNIT}"
   else
-    log "restart ${ZAPPE_UNIT} failed (ignored; safe if kiosk is not running)"
+    log "sudo -n systemctl restart ${ZAPPE_UNIT} failed"
+  fi
+elif systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
+  if systemctl --user restart "${ZAPPE_UNIT}"; then
+    log "restarted user ${ZAPPE_UNIT}"
+  else
+    log "restart user ${ZAPPE_UNIT} failed (ignored; safe if kiosk is not running)"
   fi
 else
   log "unit ${ZAPPE_UNIT} not installed; skip restart (expected name: zappe-kiosk.service)"

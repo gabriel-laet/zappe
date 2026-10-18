@@ -23,6 +23,7 @@ set(QML_FILES
   qml/VolumeHud.qml
   qml/Toast.qml
   qml/LoginPrompt.qml
+  qml/LoadingView.qml
 )
 
 foreach(qml ${QML_FILES})
