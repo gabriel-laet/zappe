@@ -2,9 +2,9 @@
 
 Files here are **samples**. They are not loaded by Zappe at runtime.
 
-Remote capture (KEY bitfields + Mic/Pointer press) lives next to this folder: [`../zappe-atongx-capture`](../zappe-atongx-capture). See [`docs/atongx-input.md`](../../../docs/atongx-input.md).
+Remote capture lives next to this folder: [`../zappe-atongx-capture`](../zappe-atongx-capture). See [`docs/atongx-input.md`](../../../docs/atongx-input.md).
 
-[`xing-wei-devices.txt`](xing-wei-devices.txt) is a **synthetic** `/proc/bus/input/devices` dump for the parser (KEY bits encoded from `atongx-map.json`). It is not a live zappe-tv capture.
+[`xing-wei-devices.txt`](xing-wei-devices.txt) is a **synthetic** `/proc/bus/input/devices` dump. It is not a live zappe-tv capture. The key contract the app uses is [`data/atongx-map.json`](../../../data/atongx-map.json).
 
 ## Custom branding (not in git)
 
@@ -24,7 +24,7 @@ mkdir -p ~/.local/share/zappe
 cp packaging/appliance/examples/branding.json ~/.local/share/zappe/branding.json
 cp /path/to/your-logo.png ~/.local/share/zappe/logo.png
 
-systemctl --user restart zappe.service
+systemctl --user restart zappe-kiosk.service
 ```
 
 If `branding.json` is missing, the guide uses in-code defaults (`Zappe` + Apple TV–black chrome). Invalid JSON → log and fall back.
@@ -55,9 +55,9 @@ Volume / mute on the ATONGX go to the living-room Samsung over Wi-Fi. Copy the s
 mkdir -p ~/.local/share/zappe
 cp packaging/appliance/examples/samsung.json ~/.local/share/zappe/samsung.json
 # allow "Zappe" in Device Connect Manager; the kiosk writes token into that file
-systemctl --user restart zappe.service
+systemctl --user restart zappe-kiosk.service
 ```
 
 Never commit a live `token`. `ZAPPE_SAMSUNG_HOST` / `ZAPPE_SAMSUNG_TOKEN` override the file. `ZAPPE_SAMSUNG_DISABLE=1` forces PulseAudio.
 
-ATONGX Power stays **return to the guide** unless you set `"wakeOnPower": true` (or `ZAPPE_SAMSUNG_WAKE_ON_POWER=1`). Optional `"mac"` / `ZAPPE_SAMSUNG_MAC` enables Wake-on-LAN when the TV is fully off. See [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).
+ATONGX Power (evdev 116) is ignored. The Qt app does not send `KEY_POWER`. A leftover `wakeOnPower` field in an old `samsung.json` is not read. See [`docs/samsung-tv.md`](../../../docs/samsung-tv.md).

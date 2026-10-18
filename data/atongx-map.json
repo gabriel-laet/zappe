@@ -1,0 +1,94 @@
+{
+  "version": 2,
+  "device": {
+    "product": "XING WEI 2.4G USB USB Composite Device",
+    "aliases": ["XING WEI", "ATONGX"],
+    "usb": { "vendor": "2320", "product": "0912" },
+    "airMouse": "event4",
+    "airMouseGrab": "exclusive",
+    "note": "event4 é o air mouse. O app faz EVIOCGRAB exclusivo nesse nó e descarta REL/BTN para o cursor não andar. Power 116 é lido e ignorado."
+  },
+  "bindings": [
+    {
+      "button": "Power",
+      "action": "ignore",
+      "keys": [{ "name": "KEY_POWER", "code": 116 }]
+    },
+    {
+      "button": "Play / Pause",
+      "action": "playpause",
+      "keys": [{ "name": "KEY_PLAYPAUSE", "code": 164 }]
+    },
+    {
+      "button": "D-pad Up",
+      "action": "up",
+      "keys": [{ "name": "KEY_UP", "code": 103 }]
+    },
+    {
+      "button": "D-pad Down",
+      "action": "down",
+      "keys": [{ "name": "KEY_DOWN", "code": 108 }]
+    },
+    {
+      "button": "D-pad Left",
+      "action": "left",
+      "keys": [{ "name": "KEY_LEFT", "code": 105 }]
+    },
+    {
+      "button": "D-pad Right",
+      "action": "right",
+      "keys": [{ "name": "KEY_RIGHT", "code": 106 }]
+    },
+    {
+      "button": "OK",
+      "action": "ok",
+      "keys": [{ "name": "KEY_ENTER", "code": 28 }]
+    },
+    {
+      "button": "Home",
+      "action": "back",
+      "note": "No controle da sala o Home sai como KEY_BACK 158 e significa voltar.",
+      "keys": [{ "name": "KEY_BACK", "code": 158 }]
+    },
+    {
+      "button": "Menu",
+      "action": "menu",
+      "keys": [{ "name": "KEY_COMPOSE", "code": 127 }]
+    },
+    {
+      "button": "PAGE up",
+      "action": "pageUp",
+      "keys": [{ "name": "KEY_PAGEUP", "code": 104 }]
+    },
+    {
+      "button": "PAGE down",
+      "action": "pageDown",
+      "keys": [{ "name": "KEY_PAGEDOWN", "code": 109 }]
+    },
+    {
+      "button": "VOL +",
+      "action": "volumeUp",
+      "keys": [{ "name": "KEY_VOLUMEUP", "code": 115 }]
+    },
+    {
+      "button": "VOL -",
+      "action": "volumeDown",
+      "keys": [{ "name": "KEY_VOLUMEDOWN", "code": 114 }]
+    },
+    {
+      "button": "Mute",
+      "action": "mute",
+      "keys": [{ "name": "KEY_MUTE", "code": 113 }]
+    },
+    {
+      "button": "DEL",
+      "action": "back",
+      "keys": [{ "name": "KEY_BACKSPACE", "code": 14 }]
+    },
+    {
+      "button": "Mic",
+      "action": "voice",
+      "keys": [{ "name": "KEY_VOICECOMMAND", "code": 582 }]
+    }
+  ]
+}

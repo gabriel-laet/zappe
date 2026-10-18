@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
-# Refuse to regress the appliance updater onto `cargo build --release`
-# (that leaves cfg(dev) → http://localhost:1420).
+# The appliance updater builds with CMake and restarts zappe-kiosk.service.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 script="${root}/packaging/appliance/zappe-update.sh"
 
-if grep -E '^[[:space:]]*cargo[[:space:]]+build[[:space:]]+--release' "${script}"; then
-  echo "check-updater: ${script} still runs cargo build --release" >&2
+if grep -nE 'npm run tauri|cargo build --release|zappe-companion' "${script}"; then
+  echo "check-updater: updater still mentions Tauri, cargo release, or the companion" >&2
   exit 1
 fi
-if ! grep -qE '^[[:space:]]*npm run tauri -- build --no-bundle[[:space:]]*$' "${script}"; then
-  echo "check-updater: ${script} must invoke: npm run tauri -- build --no-bundle" >&2
+if ! grep -q 'cmake --build' "${script}"; then
+  echo "check-updater: updater must run cmake --build" >&2
+  exit 1
+fi
+if ! grep -q 'zappe-kiosk.service' "${script}"; then
+  echo "check-updater: updater must restart zappe-kiosk.service" >&2
   exit 1
 fi
 echo "check-updater: ok"

@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# On-device updater for the living-room box (hostname zappe-tv, user glaet).
+# On-device updater for the living-room box.
 #
-# Polls origin/main, rebuilds the zappe binary (no AppImage/deb), installs it,
-# and restarts the user kiosk unit. Never touches chrome-profile.
+# Polls origin/main, rebuilds the Qt binary with CMake, installs it,
+# and restarts zappe-kiosk.service. Never touches chrome-profile.
 #
 # Env:
 #   ZAPPE_SRC       repo checkout (default: ~/src/zappe)
 #   ZAPPE_DATA_DIR  state/log dir (default: ~/.local/share/zappe)
-#   ZAPPE_UNIT      systemd user unit to restart (default: zappe.service)
+#   ZAPPE_UNIT      systemd user unit to restart (default: zappe-kiosk.service)
 set -euo pipefail
 
 ZAPPE_SRC="${ZAPPE_SRC:-${HOME}/src/zappe}"
 ZAPPE_DATA_DIR="${ZAPPE_DATA_DIR:-${HOME}/.local/share/zappe}"
-ZAPPE_UNIT="${ZAPPE_UNIT:-zappe.service}"
+ZAPPE_UNIT="${ZAPPE_UNIT:-zappe-kiosk.service}"
 REMOTE="${ZAPPE_REMOTE:-origin}"
 BRANCH="${ZAPPE_BRANCH:-main}"
 
@@ -21,16 +21,8 @@ LOG="${ZAPPE_DATA_DIR}/update.log"
 LOCK="${ZAPPE_DATA_DIR}/update.lock"
 USER_BIN="${HOME}/bin/zappe"
 SYSTEM_BIN="/usr/local/bin/zappe"
-USER_COMPANION="${HOME}/bin/zappe-companion"
-SYSTEM_COMPANION="/usr/local/bin/zappe-companion"
-COMPANION_UNIT="zappe-companion.service"
 
-# systemd --user sessions often have a thin PATH
-export PATH="${HOME}/.cargo/bin:${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
-if [[ -f "${HOME}/.cargo/env" ]]; then
-  # shellcheck disable=SC1091
-  . "${HOME}/.cargo/env"
-fi
+export PATH="${HOME}/bin:${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin:${PATH}"
 
 mkdir -p "${ZAPPE_DATA_DIR}" "${HOME}/bin"
 
@@ -67,10 +59,6 @@ git_c() {
   git -C "${ZAPPE_SRC}" "$@"
 }
 
-# --- fetch + compare -------------------------------------------------------
-# Fetch the branch into the remote-tracking ref. A bare `git fetch origin main`
-# only writes FETCH_HEAD on some setups and would leave origin/main stale,
-# so an already-written installed-sha would skip a real update forever.
 if ! git_c fetch --quiet "${REMOTE}" "+refs/heads/${BRANCH}:refs/remotes/${REMOTE}/${BRANCH}"; then
   die "git fetch ${REMOTE} ${BRANCH} failed"
 fi
@@ -90,7 +78,6 @@ fi
 
 log "update ${installed_sha:-<none>} -> ${remote_sha}"
 
-# Dirty tree: refuse. Never reset --hard / clean / wipe local work.
 if ! git_c diff --quiet --ignore-submodules HEAD \
   || ! git_c diff --cached --quiet --ignore-submodules; then
   die "dirty tree in ${ZAPPE_SRC}; refusing to pull (commit or stash locally)"
@@ -106,95 +93,56 @@ if ! git_c pull --ff-only --quiet "${REMOTE}" "${BRANCH}"; then
   die "git pull --ff-only failed (diverged from ${REMOTE}/${BRANCH}?)"
 fi
 
-# --- deps + build (binary only; bundler must not gate updates) -------------
-# NEVER `cargo build --release` alone. That leaves Tauri's `cfg(dev)` on, so
-# the kiosk binary still loads `devUrl` (http://localhost:1420) instead of
-# the baked `frontendDist`. The Tauri CLI is what flips production cfg.
-#
-# `npm run tauri build` (default) also packages AppImage/deb via linuxdeploy
-# and can fail after the executable is already linked. Appliance updates
-# skip the bundler:
-#
-#   npm run tauri -- build --no-bundle
-cd "${ZAPPE_SRC}"
-
-if [[ -f package-lock.json ]]; then
-  npm ci
-else
-  npm install
+if ! command -v cmake >/dev/null 2>&1; then
+  die "cmake not on PATH"
 fi
 
-if ! command -v npm >/dev/null 2>&1; then
-  die "npm not on PATH; cannot run the Tauri CLI"
-fi
-if ! npm run tauri -- --version >/dev/null; then
-  die "Tauri CLI missing (need @tauri-apps/cli via npm run tauri)"
+generator="Unix Makefiles"
+if command -v ninja >/dev/null 2>&1; then
+  generator="Ninja"
 fi
 
-log "build: npm run tauri -- build --no-bundle (not cargo build --release)"
-npm run tauri -- build --no-bundle
+log "build: cmake -G ${generator} && cmake --build"
+cmake -S "${ZAPPE_SRC}" -B "${ZAPPE_SRC}/build" -G "${generator}" -DCMAKE_BUILD_TYPE=Release
+cmake --build "${ZAPPE_SRC}/build"
 
 bin=""
 for candidate in \
-  "${ZAPPE_SRC}/src-tauri/target/release/zappe" \
-  "${ZAPPE_SRC}/target/release/zappe"; do
+  "${ZAPPE_SRC}/build/zappe" \
+  "${ZAPPE_SRC}/build/Release/zappe"; do
   if [[ -x "${candidate}" ]]; then
     bin="${candidate}"
     break
   fi
 done
 if [[ -z "${bin}" ]]; then
-  die "built binary not found under src-tauri/target/release/zappe"
+  die "built binary not found under build/zappe"
 fi
 
-# --- install ---------------------------------------------------------------
 install -D -m 755 "${bin}" "${USER_BIN}"
 log "installed ${bin} -> ${USER_BIN}"
-
-companion=""
-for candidate in \
-  "${ZAPPE_SRC}/src-tauri/target/release/zappe-companion" \
-  "${ZAPPE_SRC}/target/release/zappe-companion"; do
-  if [[ -x "${candidate}" ]]; then
-    companion="${candidate}"
-    break
-  fi
-done
-if [[ -n "${companion}" ]]; then
-  install -D -m 755 "${companion}" "${USER_COMPANION}"
-  log "installed ${companion} -> ${USER_COMPANION}"
-fi
 
 if sudo -n true >/dev/null 2>&1; then
   sudo -n install -m 755 "${bin}" "${SYSTEM_BIN}"
   log "installed ${bin} -> ${SYSTEM_BIN}"
-  if [[ -n "${companion}" ]]; then
-    sudo -n install -m 755 "${companion}" "${SYSTEM_COMPANION}"
-    log "installed ${companion} -> ${SYSTEM_COMPANION}"
-  fi
 else
   log "sudo -n unavailable; skipped ${SYSTEM_BIN} (kiosk PATH uses ${HOME}/bin)"
 fi
 
-# Plant harvest skills next to catalog.json so the appliance always has
-# netflix.continue_watching.v1.yaml even if an older binary looked on disk.
-if [[ -d "${ZAPPE_SRC}/skills" ]]; then
-  mkdir -p "${ZAPPE_DATA_DIR}/skills"
-  cp -f "${ZAPPE_SRC}/skills/"*.yaml "${ZAPPE_DATA_DIR}/skills/" 2>/dev/null || true
-  log "installed harvest skills -> ${ZAPPE_DATA_DIR}/skills"
+mkdir -p "${HOME}/.config/systemd/user"
+if [[ -f "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.service" ]]; then
+  cp "${ZAPPE_SRC}/packaging/appliance/zappe-kiosk.service" \
+    "${HOME}/.config/systemd/user/zappe-kiosk.service"
 fi
-
-if [[ -f "${ZAPPE_SRC}/packaging/appliance/${COMPANION_UNIT}" ]]; then
-  mkdir -p "${HOME}/.config/systemd/user"
-  cp "${ZAPPE_SRC}/packaging/appliance/${COMPANION_UNIT}" \
-    "${HOME}/.config/systemd/user/${COMPANION_UNIT}"
-  systemctl --user daemon-reload || true
+if [[ -f "${ZAPPE_SRC}/packaging/appliance/zappe-update.service" ]]; then
+  cp "${ZAPPE_SRC}/packaging/appliance/zappe-update.service" \
+    "${HOME}/.config/systemd/user/zappe-update.service"
 fi
+systemctl --user daemon-reload || true
 
 printf '%s\n' "${remote_sha}" > "${INSTALLED_SHA}"
 log "wrote ${INSTALLED_SHA}"
 
-# Restart is best-effort: unit may be missing, or gamescope/zappe may be down.
 if systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
   if systemctl --user restart "${ZAPPE_UNIT}"; then
     log "restarted ${ZAPPE_UNIT}"
@@ -202,15 +150,7 @@ if systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
     log "restart ${ZAPPE_UNIT} failed (ignored; safe if kiosk is not running)"
   fi
 else
-  log "unit ${ZAPPE_UNIT} not installed; skip restart (expected name: zappe.service)"
-fi
-
-if [[ -n "${companion}" ]] && systemctl --user cat "${COMPANION_UNIT}" >/dev/null 2>&1; then
-  if systemctl --user restart "${COMPANION_UNIT}"; then
-    log "restarted ${COMPANION_UNIT}"
-  else
-    log "restart ${COMPANION_UNIT} failed (ignored)"
-  fi
+  log "unit ${ZAPPE_UNIT} not installed; skip restart (expected name: zappe-kiosk.service)"
 fi
 
 log "update complete ${remote_sha}"

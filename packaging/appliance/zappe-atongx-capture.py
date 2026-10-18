@@ -5,9 +5,10 @@
 
   ./packaging/appliance/zappe-atongx-capture --mic-pointer
 
-Press Mic (red), then Pointer. Paste the two lines back into
-src/lib/atongx-map.json if they differ from the locked KEY_SEARCH /
-KEY_VOICECOMMAND / KEY_F2 / KEY_TOUCHPAD_TOGGLE contract.
+Press Mic (red). Paste any (unmapped) line back if it differs from
+data/atongx-map.json. The living-room contract is Power 116 ignored,
+Home 158 = back, Mic 582. event4 is grabbed by the app so the cursor
+does not move.
 
 No third-party modules — Python 3 stdlib only.
 """
@@ -35,7 +36,7 @@ EVENT_SIZE = struct.calcsize(EVENT_FMT)
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-DEFAULT_MAP = REPO / "src" / "lib" / "atongx-map.json"
+DEFAULT_MAP = REPO / "data" / "atongx-map.json"
 
 KEY_NAMES = {
     1: "KEY_ESC",

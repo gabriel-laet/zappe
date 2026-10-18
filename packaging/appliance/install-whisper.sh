@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # One-time Whisper pt-BR install for the living-room box.
-# Downloads ggml-small.bin and builds whisper-cli if it is not already on PATH.
+# Downloads ggml-base.bin (override with ggml-tiny.bin for a smaller model)
+# and builds whisper-cli if it is not already on PATH.
 set -euo pipefail
 
 DATA="${ZAPPE_DATA_DIR:-${HOME}/.local/share/zappe}"
 WHISPER_DIR="${DATA}/whisper"
 BIN_DIR="${HOME}/bin"
-MODEL="${ZAPPE_WHISPER_MODEL:-${WHISPER_DIR}/ggml-small.bin}"
-MODEL_URL="${ZAPPE_WHISPER_MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin}"
+MODEL="${ZAPPE_WHISPER_MODEL:-${WHISPER_DIR}/ggml-base.bin}"
+MODEL_URL="${ZAPPE_WHISPER_MODEL_URL:-https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin}"
 SRC_DIR="${WHISPER_DIR}/src"
 
 mkdir -p "${WHISPER_DIR}" "${BIN_DIR}"
@@ -79,13 +80,13 @@ Whisper pt-BR is ready.
   binary: ${BIN}
   model:  ${MODEL}
 
-Add to ~/.config/systemd/user/zappe.service.d/whisper.conf if PATH is tight:
+Add to ~/.config/systemd/user/zappe-kiosk.service.d/whisper.conf if PATH is tight:
 
   [Service]
   Environment=ZAPPE_WHISPER_BIN=${BIN}
   Environment=ZAPPE_WHISPER_MODEL=${MODEL}
 
-Then: systemctl --user daemon-reload && systemctl --user restart zappe.service
+Then: systemctl --user daemon-reload && systemctl --user restart zappe-kiosk.service
 
 Cloud stays off unless you also set ZAPPE_WHISPER_URL.
 See docs/voice.md
