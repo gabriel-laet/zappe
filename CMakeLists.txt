@@ -48,6 +48,7 @@ qt_add_executable(zappe
   src/chrome.cpp
   src/cdp.cpp
   src/logins.cpp
+  src/mirror.cpp
   src/remote.cpp
   src/house.cpp
 )
@@ -63,6 +64,7 @@ qt_add_resources(zappe "zappe_data"
   FILES
     data/catalog.json
     data/logins.json
+    data/mirrors.json
     data/atongx-map.json
 )
 

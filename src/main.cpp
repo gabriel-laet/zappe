@@ -165,6 +165,9 @@ int main(int argc, char **argv)
     std::fprintf(stderr, "zappe: catalog %s\n", qPrintable(guide.catalogPath()));
     std::fprintf(stderr, "zappe: branding %s (%s)\n", qPrintable(branding.name), qPrintable(branding.source));
 
+    if (screenshot)
+        qputenv("ZAPPE_MIRROR_DISABLE", "1");
+
     zappe::House house;
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("guide"), &guide);

@@ -4,6 +4,7 @@
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QString>
+#include <QVector>
 #include <QWebSocket>
 
 namespace zappe {
@@ -18,6 +19,16 @@ QString historyBackScript();
 QString historyGoBackScript();
 bool chromeCanGoBack(int currentIndex);
 
+struct PlayerKeyEvent {
+    QString type;
+    QString key;
+    QString code;
+    int virtualKey = 0;
+};
+
+// Sequência crua + down + up. Netflix ignora só o keyDown.
+QVector<PlayerKeyEvent> playerKeyEvents(const QString &action);
+
 class CdpClient : public QObject {
     Q_OBJECT
 public:
@@ -28,6 +39,7 @@ public:
     void evaluate(const QString &expression);
     void historyBack();
     void dispatchKey(const QString &key, const QString &code, int virtualKey);
+    void dispatchAction(const QString &action);
     bool connected() const { return m_connected; }
 
 signals:

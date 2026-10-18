@@ -61,6 +61,55 @@ bool chromeCanGoBack(int currentIndex)
     return currentIndex > 0;
 }
 
+QVector<PlayerKeyEvent> playerKeyEvents(const QString &action)
+{
+    const QString name = action.trimmed().toLower();
+    QString key;
+    QString code;
+    int vk = 0;
+    if (name == QLatin1String("left")) {
+        key = QStringLiteral("ArrowLeft");
+        code = key;
+        vk = 37;
+    } else if (name == QLatin1String("right")) {
+        key = QStringLiteral("ArrowRight");
+        code = key;
+        vk = 39;
+    } else if (name == QLatin1String("up")) {
+        key = QStringLiteral("ArrowUp");
+        code = key;
+        vk = 38;
+    } else if (name == QLatin1String("down")) {
+        key = QStringLiteral("ArrowDown");
+        code = key;
+        vk = 40;
+    } else if (name == QLatin1String("ok")) {
+        key = QStringLiteral("Enter");
+        code = key;
+        vk = 13;
+    } else if (name == QLatin1String("play")) {
+        key = QStringLiteral(" ");
+        code = QStringLiteral("Space");
+        vk = 32;
+    } else if (name == QLatin1String("back")) {
+        key = QStringLiteral("BrowserBack");
+        code = key;
+        vk = 166;
+    } else {
+        return {};
+    }
+    QVector<PlayerKeyEvent> events;
+    for (const char *type : {"rawKeyDown", "keyDown", "keyUp"}) {
+        PlayerKeyEvent event;
+        event.type = QString::fromLatin1(type);
+        event.key = key;
+        event.code = code;
+        event.virtualKey = vk;
+        events.append(event);
+    }
+    return events;
+}
+
 QString profileScript(const QString &name)
 {
     return QStringLiteral("(() => { const want = %1.toLowerCase();"
@@ -182,7 +231,7 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
 {
     if (!m_socket || !m_connected)
         return;
-    const QStringList types = {QStringLiteral("keyDown"), QStringLiteral("keyUp")};
+    const QStringList types = {QStringLiteral("rawKeyDown"), QStringLiteral("keyDown"), QStringLiteral("keyUp")};
     for (const QString &type : types) {
         QJsonObject params;
         params.insert(QStringLiteral("type"), type);
@@ -190,6 +239,31 @@ void CdpClient::dispatchKey(const QString &key, const QString &code, int virtual
         params.insert(QStringLiteral("code"), code);
         params.insert(QStringLiteral("windowsVirtualKeyCode"), virtualKey);
         params.insert(QStringLiteral("nativeVirtualKeyCode"), virtualKey);
+        if (key == QLatin1String(" ")) {
+            params.insert(QStringLiteral("text"), QStringLiteral(" "));
+            params.insert(QStringLiteral("unmodifiedText"), QStringLiteral(" "));
+        }
+        const int id = m_nextId++;
+        m_socket->sendTextMessage(
+            QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchKeyEvent"), params)));
+    }
+}
+
+void CdpClient::dispatchAction(const QString &action)
+{
+    if (!m_socket || !m_connected)
+        return;
+    for (const PlayerKeyEvent &event : playerKeyEvents(action)) {
+        QJsonObject params;
+        params.insert(QStringLiteral("type"), event.type);
+        params.insert(QStringLiteral("key"), event.key);
+        params.insert(QStringLiteral("code"), event.code);
+        params.insert(QStringLiteral("windowsVirtualKeyCode"), event.virtualKey);
+        params.insert(QStringLiteral("nativeVirtualKeyCode"), event.virtualKey);
+        if (event.key == QLatin1String(" ")) {
+            params.insert(QStringLiteral("text"), QStringLiteral(" "));
+            params.insert(QStringLiteral("unmodifiedText"), QStringLiteral(" "));
+        }
         const int id = m_nextId++;
         m_socket->sendTextMessage(
             QString::fromUtf8(cdpCommand(id, QStringLiteral("Input.dispatchKeyEvent"), params)));

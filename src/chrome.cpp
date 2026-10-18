@@ -45,6 +45,9 @@ ChromeLaunch chromeLaunch(const QString &dataDir)
                         QStringLiteral("--autoplay-policy=no-user-gesture-required"),
                         QStringLiteral("--disable-session-crashed-bubble"),
                         QStringLiteral("--disable-features=TranslateUI"),
+                        QStringLiteral("--disable-background-timer-throttling"),
+                        QStringLiteral("--disable-renderer-backgrounding"),
+                        QStringLiteral("--disable-backgrounding-occluded-windows"),
                         QStringLiteral("about:blank")};
     return launch;
 }

@@ -76,6 +76,24 @@ VoiceIntent parseVoicePtBr(const QString &text)
                                     "volume|abaixa\\s+o?\\s*volume|mais\\s+baixo|desce\\s+o?\\s*volume)\\b")))
         return {VoiceKind::Volume, {}, {}, -1};
 
+    static const QRegularExpression search(QStringLiteral(
+        "\\b(?:buscar|busca|procurar|procura|pesquisar|pesquisa)\\s+(.+)$"));
+    const QRegularExpressionMatch found = search.match(folded);
+    if (found.hasMatch()) {
+        QString rest = found.captured(1).trimmed();
+        const QString service = serviceIn(rest);
+        if (!service.isEmpty()) {
+            rest.remove(QRegularExpression(QStringLiteral(
+                "\\b(netflix|globoplay|prime\\s*video|prime|amazon|disney\\s*\\+|disneyplus|disney\\s+plus|"
+                "disney|youtube|you\\s+tube|hbo\\s*max|hbo|max|apple\\s*tv|appletv|apple)\\b")));
+            rest.remove(QRegularExpression(QStringLiteral("\\b(na|no|em|do|da|de)\\b")));
+            rest = rest.simplified();
+        }
+        if (rest.isEmpty() && !service.isEmpty())
+            return {VoiceKind::Open, service, {}, 0};
+        return {VoiceKind::Search, service, rest, 0};
+    }
+
     if (const QString service = serviceIn(folded); !service.isEmpty())
         return {VoiceKind::Open, service, {}, 0};
 

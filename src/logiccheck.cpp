@@ -8,11 +8,13 @@
 #include "house.h"
 #include "keymap.h"
 #include "logins.h"
+#include "mirror.h"
 #include "ota.h"
 #include "remote.h"
 #include "samsung.h"
 #include "voice.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QJsonArray>
@@ -280,6 +282,87 @@ int runLogicSelfCheck()
     QJsonObject editable = root;
     if (!removeHarvestErrors(editable) || !editable.value(QStringLiteral("shelves")).toArray().isEmpty())
         return fail("remove harvest shelf");
+
+    const QVector<MirrorAdapter> mirrors = loadMirrorAdapters();
+    const MirrorAdapter *netflix = findMirrorAdapter(mirrors, QStringLiteral("netflix"));
+    const MirrorAdapter *youtube = findMirrorAdapter(mirrors, QStringLiteral("youtube"));
+    const MirrorAdapter *prime = findMirrorAdapter(mirrors, QStringLiteral("prime"));
+    if (mirrors.size() != 7 || !netflix || !youtube || !prime)
+        return fail("mirror adapters");
+    if (netflix->kind != QLatin1String("netflix") || youtube->kind != QLatin1String("youtube")
+        || prime->kind != QLatin1String("generic"))
+        return fail("mirror kinds");
+    const QString netflixScript = mirrorExtractScript(*netflix);
+    if (!netflixScript.contains(QStringLiteral("lolomoRow")) || !netflixScript.contains(QStringLiteral("continueWatching"))
+        || !netflixScript.contains(QStringLiteral("JSON.stringify")))
+        return fail("netflix extract");
+    if (!mirrorExtractScript(*youtube).contains(QStringLiteral("ytd-rich-shelf-renderer")))
+        return fail("youtube extract");
+    if (mirrorPlayUrl(*netflix, QStringLiteral("https://www.netflix.com/title/80100172"))
+        != QStringLiteral("https://www.netflix.com/watch/80100172"))
+        return fail("netflix watch url");
+    if (!mirrorIsPlayable(*netflix, QStringLiteral("https://www.netflix.com/title/80100172"))
+        || mirrorIsPlayable(*netflix, netflix->homeUrl))
+        return fail("netflix playable");
+    if (mirrorPlayUrl(*youtube, QStringLiteral("https://youtu.be/abcdefghijk"))
+        != QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
+        return fail("youtube watch url");
+    if (!mirrorIsPlayable(*prime, QStringLiteral("https://www.primevideo.com/watch/abc"))
+        || mirrorIsPlayable(*prime, prime->homeUrl))
+        return fail("generic playable");
+    if (!mirrorSearchUrl(*netflix, QStringLiteral("dark")).contains(QStringLiteral("q=dark")))
+        return fail("netflix search");
+    if (mirrorChromeInFront(false) || !mirrorChromeInFront(true) || mirrorRefreshMs() != 20 * 60 * 1000)
+        return fail("mirror chrome policy");
+    MirrorAdapter limited = *netflix;
+    limited.limitCards = 2;
+    const MirrorPage page = parseMirrorPage(QByteArray(R"json({
+      "profiles": ["Ada"],
+      "needsLogin": false,
+      "shelves": [{
+        "title": "Continuar assistindo",
+        "context": "continueWatching",
+        "rows": [
+          {"title": "Dark", "href": "https://www.netflix.com/title/80100172", "artwork": "https://example.test/dark.jpg", "progress": 0.42},
+          {"title": "Dois", "href": "https://www.netflix.com/title/2", "artwork": "https://example.test/2.jpg", "progress": 0},
+          {"title": "Tres", "href": "https://www.netflix.com/title/3", "artwork": "", "progress": 0}
+        ]
+      }]
+    })json"),
+                                                     limited);
+    const ShelfData *continued = nullptr;
+    for (const ShelfData &shelf : page.shelves) {
+        if (shelf.id.endsWith(QStringLiteral(":continue")))
+            continued = &shelf;
+    }
+    if (!page.ok || page.profiles.size() != 1 || !continued || continued->rows.size() != 2
+        || continued->rows.at(0).href != QStringLiteral("https://www.netflix.com/watch/80100172")
+        || continued->rows.at(0).progress < 0.4 || !continued->rows.at(0).wide)
+        return fail("mirror page");
+    const QString coverPath = coverCachePath(dir.path(), QStringLiteral("https://example.test/dark.jpg"));
+    const QDateTime now = QDateTime::currentDateTime();
+    if (coverIsFresh(coverPath, now, 3600))
+        return fail("missing cover");
+    QFile cover(coverPath);
+    if (!cover.open(QIODevice::WriteOnly) || cover.write(QByteArray(64, 'x')) != 64)
+        return fail("write cover");
+    cover.close();
+    if (!coverIsFresh(coverPath, now, 3600))
+        return fail("fresh cover");
+    for (const CoverJob &job : coverJobs(page.shelves, dir.path(), now)) {
+        if (job.url == QStringLiteral("https://example.test/dark.jpg"))
+            return fail("fresh cover still queued");
+    }
+    const QVector<PlayerKeyEvent> left = playerKeyEvents(QStringLiteral("left"));
+    const QVector<PlayerKeyEvent> backKey = playerKeyEvents(QStringLiteral("back"));
+    if (left.size() != 3 || left.at(0).type != QLatin1String("rawKeyDown") || left.at(1).key != QLatin1String("ArrowLeft")
+        || left.at(1).virtualKey != 37)
+        return fail("player left key");
+    if (backKey.size() != 3 || backKey.at(1).key != QLatin1String("BrowserBack") || backKey.at(1).virtualKey != 166)
+        return fail("player back key");
+    const VoiceIntent busca = parseVoicePtBr(QStringLiteral("buscar dark na netflix"));
+    if (busca.kind != VoiceKind::Search || busca.service != QLatin1String("netflix") || busca.query != QLatin1String("dark"))
+        return fail("voice search");
 
     std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;

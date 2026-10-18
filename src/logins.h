@@ -61,6 +61,7 @@ public:
     void cancel();
     void historyBack();
     void dispatchKey(const QString &key, const QString &code, int virtualKey);
+    void dispatchAction(const QString &action);
 
 signals:
     void promptRequested(const QString &service, const QString &field, const QString &prompt, bool secret);

@@ -158,7 +158,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. Com o Chrome aberto, volta uma página; sem histórico, volta para o guia. Na TV aberta, volta para o guia.
+Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No player, Voltar manda o Chrome uma página para trás e o guia Qt volta para a frente. Na TV aberta, volta para o guia.
 
 ## Controle
 
@@ -186,7 +186,9 @@ IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo se
 
 Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Nomes 1Seg saem. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
 
-OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar. Abrir um streaming no Chrome usa o mesmo overlay.
+OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar.
+
+O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê fileiras, capas, continuar assistindo, perfis e busca. O Qt desenha isso. Só o Play abre a URL de reprodução e traz o Chrome para a frente. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
 
 Uma fileira antiga do harvest com `status` `error`, `teach` ou `harvesting`, ou com texto de AT-SPI (`no Chrome/Chromium application on the AT-SPI bus`), sai do catálogo e não aparece no guia. `Continue watching` com títulos de verdade continua.
 
@@ -215,6 +217,7 @@ journalctl --user -u zappe-update.service -n 50
 | `ZAPPE_CATALOG` | JSON do catálogo |
 | `CHROME_PATH` | binário do Chrome |
 | `ZAPPE_CDP_PORT` | porta CDP (padrão 9222) |
+| `ZAPPE_MIRROR_DISABLE` | não abre o Chrome em segundo plano |
 | `ZAPPE_LOGIN_WEBHOOK` | URL do webhook de login |
 | `ZAPPE_HDMI_CARD` / `ZAPPE_HDMI_PROFILE` | perfil PipeWire |
 | `ZAPPE_AUDIO_DISABLE` | não chama `pactl` |

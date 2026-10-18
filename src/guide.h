@@ -64,6 +64,8 @@ class Guide : public QObject {
     Q_PROPERTY(QString toastText READ toastText NOTIFY toastChanged)
     Q_PROPERTY(bool toastOn READ toastOn NOTIFY toastChanged)
     Q_PROPERTY(bool cardDown READ cardDown NOTIFY cardDownChanged)
+    Q_PROPERTY(int layoutEpoch READ layoutEpoch NOTIFY layoutChanged)
+    Q_PROPERTY(QString mirrorService READ mirrorService NOTIFY layoutChanged)
 
     Q_PROPERTY(bool showFps READ showFps CONSTANT)
     Q_PROPERTY(int fps READ fps NOTIFY fpsChanged)
@@ -135,6 +137,8 @@ public:
     QString toastText() const { return m_toastText; }
     bool toastOn() const { return m_toastOn; }
     bool cardDown() const { return m_cardDown; }
+    int layoutEpoch() const { return m_layoutEpoch; }
+    QString mirrorService() const { return m_mirrorService; }
 
     bool showFps() const { return m_showFps; }
     int fps() const { return m_fps; }
@@ -151,6 +155,10 @@ public:
     Q_INVOKABLE void toggleMute();
     Q_INVOKABLE bool shelfShown(int index) const;
     Q_INVOKABLE QString episodeTitle(int index) const;
+
+    void openMirror(const QString &serviceId);
+    void closeMirror();
+    void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
 
 signals:
     void focusChanged();
@@ -170,6 +178,9 @@ signals:
     void toastChanged();
     void cardDownChanged();
     void playRequested(const QString &title, const QString &service, const QString &href);
+    void serviceRequested(const QString &service);
+    void profileRequested(const QString &service, const QString &name);
+    void layoutChanged();
 
 private:
     void publishFocus();
@@ -188,6 +199,7 @@ private:
     void nudgeResolution(int direction);
     void setBrandingEnabled(bool on);
     void pulseCard();
+    void publishShelves(bool resetFocus);
     void revealVolume();
     void showToast(const QString &text);
     bool coalesce(const QString &key);
@@ -209,6 +221,10 @@ private:
     QString m_monoFont;
     QString m_noiseUrl;
     QString m_catalogPath;
+    QVector<ShelfData> m_baseShelves;
+    QVector<ShelfData> m_mirrorShelves;
+    QString m_mirrorService;
+    int m_layoutEpoch = 0;
 
     int m_shelf = 0;
     int m_index = 0;

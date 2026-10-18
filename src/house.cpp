@@ -4,6 +4,7 @@
 #include "chrome.h"
 #include "guide.h"
 #include "logins.h"
+#include "mirror.h"
 #include "ota.h"
 #include "remote.h"
 #include "samsung.h"
@@ -25,6 +26,7 @@ House::House(QObject *parent)
     , m_samsung(new SamsungClient(this))
     , m_voice(new VoiceSession(this))
     , m_remote(new RemoteWatcher(this))
+    , m_mirror(new MirrorSession(this))
 {
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
@@ -44,7 +46,7 @@ House::House(QObject *parent)
         m_direct->navigate(m_pendingUrl);
     });
     connect(m_direct, &CdpClient::navigated, this, [this] {
-        if (m_pendingUrl.isEmpty() || m_loadingFailed)
+        if (m_pendingUrl.isEmpty() || m_loadingFailed || !m_player)
             return;
         finishLoading();
         setPlaying(true);
@@ -96,8 +98,9 @@ House::House(QObject *parent)
         m_promptOpen = false;
         finishLoading();
         emit changed();
-        setPlaying(true);
-        hideGuide();
+        showGuide();
+        if (m_guide && !m_guide->mirrorService().isEmpty())
+            m_mirror->refresh(m_guide->mirrorService());
     });
     connect(m_login, &LoginRunner::historyResult, this, &House::onHistory);
     connect(m_ota, &OtaPlayer::started, this, [this](const QString &channel) {
@@ -148,6 +151,25 @@ House::House(QObject *parent)
     });
     connect(m_remote, &RemoteWatcher::action, this, &House::onRemote);
     connect(m_chrome, &ChromeSession::exited, this, [this] { updateKeyHold(); });
+    connect(m_mirror, &MirrorSession::playerReady, this, [this] {
+        if (!m_player || m_loadingFailed)
+            return;
+        finishLoading();
+        setPlaying(true);
+        hideGuide();
+        m_mirror->focusPlayer();
+    });
+    connect(m_mirror, &MirrorSession::needsLogin, this, [this](const QString &serviceId) {
+        toast(QStringLiteral("Login necessário"));
+        showGuide();
+        openService(serviceId);
+    });
+    connect(m_mirror, &MirrorSession::failed, this, [this](const QString &message) {
+        if (m_player && m_loading && !m_loadingFailed)
+            failLoading(message);
+        else if (!m_loading)
+            toast(message);
+    });
 }
 
 void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
@@ -163,10 +185,23 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
     });
     if (m_guide->page() == QLatin1String("settings"))
         m_samsung->refresh();
+    connect(m_guide, &Guide::serviceRequested, this, &House::showMirror);
+    connect(m_guide, &Guide::profileRequested, this, [this](const QString &service, const QString &name) {
+        showMirror(service);
+        m_mirror->chooseProfile(service, name);
+    });
     const QString preview = qEnvironmentVariable("ZAPPE_PREVIEW_LOADING").trimmed();
     if (!preview.isEmpty())
         beginLoading(preview, m_guide->focusArtwork(), QStringLiteral("ota"));
     m_remote->start();
+    m_mirror->start(m_guide, m_chrome, dataDir);
+    auto *front = new QTimer(this);
+    front->setInterval(1000);
+    connect(front, &QTimer::timeout, this, [this] {
+        if (!m_playing)
+            showGuide();
+    });
+    front->start();
 }
 
 QObject *House::tv() const
@@ -223,14 +258,32 @@ void House::playRequested(const QString &title, const QString &service, const QS
         playOta(query);
         return;
     }
-    const LoginCatalog catalog = loadLoginCatalog();
-    if (findService(catalog, service)) {
-        openService(service);
+    const QVector<MirrorAdapter> adapters = loadMirrorAdapters();
+    const MirrorAdapter *adapter = findMirrorAdapter(adapters, service);
+    if (!adapter && m_guide)
+        adapter = findMirrorAdapter(adapters, m_guide->mirrorService());
+    if (adapter && mirrorIsPlayable(*adapter, href)) {
+        if (!m_mirror->active()) {
+            failLoading(QStringLiteral("Chrome não encontrado"));
+            return;
+        }
+        m_player = true;
+        m_chromeOwner = QStringLiteral("mirror");
+        m_mirror->play(mirrorPlayUrl(*adapter, href));
+        return;
+    }
+    if (adapter) {
+        finishLoading();
+        showMirror(adapter->id);
         return;
     }
     if (href.startsWith(QStringLiteral("http://")) || href.startsWith(QStringLiteral("https://"))) {
-        openUrl(href);
-        return;
+        if (href.contains(QStringLiteral("/watch")) || href.contains(QStringLiteral("watch?v="))) {
+            m_player = true;
+            m_chromeOwner = QStringLiteral("mirror");
+            m_mirror->play(href);
+            return;
+        }
     }
     failLoading(QStringLiteral("Sem reprodução para ") + title);
 }
@@ -300,6 +353,11 @@ void House::failLoading(const QString &message)
 
 void House::cancelLoading()
 {
+    if (m_player) {
+        leavePlayer();
+        finishLoading();
+        return;
+    }
     m_login->cancel();
     m_promptOpen = false;
     m_pendingUrl.clear();
@@ -350,6 +408,10 @@ void House::goBack()
         stopPlayback();
         return;
     }
+    if (m_player) {
+        leavePlayer();
+        return;
+    }
     if (m_playing && m_chrome->running()) {
         chromeBack();
         return;
@@ -360,6 +422,30 @@ void House::goBack()
     }
     if (m_guide)
         m_guide->back();
+}
+
+void House::leavePlayer()
+{
+    m_player = false;
+    m_mirror->leavePlayer();
+    setPlaying(false);
+    showGuide();
+}
+
+void House::showMirror(const QString &serviceId)
+{
+    if (serviceId.isEmpty())
+        return;
+    if (!m_mirror->active()) {
+        toast(QStringLiteral("Chrome não encontrado"));
+        return;
+    }
+    if (m_player)
+        leavePlayer();
+    if (m_guide)
+        m_guide->openMirror(serviceId);
+    m_mirror->refresh(serviceId);
+    showGuide();
 }
 
 void House::openService(const QString &id)
@@ -409,47 +495,51 @@ void House::updateKeyHold()
 
 bool House::chromeFocused() const
 {
-    return m_playing && m_chrome->running() && !m_ota->playing();
-}
-
-void House::chromeDispatch(const QString &key, const QString &code, int virtualKey)
-{
-    if (m_chromeOwner == QLatin1String("direct"))
-        m_direct->dispatchKey(key, code, virtualKey);
-    else
-        m_login->dispatchKey(key, code, virtualKey);
+    return m_player && m_chrome->running() && !m_ota->playing();
 }
 
 void House::forwardChromeKey(RemoteAction action)
 {
+    QString name;
     switch (action) {
     case RemoteAction::Up:
-        chromeDispatch(QStringLiteral("ArrowUp"), QStringLiteral("ArrowUp"), 38);
+        name = QStringLiteral("up");
         break;
     case RemoteAction::Down:
-        chromeDispatch(QStringLiteral("ArrowDown"), QStringLiteral("ArrowDown"), 40);
+        name = QStringLiteral("down");
         break;
     case RemoteAction::Left:
-        chromeDispatch(QStringLiteral("ArrowLeft"), QStringLiteral("ArrowLeft"), 37);
+        name = QStringLiteral("left");
         break;
     case RemoteAction::Right:
-        chromeDispatch(QStringLiteral("ArrowRight"), QStringLiteral("ArrowRight"), 39);
+        name = QStringLiteral("right");
         break;
     case RemoteAction::Ok:
-        chromeDispatch(QStringLiteral("Enter"), QStringLiteral("Enter"), 13);
+        name = QStringLiteral("ok");
         break;
     case RemoteAction::PageUp:
-        chromeDispatch(QStringLiteral("PageUp"), QStringLiteral("PageUp"), 33);
+        name = QStringLiteral("up");
         break;
     case RemoteAction::PageDown:
-        chromeDispatch(QStringLiteral("PageDown"), QStringLiteral("PageDown"), 34);
+        name = QStringLiteral("down");
         break;
     case RemoteAction::PlayPause:
-        chromeDispatch(QStringLiteral(" "), QStringLiteral("Space"), 32);
+        name = QStringLiteral("play");
+        break;
+    case RemoteAction::Back:
+        name = QStringLiteral("back");
         break;
     default:
-        break;
+        return;
     }
+    if (m_player) {
+        m_mirror->dispatchAction(name);
+        return;
+    }
+    if (m_chromeOwner == QLatin1String("direct"))
+        m_direct->dispatchAction(name);
+    else
+        m_login->dispatchAction(name);
 }
 
 void House::showGuide()
@@ -500,7 +590,15 @@ void House::handleVoice(const QString &transcript)
                 " document.dispatchEvent(ev); return 'ok'; })()"));
         break;
     case VoiceKind::Open:
-        openService(intent.service);
+        showMirror(intent.service);
+        break;
+    case VoiceKind::Search:
+        if (intent.service.isEmpty())
+            toast(QStringLiteral("Em qual streaming?"));
+        else {
+            showMirror(intent.service);
+            m_mirror->search(intent.service, intent.query);
+        }
         break;
     case VoiceKind::Ota:
         playOta(intent.query);

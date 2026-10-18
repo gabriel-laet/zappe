@@ -18,7 +18,7 @@ O app lê `/dev/input` do dongle XING WEI / ATONGX. O contrato está em [`data/a
 
 Power não desliga o mini-PC: o nó da tecla 116 fica com `EVIOCGRAB`, o logind não a recebe, e o app manda o toggle para a Samsung. Ver [`samsung-tv.md`](samsung-tv.md).
 
-Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. Com streaming aberto, o app segura esse nó de teclado e consulta o histórico do Chrome: se ainda há página anterior, volta uma; se já está na primeira, fecha o Chrome e volta ao guia. Setas, OK e play/pause seguem para a página. Com a TV aberta, para o mpv e volta ao guia. A tecla não pode encerrar o processo: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
+Home (158) é voltar. Na home do guia não faz nada. Em Ajustes, ficha ou menu, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player, o app segura o teclado e manda as teclas ao Chrome por CDP (`Input.dispatchKeyEvent`: setas, OK, play/pause e Voltar). Voltar também devolve o guia Qt para a frente. Com a TV aberta, para o mpv e volta ao guia. A tecla não pode encerrar o processo: um `close` da janela é ignorado, e o kiosk abre o app de novo se ele sair.
 
 ## Air mouse
 

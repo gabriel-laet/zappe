@@ -380,6 +380,11 @@ void LoginRunner::dispatchKey(const QString &key, const QString &code, int virtu
     m_cdp->dispatchKey(key, code, virtualKey);
 }
 
+void LoginRunner::dispatchAction(const QString &action)
+{
+    m_cdp->dispatchAction(action);
+}
+
 void LoginRunner::finishHome()
 {
     if (!m_active)
