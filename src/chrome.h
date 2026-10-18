@@ -19,6 +19,8 @@ struct ChromeLaunch {
 
 ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face = ChromeFace::Hidden);
 QString findChromeBinary();
+// UA de Chrome normal. HeadlessChrome faz a Netflix e o YouTube não renderizarem o catálogo.
+QString chromeCatalogUserAgent();
 
 class ChromeSession : public QObject {
     Q_OBJECT
@@ -30,7 +32,7 @@ public:
     void ensure(const QString &dataDir);
     // Janela kiosk, só enquanto o vídeo está na frente.
     void present(const QString &dataDir);
-    // Fecha a janela visível e sobe de novo sem janela.
+    // Fecha a janela do vídeo e sobe de novo fora da tela.
     void relaunchHidden();
     void stop();
 

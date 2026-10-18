@@ -37,6 +37,8 @@ public:
     explicit CdpClient(QObject *parent = nullptr);
 
     void attach(int port);
+    // Aba nova. Não reutiliza a page que outro serviço já está lendo.
+    void openPage(int port, const QString &url);
     void navigate(const QString &url);
     void evaluate(const QString &expression);
     void historyBack();
@@ -67,6 +69,7 @@ private:
     void openSocket(const QString &url);
     void requestTargets(int generation, bool created);
     void createTarget(int generation);
+    void adoptTarget(int generation, const QByteArray &body, const QString &error, bool fallback);
 
     QWebSocket *m_socket = nullptr;
     QNetworkAccessManager *m_http = nullptr;

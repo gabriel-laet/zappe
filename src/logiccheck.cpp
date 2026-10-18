@@ -251,12 +251,19 @@ int runLogicSelfCheck()
     if (chrome.port != 9222 && qEnvironmentVariable("ZAPPE_CDP_PORT").isEmpty())
         return fail("cdp port");
     if (chrome.face != ChromeFace::Hidden || joined.contains(QStringLiteral("--kiosk"))
-        || !joined.contains(QStringLiteral("--headless=new")) || !joined.contains(QStringLiteral("--remote-debugging-port="))
+        || joined.contains(QStringLiteral("--headless")) || !joined.contains(QStringLiteral("--remote-debugging-port="))
         || !joined.contains(QStringLiteral("chrome-profile")) || joined.contains(QStringLiteral("gamescope")))
         return fail("chrome args");
     if (!joined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
         || !joined.contains(QStringLiteral("--window-size=1920,1080")) || joined.contains(QStringLiteral("800,600")))
         return fail("chrome screen");
+    if (!joined.contains(QStringLiteral("--window-position=-3000,-3000"))
+        || !joined.contains(QStringLiteral("--disable-blink-features=AutomationControlled"))
+        || !joined.contains(QStringLiteral("--mute-audio"))
+        || !joined.contains(QStringLiteral("--user-agent=") + chromeCatalogUserAgent())
+        || chromeCatalogUserAgent().contains(QStringLiteral("HeadlessChrome"))
+        || joined.contains(QStringLiteral("HeadlessChrome")))
+        return fail("chrome catalog window");
     if (!playerJoined.contains(QStringLiteral("--kiosk")) || playerJoined.contains(QStringLiteral("--headless")))
         return fail("chrome player");
     if (!playerJoined.contains(QStringLiteral("--ozone-override-screen-size=1920,1080"))
@@ -444,7 +451,7 @@ int runLogicSelfCheck()
         if (shelf.id.endsWith(QStringLiteral(":continue")))
             fedContinue = &shelf;
     }
-    if (!mirrorPageUsable(fed, 4) || !fedContinue || fedContinue->rows.size() != 4
+    if (mirrorTitleCount(fed) != 4 || !mirrorPageUsable(fed, 4) || !fedContinue || fedContinue->rows.size() != 4
         || fedContinue->rows.at(0).href != QStringLiteral("https://www.netflix.com/watch/80100172")
         || !fedContinue->rows.at(0).artworkSpec.startsWith(QStringLiteral("https://")))
         return fail("netflix json feed");

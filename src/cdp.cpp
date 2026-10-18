@@ -177,33 +177,57 @@ void CdpClient::requestTargets(int generation, bool created)
     });
 }
 
+void CdpClient::adoptTarget(int generation, const QByteArray &body, const QString &error, bool fallback)
+{
+    if (generation != m_attachGen)
+        return;
+    if (!error.isEmpty()) {
+        std::fprintf(stderr, "zappe: cdp criar target %s\n", qPrintable(error));
+        emit failed(error);
+        return;
+    }
+    const QJsonObject obj = QJsonDocument::fromJson(body).object();
+    const QString ws = obj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
+    std::fprintf(stderr, "zappe: cdp alvo novo %s url %s\n",
+                 qPrintable(obj.value(QStringLiteral("id")).toString()),
+                 qPrintable(obj.value(QStringLiteral("url")).toString()));
+    if (ws.isEmpty()) {
+        if (fallback) {
+            requestTargets(generation, true);
+            return;
+        }
+        std::fprintf(stderr, "zappe: cdp nova aba sem websocket\n");
+        emit failed(QStringLiteral("CDP sem aba page"));
+        return;
+    }
+    openSocket(ws);
+}
+
 void CdpClient::createTarget(int generation)
 {
     const QUrl url(QStringLiteral("http://127.0.0.1:%1/json/new?about:blank").arg(m_port));
     QNetworkReply *reply = m_http->put(QNetworkRequest(url), QByteArray());
     connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {
-        if (generation != m_attachGen) {
-            reply->deleteLater();
-            return;
-        }
         const QByteArray body = reply->readAll();
         const QString error = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
         reply->deleteLater();
-        if (!error.isEmpty()) {
-            std::fprintf(stderr, "zappe: cdp criar target %s\n", qPrintable(error));
-            emit failed(error);
-            return;
-        }
-        const QJsonObject obj = QJsonDocument::fromJson(body).object();
-        const QString ws = obj.value(QStringLiteral("webSocketDebuggerUrl")).toString();
-        std::fprintf(stderr, "zappe: cdp alvo novo %s url %s\n",
-                     qPrintable(obj.value(QStringLiteral("id")).toString()),
-                     qPrintable(obj.value(QStringLiteral("url")).toString()));
-        if (ws.isEmpty()) {
-            requestTargets(generation, true);
-            return;
-        }
-        openSocket(ws);
+        adoptTarget(generation, body, error, true);
+    });
+}
+
+void CdpClient::openPage(int port, const QString &pageUrl)
+{
+    m_port = port;
+    const int generation = ++m_attachGen;
+    const QString target = pageUrl.isEmpty() ? QStringLiteral("about:blank") : pageUrl;
+    const QUrl url(QStringLiteral("http://127.0.0.1:%1/json/new?%2").arg(port).arg(target));
+    std::fprintf(stderr, "zappe: cdp nova aba %s\n", qPrintable(target));
+    QNetworkReply *reply = m_http->put(QNetworkRequest(url), QByteArray());
+    connect(reply, &QNetworkReply::finished, this, [this, reply, generation] {
+        const QByteArray body = reply->readAll();
+        const QString error = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
+        reply->deleteLater();
+        adoptTarget(generation, body, error, false);
     });
 }
 

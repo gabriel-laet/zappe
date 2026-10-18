@@ -804,13 +804,18 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
 
 bool mirrorPageHasTitles(const MirrorPage &page)
 {
+    return mirrorTitleCount(page) > 0;
+}
+
+int mirrorTitleCount(const MirrorPage &page)
+{
+    int count = 0;
     for (const ShelfData &shelf : page.shelves) {
         if (shelf.id.endsWith(QStringLiteral(":profiles")) || shelf.status != QLatin1String("ok"))
             continue;
-        if (!shelf.rows.isEmpty())
-            return true;
+        count += shelf.rows.size();
     }
-    return false;
+    return count;
 }
 
 bool mirrorPageUsable(const MirrorPage &page, int minTitles)
@@ -995,13 +1000,24 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
         std::fprintf(stderr, "zappe: espelho cdp falhou: %s\n", qPrintable(message));
         if (m_job == JobLearnDom || m_job == JobLearnShot)
             return;
+        // Navegação substituída no mesmo alvo. A extração da navegação nova segue.
+        if (message.contains(QStringLiteral("ERR_ABORTED")))
+            return;
         const bool down = !m_cdp || !m_cdp->connected();
         if (m_job == JobPlay)
             emit failed(message);
         if (down) {
-            if (m_job != JobPlay)
-                m_busy = false;
-            scheduleAttach();
+            m_holdNav = false;
+            if (m_job == JobPlay) {
+                scheduleAttach();
+                return;
+            }
+            if ((m_job == JobExtract || m_job == JobSearch) && !m_current.isEmpty())
+                m_queue.prepend(m_current);
+            m_busy = false;
+            m_job = JobNone;
+            m_tabService.clear();
+            schedulePump();
             return;
         }
         if (m_job == JobPlay) {
@@ -1013,6 +1029,9 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
         ++m_epoch;
         m_busy = false;
         m_job = JobNone;
+        m_holdNav = false;
+        // A aba nova não chegou. Não reusar o alvo de outro serviço.
+        m_tabService.clear();
         QTimer::singleShot(400, this, &MirrorSession::pump);
     });
     connect(m_chrome, &ChromeSession::ready, this, &MirrorSession::onChromeReady);
@@ -1036,7 +1055,18 @@ void MirrorSession::onChromeReady()
     if (!m_cdp || !m_chrome)
         return;
     m_attachTries = 0;
-    scheduleAttach();
+    m_tabService.clear();
+    if (m_job == JobPlay) {
+        scheduleAttach();
+        return;
+    }
+    if (m_busy)
+        return;
+    if (m_queue.isEmpty()) {
+        for (const MirrorAdapter &adapter : m_adapters)
+            m_queue.append(adapter.id);
+    }
+    pump();
 }
 
 void MirrorSession::scheduleAttach()
@@ -1063,11 +1093,38 @@ void MirrorSession::scheduleAttach()
     });
 }
 
+void MirrorSession::schedulePump()
+{
+    if (!m_cdp || !m_chrome || m_busy)
+        return;
+    if (m_attachTries >= 12) {
+        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        return;
+    }
+    const int attempt = m_attachTries++;
+    int delay = attempt == 0 ? 200 : 250;
+    for (int i = 1; i < attempt && delay < 2000; ++i)
+        delay *= 2;
+    delay = std::min(delay, 2000);
+    QTimer::singleShot(delay, this, [this] {
+        if (!m_busy)
+            pump();
+    });
+}
+
 void MirrorSession::onAttached()
 {
     m_attachTries = 0;
     if (m_cdp)
         m_cdp->enableNetwork();
+    if (m_holdNav) {
+        const QString url = m_openUrl;
+        m_holdNav = false;
+        m_openUrl.clear();
+        if (!url.isEmpty() && m_cdp)
+            m_cdp->navigate(url);
+        return;
+    }
     if (!m_pendingUrl.isEmpty() && m_job == JobPlay) {
         const QString url = m_pendingUrl;
         m_cdp->navigate(url);
@@ -1248,8 +1305,11 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
 {
     if (m_player || url.isEmpty())
         return;
-    if (!m_cdp || !m_cdp->connected()) {
+    if (!m_cdp || !m_chrome) {
+        m_queue.removeAll(serviceId);
         m_queue.prepend(serviceId);
+        m_busy = false;
+        m_job = JobNone;
         return;
     }
     ++m_epoch;
@@ -1263,13 +1323,25 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
     m_learnPosted = false;
     m_samples.clear();
     m_inflight.clear();
+    m_lastFeedTitles = -1;
+    m_lastDomTitles = -1;
     std::fprintf(stderr, "zappe: espelho %s -> %s\n", qPrintable(serviceId), qPrintable(url));
-    m_cdp->navigate(url);
+    // Histórico do mesmo serviço reusa a aba. Outro serviço ganha um target novo,
+    // mesmo sem websocket ainda: a primeira home não pode esperar um attach compartilhado.
+    const bool sameTab = m_cdp->connected() && m_tabService == serviceId && !m_holdNav;
+    if (sameTab) {
+        m_cdp->navigate(url);
+        return;
+    }
+    m_tabService = serviceId;
+    m_openUrl = url;
+    m_holdNav = true;
+    m_cdp->openPage(m_chrome->port(), QStringLiteral("about:blank"));
 }
 
 void MirrorSession::pump()
 {
-    if (m_player || m_busy || m_queue.isEmpty() || !m_cdp || !m_cdp->connected())
+    if (m_player || m_busy || m_queue.isEmpty() || !m_cdp || !m_chrome)
         return;
     const QString serviceId = m_queue.takeFirst();
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
@@ -1299,7 +1371,11 @@ void MirrorSession::settle(int epoch, const QString &serviceId, int job, int wai
 {
     if (m_player || epoch != m_epoch || m_current != serviceId || m_job != job)
         return;
-    if (!m_inflight.isEmpty() && waited < 2000) {
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
+    const bool haveTitles = adapter && mirrorPageHasTitles(parseMirrorFeeds(m_samples, *adapter));
+    // Não troca de serviço enquanto o feed ainda pode chegar. O próximo Page.navigate
+    // fica numa aba nova, depois desta contagem.
+    if ((!haveTitles || !m_inflight.isEmpty()) && waited < 8000) {
         QTimer::singleShot(400, this, [this, epoch, serviceId, job, waited] { settle(epoch, serviceId, job, waited + 400); });
         return;
     }
@@ -1318,10 +1394,19 @@ void MirrorSession::considerExtract()
         return;
     }
     const MirrorPage network = parseMirrorFeeds(m_samples, *adapter);
+    m_lastFeedTitles = mirrorTitleCount(network);
+    std::fprintf(stderr, "zappe: espelho %s feed %d títulos em %d corpos\n", qPrintable(m_current),
+                 m_lastFeedTitles, int(m_samples.size()));
+    for (const NetworkSample &sample : m_samples) {
+        const int n = mirrorTitleCount(parseMirrorFeeds(QVector<NetworkSample>{sample}, *adapter));
+        std::fprintf(stderr, "zappe: espelho %s feed %d títulos em %s\n", qPrintable(m_current), n,
+                     qPrintable(sample.url.left(180)));
+    }
     if (mirrorPageHasTitles(network)) {
         acceptPage(network);
         return;
     }
+    std::fprintf(stderr, "zappe: espelho %s extrator DOM de mirrors.json\n", qPrintable(m_current));
     m_cdp->evaluate(mirrorExtractScript(*adapter));
 }
 
@@ -1409,7 +1494,9 @@ void MirrorSession::beginRepair()
     m_learned.insert(serviceId);
     const LlmConfig config = loadLlmConfig(m_dataDir);
     if (!llmEnabled(config)) {
-        std::fprintf(stderr, "zappe: aprendizado desligado para %s (sem URL em llm.json)\n", qPrintable(serviceId));
+        std::fprintf(stderr,
+                     "zappe: espelho %s extrator estático sem catálogo (feed %d, dom %d); aprendizado desligado\n",
+                     qPrintable(serviceId), m_lastFeedTitles, m_lastDomTitles);
         finishEmpty();
         return;
     }
@@ -1588,6 +1675,9 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
         return;
     }
     const MirrorPage page = parseMirrorPage(value.toUtf8(), *adapter);
+    m_lastDomTitles = mirrorTitleCount(page);
+    std::fprintf(stderr, "zappe: espelho %s dom %d títulos login=%d\n", qPrintable(m_current), m_lastDomTitles,
+                 page.needsLogin ? 1 : 0);
     if (page.needsLogin || mirrorPageHasTitles(page)) {
         acceptPage(page);
         return;

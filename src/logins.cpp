@@ -249,7 +249,7 @@ void LoginRunner::attach()
 {
     QTimer::singleShot(400, this, [this] {
         if (m_active)
-            m_cdp->attach(m_port);
+            m_cdp->openPage(m_port, QStringLiteral("about:blank"));
     });
 }
 

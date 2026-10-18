@@ -14,6 +14,12 @@
 
 namespace zappe {
 
+QString chromeCatalogUserAgent()
+{
+    return QStringLiteral("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36");
+}
+
 QString findChromeBinary()
 {
     if (const QString explicitBin = qEnvironmentVariable("CHROME_PATH"); !explicitBin.isEmpty() && QFile::exists(explicitBin))
@@ -60,8 +66,12 @@ ChromeLaunch chromeLaunch(const QString &dataDir, ChromeFace face)
         // Tela cheia só no Play. No gamescope, minimizar não tira a janela da frente.
         launch.arguments.append(QStringLiteral("--kiosk"));
     } else {
-        // Sem janela: o kiosk em about:blank ficava branco por cima do guia.
-        launch.arguments.append(QStringLiteral("--headless=new"));
+        // --headless=new anuncia HeadlessChrome e a Netflix/YouTube não montam o catálogo
+        // (sem grade, sem o feed browse/graphql). Janela real, fora da tela, sem foco.
+        // O gamescope mostra a janela focada; o guia pede o foco de volta.
+        launch.arguments.append(QStringLiteral("--user-agent=") + chromeCatalogUserAgent());
+        launch.arguments.append(QStringLiteral("--disable-blink-features=AutomationControlled"));
+        launch.arguments.append(QStringLiteral("--window-position=-3000,-3000"));
         launch.arguments.append(QStringLiteral("--mute-audio"));
     }
     launch.arguments.append(QStringLiteral("about:blank"));

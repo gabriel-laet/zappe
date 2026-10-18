@@ -10,7 +10,7 @@ O nome padrão é **Zappe**. Marca, logo e splash vêm de um arquivo na máquina
 zappe-kiosk.service   (systemd de sistema, tty1, seat0)
   └─ gamescope 1920×1080
        ├─ zappe          guia Qt Quick
-       └─ google-chrome  --headless=new (kiosk só no Play) --remote-debugging-port=9222
+       └─ google-chrome  janela fora da tela (kiosk só no Play) --remote-debugging-port=9222
             perfil ~/.local/share/zappe/chrome-profile
 ```
 
@@ -19,7 +19,7 @@ Não há segundo gamescope. O Chrome é filho do app e herda o `WAYLAND_DISPLAY`
 | Peça | Função |
 | --- | --- |
 | Guia | Qt Quick. Fileiras, ficha, menu, ajustes. |
-| Chrome | Um perfil, porta CDP 9222. Sem janela no guia; kiosk só no Play. |
+| Chrome | Um perfil, porta CDP 9222. Janela fora da tela no guia; kiosk só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
 | TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
@@ -132,20 +132,21 @@ pactl set-card-profile alsa_card.pci-0000_00_1f.3 output:hdmi-stereo
 
 ## Chrome e roteiros de login
 
-Fora do Play o app lança o Chrome sem janela. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`: sem isso o headless injeta uma tela virtual de 800×600.
+Fora do Play o Chrome é uma janela real, parada em `--window-position=-3000,-3000`, com o áudio mudo. `--headless=new` anuncia `HeadlessChrome` e a Netflix e o YouTube não montam o catálogo nem disparam os feeds JSON medidos na TV. O user-agent é o de um Chrome normal, com `--disable-blink-features=AutomationControlled`. `--ozone-override-screen-size=1920,1080` acompanha `--window-size=1920,1080`. O guia pede o foco de volta a cada segundo; o gamescope mostra a janela focada. No Play a mesma tela entra com `--kiosk`.
 
 ```bash
 google-chrome-stable \
   --user-data-dir="$HOME/.local/share/zappe/chrome-profile" \
   --remote-debugging-port=9222 \
   --remote-allow-origins=* \
-  --headless=new \
+  --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/154.0.0.0 Safari/537.36" \
+  --disable-blink-features=AutomationControlled \
   --ozone-override-screen-size=1920,1080 \
   --window-size=1920,1080 \
+  --window-position=-3000,-3000 \
+  --mute-audio \
   about:blank
 ```
-
-No Play a mesma tela entra com `--kiosk` no lugar de `--headless=new`.
 
 `data/logins.json` descreve cada streaming: `homeUrl`, `readySelector` e passos `navigate`, `click` e `ask`. Um `ask` pede `email`, `password`, `code` ou `profile`.
 
@@ -164,7 +165,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No player, Voltar manda o Chrome uma página para trás e o guia Qt volta para a frente. Na TV aberta, volta para o guia.
+Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player do espelho, fecha o Chrome e o guia volta para a frente. Na TV aberta, volta para o guia. A tecla do controle é `KEY_BACK` (evdev 158, `XF86Back`), não Escape. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
 
 ## Controle
 
