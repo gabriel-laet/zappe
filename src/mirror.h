@@ -90,12 +90,17 @@ QString mirrorRowService(const QString &service, const QString &href);
 bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
 // Hero de canal ao vivo não entra na fileira do guia.
 bool mirrorLiveHero(const QString &title, const QString &href);
+// GIF 1×1 e pixel de rastreio não são capa.
+bool coverUrlIsPlaceholder(const QString &url);
+// YouTube não tem perfis. "Account menu" também não é um perfil.
+bool mirrorKeepsProfiles(const MirrorAdapter &adapter);
+bool mirrorProfileLabel(const QString &name);
 // Casa a capa no card pela URL sem query. changed fica true se algum path mudou.
 int assignCoverFile(QVector<ShelfData> &shelves, const QString &url, const QString &path, bool *changed = nullptr);
 // Apaga covers/*.img e JPEG sem uso há mais de 14 dias.
 int purgeStaleCovers(const QString &cacheDir, const QDateTime &now);
 QString mirrorCoverFetchScript(const QStringList &urls);
-QString mirrorCoverClipScript(const QStringList &urls);
+QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles = {});
 // Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
 QString coverMatchKey(const QString &url);
 bool coverUrlsMatch(const QString &wanted, const QString &loaded);
@@ -132,6 +137,7 @@ struct CoverJob {
     QString url;
     QString path;
     QString referer;
+    QString title;
 };
 
 struct HeldImage {
@@ -207,6 +213,8 @@ private:
     void logDirectCovers();
     void finishAccept();
     int storeCover(const CoverJob &job, const QByteArray &body);
+    int saveFromNetwork(const CoverJob &job);
+    void attachHeldCover(const QString &url, const QByteArray &body);
     void onFrame(const QString &url);
     void showLoading(const QString &serviceId);
     void showError(const QString &serviceId, const QString &detail);
@@ -279,7 +287,10 @@ private:
     int m_directActive = 0;
     int m_directSaved = 0;
     int m_directCards = 0;
+    int m_directFromNet = 0;
     int m_directTotal = 0;
+    MirrorPage m_feedPage;
+    bool m_feedPending = false;
     QString m_directError;
     QString m_directFile;
 };

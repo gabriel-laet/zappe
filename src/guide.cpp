@@ -632,6 +632,34 @@ void Guide::toggleSaved()
     emit savedChanged();
 }
 
+void Guide::ensureFocusableShelf()
+{
+    auto good = [this](int shelf) {
+        if (!shelfShown(shelf))
+            return false;
+        const ShelfData *data = m_shelves->shelfAt(shelf);
+        if (!data || data->id.endsWith(QStringLiteral(":profiles")))
+            return false;
+        for (const RowData &row : data->rows) {
+            if (!row.title.trimmed().isEmpty() && !row.href.trimmed().isEmpty())
+                return true;
+        }
+        return false;
+    };
+    if (good(m_shelf))
+        return;
+    for (int i = 0; i < shelfCount(); ++i) {
+        if (!good(i))
+            continue;
+        m_shelf = i;
+        m_index = 0;
+        clampIndex();
+        syncFocusFields();
+        emit focusChanged();
+        return;
+    }
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))
@@ -647,14 +675,26 @@ void Guide::back()
         emit focusChanged();
         return;
     }
-    if (!m_mirrorService.isEmpty() && m_page == QLatin1String("streaming")) {
-        closeMirror();
+    // Uma view de streaming, mesmo vazia ou só com card vazio, sempre sai.
+    if (!m_mirrorService.isEmpty() || m_page == QLatin1String("streaming")) {
+        m_mirrorService.clear();
+        if (m_page != QLatin1String("home"))
+            setPage(QStringLiteral("home"));
+        else {
+            ++m_layoutEpoch;
+            emit layoutChanged();
+            clampFocusToPage();
+            emit focusChanged();
+        }
+        ensureFocusableShelf();
         return;
     }
     if (m_page != QLatin1String("home")) {
         setPage(QStringLiteral("home"));
+        ensureFocusableShelf();
         return;
     }
+    ensureFocusableShelf();
 }
 
 void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color)

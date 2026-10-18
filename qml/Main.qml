@@ -205,6 +205,7 @@ Window {
             const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Back
                     || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home
                     || event.key === Qt.Key_HomePage || event.nativeScanCode === 166
+                    || event.nativeScanCode === 172
             if (backKey && event.isAutoRepeat) {
                 event.accepted = true
                 return
@@ -244,7 +245,8 @@ Window {
                 event.accepted = true
                 return
             }
-            if (event.nativeScanCode === 166 && event.key !== Qt.Key_Escape && event.key !== Qt.Key_Back
+            if ((event.nativeScanCode === 166 || event.nativeScanCode === 172)
+                    && event.key !== Qt.Key_Escape && event.key !== Qt.Key_Back
                     && event.key !== Qt.Key_Backspace && event.key !== Qt.Key_Home && event.key !== Qt.Key_HomePage) {
                 house.goBack()
                 event.accepted = true

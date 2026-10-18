@@ -40,7 +40,7 @@
       "linkSelector": "a#video-title-link, a#thumbnail, a[href*='watch']",
       "imageSelector": "ytd-thumbnail img, img#img, img",
       "progressSelector": "#progress, ytd-thumbnail-overlay-resume-playback-renderer #progress",
-      "profileSelector": "button#avatar-btn, yt-img-shadow#avatar img",
+      "profileSelector": "",
       "feeds": [
         {
           "urlContains": ["youtubei/v1/browse", "youtubei/v1/search", "youtubei/v1/guide", "youtube.com/youtubei"],

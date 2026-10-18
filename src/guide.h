@@ -205,6 +205,7 @@ private:
     void setMenuIndex(int index);
     void clampFocusToPage();
     void clampIndex();
+    void ensureFocusableShelf();
     void moveShelves(int dShelf, int dIndex);
     void moveDetail(int dShelf, int dIndex);
     void moveSettings(int dShelf, int dIndex);

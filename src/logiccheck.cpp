@@ -414,7 +414,10 @@ int runLogicSelfCheck()
     if (!netflixScript.contains(QStringLiteral("data-src")) || !netflixScript.contains(QStringLiteral("srcset"))
         || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis"))
         || !netflixScript.contains(QStringLiteral("indexOf('//') === 0"))
-        || !netflixScript.contains(QStringLiteral("parentElement")))
+        || !netflixScript.contains(QStringLiteral("parentElement"))
+        || !netflixScript.contains(QStringLiteral("shadowRoot"))
+        || !netflixScript.contains(QStringLiteral("1x1"))
+        || !netflixScript.contains(QStringLiteral("cfg.profile")))
         return fail("cover art extract");
     if (netflixScript.indexOf(QStringLiteral("el.currentSrc")) < 0
         || netflixScript.indexOf(QStringLiteral("el.currentSrc")) > netflixScript.indexOf(QStringLiteral("srcset")))
@@ -493,8 +496,18 @@ int runLogicSelfCheck()
     if (webpJpeg.size() < 32 || static_cast<unsigned char>(webpJpeg.at(0)) != 0xFF
         || static_cast<unsigned char>(webpJpeg.at(1)) != 0xD8)
         return fail("webp cover becomes jpeg");
-    if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect")))
+    if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect"))
+        || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
+                .contains(QStringLiteral("aria-label")))
         return fail("cover clip script");
+    if (!coverUrlIsPlaceholder(QStringLiteral("https://tv.apple.com/assets/1x1.gif"))
+        || !coverUrlIsPlaceholder(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/a/1x1bb.gif"))
+        || coverUrlIsPlaceholder(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/a/640x360bb.jpg")))
+        return fail("ignore 1x1 gif");
+    if (mirrorKeepsProfiles(*youtube) || !mirrorKeepsProfiles(*netflix)
+        || mirrorProfileLabel(QStringLiteral("Account menu")) || mirrorProfileLabel(QStringLiteral("Menu da conta"))
+        || !mirrorProfileLabel(QStringLiteral("Ada")))
+        return fail("youtube has no profiles");
     if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))
         || !mirrorUrlIsPlayback(QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
         || mirrorUrlIsPlayback(netflix->homeUrl) || mirrorUrlIsPlayback(youtube->homeUrl)
@@ -609,6 +622,55 @@ int runLogicSelfCheck()
         || !primeArt.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("m.media-amazon.com"))
         || primeArt.shelves.at(0).rows.at(0).artworkSpec.startsWith(QStringLiteral("//")))
         return fail("prime protocol-relative art");
+    const MirrorPage youtubeAccount = parseMirrorPage(QByteArray(R"json({
+      "profiles": ["Account menu"],
+      "shelves": [{
+        "title": "Em alta",
+        "rows": [{"title": "Dark", "href": "https://www.youtube.com/watch?v=abcdefghijk", "artwork": "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"}]
+      }]
+    })json"),
+                                                      *youtube);
+    bool youtubeProfiles = false;
+    for (const ShelfData &shelf : youtubeAccount.shelves) {
+        if (shelf.id.endsWith(QStringLiteral(":profiles")))
+            youtubeProfiles = true;
+    }
+    if (youtubeProfiles || !mirrorPageHasTitles(youtubeAccount))
+        return fail("youtube account menu is not a profile shelf");
+    const MirrorAdapter *hbo = findMirrorAdapter(mirrors, QStringLiteral("hbo"));
+    if (!hbo)
+        return fail("hbo adapter");
+    NetworkSample hboSample;
+    hboSample.url = QStringLiteral("https://api.hbomax.com/cms/routes/home");
+    hboSample.body = QByteArray(R"json({
+      "items": [{
+        "title": "Show",
+        "href": "https://play.max.com/show/abc",
+        "image": {
+          "uri": "https://api.hbomax.com/missing.jpg",
+          "src": "https://images.cdn.prd.api.discomax.com/a.jpeg?w={width}&h={height}"
+        }
+      }]
+    })json");
+    const MirrorPage hboPage = parseMirrorFeeds({hboSample}, *hbo);
+    if (!mirrorPageHasTitles(hboPage) || hboPage.shelves.isEmpty() || hboPage.shelves.at(0).rows.isEmpty()
+        || hboPage.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("api.hbomax.com"))
+        || !hboPage.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("w=640")))
+        return fail("hbo art prefers src");
+    const MirrorAdapter *apple = findMirrorAdapter(mirrors, QStringLiteral("apple"));
+    if (!apple)
+        return fail("apple adapter");
+    MirrorAdapter appleFilter = *apple;
+    const MirrorPage appleGif = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Em alta",
+        "rows": [{"title": "Filme", "href": "https://tv.apple.com/movie/filme", "artwork": "https://tv.apple.com/assets/1x1.gif"}]
+      }]
+    })json"),
+                                                 appleFilter);
+    if (!mirrorPageHasTitles(appleGif) || appleGif.shelves.isEmpty() || appleGif.shelves.at(0).rows.isEmpty()
+        || !appleGif.shelves.at(0).rows.at(0).artworkSpec.isEmpty())
+        return fail("apple drops 1x1 gif");
     ShelfData focusHome;
     RowData focusDark;
     focusDark.title = QStringLiteral("Dark");

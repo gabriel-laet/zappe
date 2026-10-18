@@ -87,6 +87,12 @@ Enquanto a página carrega, cada resposta `image/*` grande o bastante é guardad
 
 Na view de um streaming só entram as fileiras lidas agora daquele serviço. O catálogo local, mesmo com o mesmo nome de fileira, fica de fora. Título que começa com «Assistir ao vivo» ou «Ao vivo:», ou cujo link tem `/ao-vivo/`, não entra na fileira: esse card do Globoplay tomava o hero do guia no meio da navegação. Se a fileira é republicada enquanto a capa chega, o foco volta ao mesmo link ou, se o link ganhou query nova, ao mesmo título. Não cai no primeiro card de outra fileira.
 
+Voltar e Home saem de qualquer view de streaming, inclusive vazia ou só com um card sem título. O foco não fica num card vazio nem na fileira Perfis. O YouTube não tem perfis: o botão da conta (`Account menu` / `Menu da conta`) não vira fileira.
+
+O Prime guarda a imagem dentro de shadow root e em URL `//m.media-amazon.com`. Se o feed JSON trouxer títulos sem arte, o DOM ainda é lido. GIF `1x1` da Apple é ignorado para o `srcset` real entrar.
+
+Se o GET direto da capa falha (a HBO responde `404 text/plain` sem o cookie da aba), o app usa a imagem que o Chrome já baixou e, nos cards visíveis, um recorte pelo título. O log do direto traz `rede N`. Uma chegada atrasada da rede escreve `capa da rede`.
+
 O log é uma linha por serviço (`artes N http, M sem url` e `capas N/M direto, cards K`), com o primeiro `file://` e o primeiro erro. `N` é o arquivo gravado; `K` é quantos cards passaram a apontar para ele. Não repete o lote.
 
 Cada serviço é relido ao abrir e de novo a cada 45 minutos. `ZAPPE_MIRROR_REFRESH_MIN` muda esse intervalo e fica preso entre 30 e 60. A releitura não roda enquanto o player está aberto. Se a mesma URL já está na aba, o app passa por `about:blank` antes de navegar de novo: no YouTube um `Page.navigate` repetido não recarrega e o DOM virtualizado devolve um título. Uma leitura sem merge muito menor que a anterior (a guardada tem pelo menos 4 e a nova tem menos da metade) fica de fora.
