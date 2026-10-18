@@ -74,7 +74,7 @@
           "urlContains": ["primevideo.com/api/enrichItemMetadata", "atv-ps.primevideo.com", "primevideo.com"],
           "titleKeys": ["title", "name"],
           "hrefKeys": ["playbackUrl", "link", "href"],
-          "artworkKeys": ["image", "artwork", "thumbnail"],
+          "artworkKeys": ["image", "images", "packshot", "artwork", "thumbnail", "uri"],
           "shelfKeys": ["title", "name"],
           "hrefTemplate": ""
         }

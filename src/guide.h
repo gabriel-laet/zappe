@@ -13,6 +13,12 @@ class QQuickWindow;
 
 namespace zappe {
 
+// Depois de republicar as fileiras, o foco volta ao mesmo href ou ao mesmo título.
+// Fileira escondida nesta página não vira o hero. O índice não cai em 0 de outra fileira
+// quando o título ainda está na tela.
+bool restoreGuideFocus(const QVector<ShelfData> &shelves, const QVector<int> &shown, const QString &keepHref,
+                       const QString &keepTitle, int keepShelf, int keepIndex, int &shelf, int &index);
+
 class Guide : public QObject {
     Q_OBJECT
     Q_PROPERTY(ShelfModel *shelves READ shelves CONSTANT)

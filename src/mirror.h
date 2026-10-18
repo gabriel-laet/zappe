@@ -88,6 +88,12 @@ bool mirrorUrlIsPlayback(const QString &url);
 QString mirrorRowService(const QString &service, const QString &href);
 // Leitura nova muito menor que a anterior: fica a página mais rica.
 bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
+// Hero de canal ao vivo não entra na fileira do guia.
+bool mirrorLiveHero(const QString &title, const QString &href);
+// Casa a capa no card pela URL sem query. changed fica true se algum path mudou.
+int assignCoverFile(QVector<ShelfData> &shelves, const QString &url, const QString &path, bool *changed = nullptr);
+// Apaga covers/*.img e JPEG sem uso há mais de 14 dias.
+int purgeStaleCovers(const QString &cacheDir, const QDateTime &now);
 QString mirrorCoverFetchScript(const QStringList &urls);
 QString mirrorCoverClipScript(const QStringList &urls);
 // Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
@@ -112,6 +118,7 @@ bool mirrorPageUsable(const MirrorPage &page, int minTitles);
 QString coverCachePath(const QString &cacheDir, const QString &url);
 bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs);
 int mirrorCoverMaxAgeSecs();
+int mirrorCoverUnusedMaxAgeSecs();
 int mirrorRefreshMs();
 int mirrorLoadTimeoutMs();
 // Fileira de erro do espelho: OK dispara de novo em vez de abrir o detalhe.
@@ -199,7 +206,7 @@ private:
     void pumpDirectCovers();
     void logDirectCovers();
     void finishAccept();
-    void storeCover(const CoverJob &job, const QByteArray &body);
+    int storeCover(const CoverJob &job, const QByteArray &body);
     void onFrame(const QString &url);
     void showLoading(const QString &serviceId);
     void showError(const QString &serviceId, const QString &detail);
@@ -271,6 +278,7 @@ private:
     QVector<CoverJob> m_directJobs;
     int m_directActive = 0;
     int m_directSaved = 0;
+    int m_directCards = 0;
     int m_directTotal = 0;
     QString m_directError;
     QString m_directFile;

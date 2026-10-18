@@ -5,6 +5,7 @@
 #include "cdp.h"
 #include "chrome.h"
 #include "display.h"
+#include "guide.h"
 #include "house.h"
 #include "keymap.h"
 #include "learn.h"
@@ -20,6 +21,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -410,7 +412,9 @@ int runLogicSelfCheck()
         || youtube->extraUrls.isEmpty() || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
         return fail("youtube home");
     if (!netflixScript.contains(QStringLiteral("data-src")) || !netflixScript.contains(QStringLiteral("srcset"))
-        || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis")))
+        || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis"))
+        || !netflixScript.contains(QStringLiteral("indexOf('//') === 0"))
+        || !netflixScript.contains(QStringLiteral("parentElement")))
         return fail("cover art extract");
     if (netflixScript.indexOf(QStringLiteral("el.currentSrc")) < 0
         || netflixScript.indexOf(QStringLiteral("el.currentSrc")) > netflixScript.indexOf(QStringLiteral("srcset")))
@@ -424,6 +428,28 @@ int runLogicSelfCheck()
     if (!coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg?r=1"), QStringLiteral("https://cdn.example/a/box.jpg?r=2"))
         || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg")))
         return fail("cover url match");
+    const QString queryA = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?r=1"));
+    const QString queryB = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?token=2"));
+    const QString otherArt = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/other.jpg"));
+    if (queryA != queryB || queryA == otherArt)
+        return fail("cover cache key ignores query");
+    QVector<ShelfData> linkedShelves(1);
+    RowData linkedRow;
+    linkedRow.title = QStringLiteral("Dark");
+    linkedRow.artworkSpec = QStringLiteral("https://cdn.example/a/box.jpg?r=1");
+    linkedShelves[0].rows.append(linkedRow);
+    const QString linkedPath = dir.filePath(QStringLiteral("covers/box.jpg"));
+    QDir().mkpath(QFileInfo(linkedPath).absolutePath());
+    QFile linkedFile(linkedPath);
+    if (!linkedFile.open(QIODevice::WriteOnly) || linkedFile.write(QByteArray(64, 'j')) != 64)
+        return fail("write linked cover");
+    linkedFile.close();
+    bool linkedChanged = false;
+    const int linkedCards = assignCoverFile(linkedShelves, QStringLiteral("https://cdn.example/a/box.jpg?r=2"), linkedPath,
+                                             &linkedChanged);
+    if (linkedCards != 1 || !linkedChanged || linkedShelves.at(0).rows.at(0).artwork != linkedPath
+        || !fileUrl(linkedShelves.at(0).rows.at(0).artwork).startsWith(QStringLiteral("file://")))
+        return fail("cover links card");
     const QString referer = coverDownloadReferer(QStringLiteral("https://www.netflix.com/browse"));
     if (!referer.contains(QStringLiteral("netflix.com")) || referer.contains(QStringLiteral("nflxso"))
         || !coverDownloadReferer(QStringLiteral("https://www.primevideo.com/")).contains(QStringLiteral("primevideo.com"))
@@ -494,8 +520,21 @@ int runLogicSelfCheck()
         return fail("player video");
     if (!mirrorSearchUrl(*netflix, QStringLiteral("dark")).contains(QStringLiteral("q=dark")))
         return fail("netflix search");
-    if (mirrorChromeInFront(false) || !mirrorChromeInFront(true) || mirrorRefreshMs() != 20 * 60 * 1000)
+    if (mirrorChromeInFront(false) || !mirrorChromeInFront(true))
         return fail("mirror chrome policy");
+    qunsetenv("ZAPPE_MIRROR_REFRESH_MIN");
+    if (mirrorRefreshMs() != 45 * 60 * 1000 || mirrorCoverUnusedMaxAgeSecs() != 14 * 24 * 60 * 60)
+        return fail("mirror refresh default");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "15");
+    if (mirrorRefreshMs() != 30 * 60 * 1000)
+        return fail("mirror refresh floor");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "120");
+    if (mirrorRefreshMs() != 60 * 60 * 1000)
+        return fail("mirror refresh cap");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "40");
+    if (mirrorRefreshMs() != 40 * 60 * 1000)
+        return fail("mirror refresh env");
+    qunsetenv("ZAPPE_MIRROR_REFRESH_MIN");
     MirrorAdapter limited = *netflix;
     limited.limitCards = 2;
     const MirrorPage page = parseMirrorPage(QByteArray(R"json({
@@ -537,6 +576,65 @@ int runLogicSelfCheck()
     if (!mirrorPageHasTitles(paid) || paid.shelves.isEmpty() || paid.shelves.at(0).rows.size() != 1
         || paid.shelves.at(0).rows.at(0).title != QLatin1String("Dark"))
         return fail("prime paid filter");
+    if (!mirrorLiveHero(QStringLiteral("Assistir ao vivo: Copa do Mundo"), QStringLiteral("https://globoplay.globo.com/v/1"))
+        || !mirrorLiveHero(QStringLiteral("Ao vivo: Jornal"), QStringLiteral("https://globoplay.globo.com/v/2"))
+        || mirrorLiveHero(QStringLiteral("Dark"), QStringLiteral("https://globoplay.globo.com/v/3"))
+        || !mirrorLiveHero(QStringLiteral("Copa"), QStringLiteral("https://globoplay.globo.com/ao-vivo/copa")))
+        return fail("live hero");
+    const MirrorPage globoLive = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Continuar assistindo",
+        "context": "continuar",
+        "rows": [
+          {"title": "Assistir ao vivo: Copa do Mundo Feminina Sub-17", "href": "https://globoplay.globo.com/ao-vivo/copa", "artwork": "https://example.test/live.jpg"},
+          {"title": "Novela", "href": "https://globoplay.globo.com/v/123", "artwork": "https://example.test/novela.jpg"}
+        ]
+      }]
+    })json"),
+                                                       *globoplay);
+    if (!globoplay || globoLive.shelves.isEmpty() || globoLive.shelves.at(0).rows.size() != 1
+        || globoLive.shelves.at(0).rows.at(0).title != QLatin1String("Novela"))
+        return fail("globoplay live hero dropped");
+    NetworkSample primeSample;
+    primeSample.url = QStringLiteral("https://www.primevideo.com/api/enrichItemMetadata");
+    primeSample.body = QByteArray(R"json({
+      "items": [{
+        "title": "A Roda",
+        "link": "/detail/RODA1",
+        "images": {"packshot": "//m.media-amazon.com/images/S/pv-target-images/abc123def456.jpg"}
+      }]
+    })json");
+    const MirrorPage primeArt = parseMirrorFeeds({primeSample}, *prime);
+    if (!mirrorPageHasTitles(primeArt) || primeArt.shelves.isEmpty() || primeArt.shelves.at(0).rows.isEmpty()
+        || !primeArt.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("m.media-amazon.com"))
+        || primeArt.shelves.at(0).rows.at(0).artworkSpec.startsWith(QStringLiteral("//")))
+        return fail("prime protocol-relative art");
+    ShelfData focusHome;
+    RowData focusDark;
+    focusDark.title = QStringLiteral("Dark");
+    focusDark.href = QStringLiteral("https://example.test/dark");
+    focusHome.rows.append(focusDark);
+    ShelfData focusLive;
+    RowData focusCopa;
+    focusCopa.title = QStringLiteral("Assistir ao vivo: Copa");
+    focusCopa.href = QStringLiteral("https://globoplay.globo.com/ao-vivo/copa");
+    RowData focusNovela;
+    focusNovela.title = QStringLiteral("Novela");
+    focusNovela.href = QStringLiteral("https://globoplay.globo.com/v/1?novo=1");
+    focusLive.rows.append(focusCopa);
+    focusLive.rows.append(focusNovela);
+    const QVector<ShelfData> focusShelves{focusHome, focusLive};
+    int focusShelf = 0;
+    int focusIndex = 0;
+    if (!restoreGuideFocus(focusShelves, {1, 1}, QStringLiteral("https://globoplay.globo.com/v/1?velho=1"),
+                           QStringLiteral("Novela"), 1, 1, focusShelf, focusIndex)
+        || focusShelf != 1 || focusIndex != 1)
+        return fail("focus stays on title");
+    int jumpedShelf = 0;
+    int jumpedIndex = 0;
+    if (!restoreGuideFocus(focusShelves, {0, 1}, QString(), QString(), 4, 3, jumpedShelf, jumpedIndex)
+        || jumpedShelf != 1 || jumpedIndex != 3)
+        return fail("focus does not snap to zero");
     const QString coverPath = coverCachePath(dir.path(), QStringLiteral("https://example.test/dark.jpg"));
     const QDateTime now = QDateTime::currentDateTime();
     if (coverIsFresh(coverPath, now, 3600))
@@ -547,6 +645,30 @@ int runLogicSelfCheck()
     cover.close();
     if (!coverIsFresh(coverPath, now, 3600))
         return fail("fresh cover");
+    QDir coverDir(dir.filePath(QStringLiteral("covers")));
+    if (!coverDir.mkpath(QStringLiteral(".")))
+        return fail("cover dir");
+    auto writeAged = [&](const QString &name, int days) {
+        const QString path = coverDir.filePath(name);
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(QByteArray(40, 'x')) != 40)
+            return false;
+        file.close();
+        QFile aged(path);
+        if (!aged.open(QIODevice::ReadWrite))
+            return false;
+        const bool ok = aged.setFileTime(now.addDays(days), QFileDevice::FileModificationTime);
+        aged.close();
+        return ok;
+    };
+    if (!writeAged(QStringLiteral("legacy.img"), -1) || !writeAged(QStringLiteral("stale.jpg"), -20)
+        || !writeAged(QStringLiteral("fresh-keep.jpg"), -1))
+        return fail("age covers");
+    const int purged = purgeStaleCovers(dir.path(), now);
+    if (purged < 2 || QFileInfo::exists(coverDir.filePath(QStringLiteral("legacy.img")))
+        || QFileInfo::exists(coverDir.filePath(QStringLiteral("stale.jpg")))
+        || !QFileInfo::exists(coverDir.filePath(QStringLiteral("fresh-keep.jpg"))))
+        return fail("purge stale covers");
     for (const CoverJob &job : coverJobs(page.shelves, dir.path(), now)) {
         if (job.url == QStringLiteral("https://example.test/dark.jpg"))
             return fail("fresh cover still queued");

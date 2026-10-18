@@ -20,6 +20,71 @@
 
 namespace zappe {
 
+bool restoreGuideFocus(const QVector<ShelfData> &shelves, const QVector<int> &shown, const QString &keepHref,
+                       const QString &keepTitle, int keepShelf, int keepIndex, int &shelf, int &index)
+{
+    auto shownOk = [&](int row) { return row >= 0 && row < shown.size() && shown.at(row) != 0 && row < shelves.size(); };
+    if (!keepHref.isEmpty()) {
+        for (int s = 0; s < shelves.size(); ++s) {
+            if (!shownOk(s))
+                continue;
+            for (int i = 0; i < shelves.at(s).rows.size(); ++i) {
+                if (shelves.at(s).rows.at(i).href == keepHref) {
+                    shelf = s;
+                    index = i;
+                    return true;
+                }
+            }
+        }
+    }
+    if (!keepTitle.isEmpty()) {
+        const int prefer = shownOk(keepShelf) ? keepShelf : -1;
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int s = 0; s < shelves.size(); ++s) {
+                if (!shownOk(s))
+                    continue;
+                if (pass == 0 && s != prefer)
+                    continue;
+                if (pass == 1 && s == prefer)
+                    continue;
+                for (int i = 0; i < shelves.at(s).rows.size(); ++i) {
+                    if (shelves.at(s).rows.at(i).title == keepTitle) {
+                        shelf = s;
+                        index = i;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    if (shownOk(keepShelf)) {
+        shelf = keepShelf;
+        index = keepIndex;
+        return true;
+    }
+    int pick = -1;
+    const int start = std::max(0, keepShelf);
+    for (int s = start; s < shelves.size(); ++s) {
+        if (shownOk(s)) {
+            pick = s;
+            break;
+        }
+    }
+    if (pick < 0) {
+        for (int s = 0; s < shelves.size(); ++s) {
+            if (shownOk(s)) {
+                pick = s;
+                break;
+            }
+        }
+    }
+    if (pick < 0)
+        return false;
+    shelf = pick;
+    index = keepIndex;
+    return true;
+}
+
 QString cacheDir()
 {
     const QString base = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
@@ -615,7 +680,9 @@ void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QSt
 void Guide::publishShelves(bool resetFocus)
 {
     const QString keepHref = resetFocus ? QString() : m_focusHref;
+    const QString keepTitle = resetFocus ? QString() : m_focusTitle;
     const int keepShelf = m_shelf;
+    const int keepIndex = m_index;
     QVector<ShelfData> merged;
     merged.reserve(m_baseShelves.size() + m_mirrorShelves.size());
     bool inserted = false;
@@ -635,24 +702,22 @@ void Guide::publishShelves(bool resetFocus)
         m_shelf = 0;
         m_index = 0;
         m_detailOpen = false;
-    } else if (!keepHref.isEmpty()) {
-        bool found = false;
-        for (int shelf = 0; shelf < shelfCount() && !found; ++shelf) {
-            const RowModel *rows = m_shelves->rowsAt(shelf);
-            if (!rows)
-                continue;
-            for (int i = 0; i < rows->rowCount(); ++i) {
-                const RowData *row = rows->at(i);
-                if (row && row->href == keepHref) {
-                    m_shelf = shelf;
-                    m_index = i;
-                    found = true;
-                    break;
-                }
-            }
+    } else {
+        QVector<ShelfData> shelves;
+        QVector<int> shown;
+        shelves.reserve(shelfCount());
+        shown.reserve(shelfCount());
+        for (int i = 0; i < shelfCount(); ++i) {
+            const ShelfData *shelf = m_shelves->shelfAt(i);
+            shelves.append(shelf ? *shelf : ShelfData{});
+            shown.append(shelfShown(i) ? 1 : 0);
         }
-        if (!found)
-            m_shelf = shelfCount() == 0 ? 0 : std::clamp(keepShelf, 0, shelfCount() - 1);
+        int shelf = keepShelf;
+        int index = keepIndex;
+        if (restoreGuideFocus(shelves, shown, keepHref, keepTitle, keepShelf, keepIndex, shelf, index)) {
+            m_shelf = shelf;
+            m_index = index;
+        }
     }
     clampFocusToPage();
     syncFocusFields();

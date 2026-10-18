@@ -31,6 +31,15 @@
 #include <cstdio>
 
 namespace zappe {
+
+void touchCoverFile(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadWrite))
+        return;
+    file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
+}
+
 namespace {
 
 enum Job {
@@ -155,7 +164,9 @@ QString jsonArt(const QJsonValue &value, int depth)
     if (depth > 5)
         return QString();
     if (value.isString()) {
-        const QString text = value.toString().trimmed();
+        QString text = value.toString().trimmed();
+        if (text.startsWith(QStringLiteral("//")))
+            text.prepend(QStringLiteral("https:"));
         if (text.startsWith(QStringLiteral("http://")) || text.startsWith(QStringLiteral("https://")))
             return text;
         return QString();
@@ -172,12 +183,28 @@ QString jsonArt(const QJsonValue &value, int depth)
     if (!value.isObject())
         return QString();
     const QJsonObject obj = value.toObject();
-    if (obj.contains(QStringLiteral("thumbnails")))
-        return jsonArt(obj.value(QStringLiteral("thumbnails")), depth + 1);
-    if (obj.contains(QStringLiteral("url")))
-        return jsonArt(obj.value(QStringLiteral("url")), depth + 1);
-    if (obj.contains(QStringLiteral("src")))
-        return jsonArt(obj.value(QStringLiteral("src")), depth + 1);
+    const QStringList keys = {QStringLiteral("thumbnails"), QStringLiteral("packshot"), QStringLiteral("images"),
+                              QStringLiteral("image"),      QStringLiteral("artwork"),  QStringLiteral("boxart"),
+                              QStringLiteral("storyArt"),   QStringLiteral("thumbnail"), QStringLiteral("poster"),
+                              QStringLiteral("cover"),      QStringLiteral("uri"),      QStringLiteral("url"),
+                              QStringLiteral("src")};
+    for (const QString &key : keys) {
+        if (!obj.contains(key))
+            continue;
+        const QString art = jsonArt(obj.value(key), depth + 1);
+        if (!art.isEmpty())
+            return art;
+    }
+    for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+        if (!it.value().isString())
+            continue;
+        const QString art = jsonArt(it.value(), depth + 1);
+        const QString lower = art.toLower();
+        if (lower.contains(QStringLiteral("media-amazon.com")) || lower.contains(QStringLiteral("mzstatic.com"))
+            || lower.contains(QStringLiteral(".jpg")) || lower.contains(QStringLiteral(".jpeg"))
+            || lower.contains(QStringLiteral(".png")) || lower.contains(QStringLiteral(".webp")))
+            return art;
+    }
     return QString();
 }
 
@@ -384,6 +411,7 @@ void paintMissingCovers(QVector<ShelfData> &shelves, const QString &cacheDir, co
             const QString path = coverCachePath(cacheDir, row.artworkSpec);
             if (coverIsFresh(path, now, mirrorCoverMaxAgeSecs())) {
                 row.artwork = path;
+                touchCoverFile(path);
                 continue;
             }
             const ArtPaths art = makePoster(cacheDir, row.title, row.serviceLabel, row.wide);
@@ -401,9 +429,20 @@ int mirrorCoverMaxAgeSecs()
     return 12 * 60 * 60;
 }
 
+int mirrorCoverUnusedMaxAgeSecs()
+{
+    return 14 * 24 * 60 * 60;
+}
+
 int mirrorRefreshMs()
 {
-    return 20 * 60 * 1000;
+    // 45 min. ZAPPE_MIRROR_REFRESH_MIN fica entre 30 e 60.
+    int minutes = 45;
+    bool ok = false;
+    const int env = qEnvironmentVariableIntValue("ZAPPE_MIRROR_REFRESH_MIN", &ok);
+    if (ok)
+        minutes = std::clamp(env, 30, 60);
+    return minutes * 60 * 1000;
 }
 
 int mirrorLoadTimeoutMs()
@@ -609,7 +648,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     for (const part of text.split(',')) {
       const bits = part.trim().split(/\s+/);
       const url = bits[0] || '';
-      if (url.indexOf('http') !== 0) continue;
+      if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) continue;
       const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
       if (w >= bestW) { bestW = w; best = url; }
     }
@@ -618,14 +657,16 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
   const bgUrl = (el) => {
     if (!el) return '';
     const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
-    const match = /url\((['"]?)(https?:[^'")]+)\1\)/.exec(raw);
+    const match = /url\((['"]?)((?:https?:)?\/\/[^'")]+)\1\)/.exec(raw);
     return match ? match[2] : '';
   };
   const httpUrl = (value) => {
-    const url = pickSrc(value);
-    return url && url.indexOf('http') === 0 ? url : '';
+    let url = pickSrc(value);
+    if (!url) return '';
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    return url.indexOf('http') === 0 ? url : '';
   };
-  const artOf = (root) => {
+  const artIn = (root) => {
     if (!root) return '';
     const nodes = [];
     if (root.querySelectorAll) {
@@ -652,6 +693,19 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const url = httpUrl(value);
         if (url) return url;
       }
+    }
+    return '';
+  };
+  const artOf = (root) => {
+    const own = artIn(root);
+    if (own) return own;
+    const parent = root && root.parentElement;
+    if (!parent || !parent.children) return '';
+    for (const kid of parent.children) {
+      if (!kid || kid === root) continue;
+      if (kid.querySelector && kid.querySelector('a[href]')) continue;
+      const url = artIn(kid);
+      if (url) return url;
     }
     return '';
   };
@@ -1177,6 +1231,14 @@ QString mirrorCoverClipScript(const QStringList &urls)
 })())js");
 }
 
+bool mirrorLiveHero(const QString &title, const QString &href)
+{
+    const QString name = title.trimmed().toLower();
+    if (name.startsWith(QStringLiteral("assistir ao vivo")) || name.startsWith(QStringLiteral("ao vivo:")))
+        return true;
+    return href.toLower().contains(QStringLiteral("/ao-vivo/"));
+}
+
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
 {
     MirrorPage page;
@@ -1227,7 +1289,8 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             const QJsonObject rowObj = rowValue.toObject();
             const QString href = mirrorPlayUrl(adapter, rowObj.value(QStringLiteral("href")).toString());
             QString name = rowObj.value(QStringLiteral("title")).toString().trimmed();
-            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")) || titleRejected(adapter, name))
+            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")) || titleRejected(adapter, name)
+                || mirrorLiveHero(name, href))
                 continue;
             RowData row;
             row.title = name;
@@ -1389,7 +1452,8 @@ QString mirrorDomSnapshotScript()
 
 QString coverCachePath(const QString &cacheDir, const QString &url)
 {
-    const QByteArray hash = QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex();
+    const QByteArray hash =
+        QCryptographicHash::hash(coverMatchKey(expandCoverUrl(url)).toUtf8(), QCryptographicHash::Sha1).toHex();
     QDir dir(cacheDir);
     dir.mkpath(QStringLiteral("covers"));
     return dir.filePath(QStringLiteral("covers/%1.jpg").arg(QString::fromLatin1(hash)));
@@ -1404,18 +1468,59 @@ bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs)
     return age >= -60 && age <= maxAgeSecs;
 }
 
+int assignCoverFile(QVector<ShelfData> &shelves, const QString &url, const QString &path, bool *changed)
+{
+    int linked = 0;
+    bool didChange = false;
+    for (ShelfData &shelf : shelves) {
+        for (RowData &row : shelf.rows) {
+            if (!coverUrlsMatch(row.artworkSpec, url))
+                continue;
+            ++linked;
+            if (row.artwork != path) {
+                row.artwork = path;
+                didChange = true;
+            }
+        }
+    }
+    if (changed)
+        *changed = didChange;
+    if (linked > 0)
+        touchCoverFile(path);
+    return linked;
+}
+
+int purgeStaleCovers(const QString &cacheDir, const QDateTime &now)
+{
+    QDir dir(QDir(cacheDir).filePath(QStringLiteral("covers")));
+    if (!dir.exists())
+        return 0;
+    int removed = 0;
+    const QFileInfoList files = dir.entryInfoList(QDir::Files);
+    for (const QFileInfo &info : files) {
+        const QString name = info.fileName().toLower();
+        const bool legacy = name.endsWith(QStringLiteral(".img"));
+        const qint64 age = info.lastModified().secsTo(now);
+        if (!legacy && !(name.endsWith(QStringLiteral(".jpg")) && age > mirrorCoverUnusedMaxAgeSecs()))
+            continue;
+        if (QFile::remove(info.absoluteFilePath()))
+            ++removed;
+    }
+    return removed;
+}
+
 QVector<CoverJob> coverJobs(const QVector<ShelfData> &shelves, const QString &cacheDir, const QDateTime &now)
 {
     QVector<CoverJob> jobs;
     QSet<QString> seen;
     for (const ShelfData &shelf : shelves) {
         for (const RowData &row : shelf.rows) {
-            if (!row.artworkSpec.startsWith(QStringLiteral("http")) || seen.contains(row.artworkSpec))
+            if (!row.artworkSpec.startsWith(QStringLiteral("http")))
                 continue;
             const QString path = coverCachePath(cacheDir, row.artworkSpec);
-            if (coverIsFresh(path, now, mirrorCoverMaxAgeSecs()))
+            if (seen.contains(path) || coverIsFresh(path, now, mirrorCoverMaxAgeSecs()))
                 continue;
-            seen.insert(row.artworkSpec);
+            seen.insert(path);
             CoverJob job;
             job.serviceId = shelf.skillId.mid(QStringLiteral("mirror:").size());
             job.url = row.artworkSpec;
@@ -1449,6 +1554,7 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     m_chrome = chrome;
     m_dataDir = dataDir;
     m_cacheDir = cacheDir();
+    purgeStaleCovers(m_cacheDir, QDateTime::currentDateTime());
     m_cdp = new CdpClient(this);
     connect(m_cdp, &CdpClient::attached, this, &MirrorSession::onAttached);
     connect(m_cdp, &CdpClient::navigated, this, &MirrorSession::onNavigated);
@@ -1524,6 +1630,7 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     m_refresh = new QTimer(this);
     m_refresh->setInterval(mirrorRefreshMs());
     connect(m_refresh, &QTimer::timeout, this, [this] {
+        purgeStaleCovers(m_cacheDir, QDateTime::currentDateTime());
         if (m_player)
             return;
         m_queue.clear();
@@ -2431,7 +2538,7 @@ bool MirrorSession::applyPage(const MirrorPage &page)
     for (const CoverJob &job : jobs) {
         bool queued = false;
         for (const CoverJob &have : m_covers) {
-            if (have.url == job.url)
+            if (have.path == job.path || coverUrlsMatch(have.url, job.url))
                 queued = true;
         }
         if (!queued) {
@@ -2698,7 +2805,7 @@ void MirrorSession::finishAccept()
     QTimer::singleShot(500, this, &MirrorSession::pump);
 }
 
-void MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
+int MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
 {
     QByteArray jpeg = body;
     if (coverKind(body) != QLatin1String("jpeg")) {
@@ -2706,26 +2813,19 @@ void MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
         jpeg = coverJpegFromBody(body, &detail);
     }
     if (jpeg.size() < 32)
-        return;
+        return -1;
     QDir().mkpath(QFileInfo(job.path).absolutePath());
     QFile out(job.path);
-    if (!out.open(QIODevice::WriteOnly))
-        return;
-    out.write(jpeg);
+    if (!out.open(QIODevice::WriteOnly) || out.write(jpeg) != jpeg.size())
+        return -1;
     QVector<ShelfData> shelves = m_pages.value(job.serviceId);
     bool changed = false;
-    for (ShelfData &shelf : shelves) {
-        for (RowData &row : shelf.rows) {
-            if (row.artworkSpec == job.url) {
-                row.artwork = job.path;
-                changed = true;
-            }
-        }
-    }
+    const int linked = assignCoverFile(shelves, job.url, job.path, &changed);
     if (changed && m_guide) {
         m_pages.insert(job.serviceId, shelves);
         m_guide->replaceServiceShelves(job.serviceId, shelves);
     }
+    return linked;
 }
 
 void MirrorSession::startDirectCovers(const QVector<CoverJob> &jobs)
@@ -2733,6 +2833,7 @@ void MirrorSession::startDirectCovers(const QVector<CoverJob> &jobs)
     m_directJobs = jobs;
     m_directActive = 0;
     m_directSaved = 0;
+    m_directCards = 0;
     m_directTotal = int(jobs.size());
     m_directError.clear();
     m_directFile.clear();
@@ -2753,8 +2854,8 @@ void MirrorSession::logDirectCovers()
         extra += QStringLiteral(" ") + m_directFile;
     if (!m_directError.isEmpty())
         extra += QStringLiteral(" erro ") + m_directError.left(240);
-    std::fprintf(stderr, "zappe: espelho %s capas %d/%d direto%s\n", qPrintable(m_current), m_directSaved,
-                 m_directTotal, qPrintable(extra));
+    std::fprintf(stderr, "zappe: espelho %s capas %d/%d direto, cards %d%s\n", qPrintable(m_current), m_directSaved,
+                 m_directTotal, m_directCards, qPrintable(extra));
     m_directTotal = -1;
 }
 
@@ -2789,10 +2890,13 @@ void MirrorSession::pumpDirectCovers()
             QString detail;
             const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail) : QByteArray();
             if (jpeg.size() >= 32) {
-                storeCover(job, jpeg);
-                ++m_directSaved;
-                if (m_directFile.isEmpty())
-                    m_directFile = fileUrl(job.path);
+                const int cards = storeCover(job, jpeg);
+                if (cards >= 0) {
+                    ++m_directSaved;
+                    m_directCards += cards;
+                    if (m_directFile.isEmpty())
+                        m_directFile = fileUrl(job.path);
+                }
             } else if (m_directError.isEmpty()) {
                 const QString mime = type.section(QLatin1Char(';'), 0, 0).trimmed();
                 if (!httpOk && status <= 0)
