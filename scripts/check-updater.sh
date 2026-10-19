@@ -20,6 +20,14 @@ if ! grep -q 'sudo -n systemctl restart' "${script}"; then
   echo "check-updater: updater must use sudo -n systemctl restart when the system unit exists" >&2
   exit 1
 fi
+if grep -qE 'systemctl (--user )?cat' "${script}"; then
+  echo "check-updater: updater must not detect units with systemctl cat (root-only drop-ins make it fail)" >&2
+  exit 1
+fi
+if ! grep -q 'systemctl show -p LoadState' "${script}"; then
+  echo "check-updater: updater must detect the system unit with systemctl show -p LoadState" >&2
+  exit 1
+fi
 if ! grep -q 'install-whisper.sh' "${script}"; then
   echo "check-updater: updater must call install-whisper.sh" >&2
   exit 1

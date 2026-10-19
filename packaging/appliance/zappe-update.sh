@@ -161,13 +161,20 @@ if [[ -f "${ZAPPE_SRC}/packaging/appliance/install-whisper.sh" ]]; then
   fi
 fi
 
-if systemctl cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
+# Ask the system manager over D-Bus instead of reading unit files: "cat" reads the
+# unit and drop-in files as this user, and a root-only drop-in (0600) makes it
+# fail even though the system unit exists. While the system unit is loaded,
+# never fall back to the user unit of the same name (it would start a second
+# kiosk next to the real one).
+system_load="$(systemctl show -p LoadState --value "${ZAPPE_UNIT}" 2>/dev/null || true)"
+user_load="$(systemctl --user show -p LoadState --value "${ZAPPE_UNIT}" 2>/dev/null || true)"
+if [[ -n "${system_load}" && "${system_load}" != "not-found" ]]; then
   if sudo -n systemctl restart "${ZAPPE_UNIT}"; then
     log "restarted system ${ZAPPE_UNIT}"
   else
-    log "sudo -n systemctl restart ${ZAPPE_UNIT} failed"
+    log "sudo -n systemctl restart ${ZAPPE_UNIT} failed (system unit ${system_load}; user unit not touched)"
   fi
-elif systemctl --user cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
+elif [[ -n "${user_load}" && "${user_load}" != "not-found" ]]; then
   if systemctl --user restart "${ZAPPE_UNIT}"; then
     log "restarted user ${ZAPPE_UNIT}"
   else
