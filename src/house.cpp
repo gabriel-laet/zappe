@@ -42,7 +42,7 @@ House::House(QObject *parent)
 {
     connect(m_xback, &XBackGrab::pressed, this, [this] {
         noteX11Key(166, int(Qt::Key_Back));
-        goHome();
+        goBack();
     });
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
@@ -514,7 +514,10 @@ void House::goBack()
         return;
     }
     if (m_ota->playing()) {
+        const QString channel = m_ota->playingChannel();
         stopPlayback();
+        if (m_guide)
+            m_guide->focusOtaChannel(channel);
         return;
     }
     if (m_player) {

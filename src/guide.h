@@ -162,6 +162,8 @@ public:
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
     Q_INVOKABLE void home();
+    // Card do canal que estava no ar. Não mexe no foco se o canal não está na grade.
+    bool focusOtaChannel(const QString &channel);
     Q_INVOKABLE void openTvTest();
     Q_INVOKABLE void toggleMenu();
     Q_INVOKABLE void adjustVolume(int delta);

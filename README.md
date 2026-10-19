@@ -174,7 +174,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar nunca encerra o app. Escape e Del voltam um nível: na home não fazem nada, numa tela interna fecham essa tela, no catálogo de um streaming voltam para a lista de apps. Home volta para a grade e deixa o foco no primeiro card, também no meio de uma fileira ou saindo do canal. No player do espelho, os dois fecham o Chrome e o guia volta para a frente, mesmo com o Chrome em foco. Na TV aberta, os dois fecham o mpv. A tecla Home do controle da sala é `KEY_BACK` (evdev 158, `XF86Back`). `KEY_HOMEPAGE` (172) e `KEY_HOME` (102) fazem o mesmo. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
+Voltar nunca encerra o app. `KEY_BACK` (evdev 158, `XF86Back`), Escape e Del voltam um nível: na home não fazem nada, numa tela interna fecham essa tela, no catálogo de um streaming voltam para a lista de apps. No canal ao vivo, Voltar fecha o mpv e devolve o foco ao card que estava no ar. Home (`KEY_HOMEPAGE` 172 e `KEY_HOME` 102) volta para a grade e deixa o foco no primeiro card, também no meio de uma fileira ou saindo do canal. No player do espelho, os dois fecham o Chrome e o guia volta para a frente, mesmo com o Chrome em foco. Para injetar o Voltar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
 
 ## Controle
 
@@ -186,7 +186,8 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Play / Pause | 164 | play/pause |
 | Setas | 103, 108, 105, 106 | foco |
 | OK | 28 | ativar |
-| Home | 158, 172, 102 | grade, foco no primeiro card |
+| Voltar | 158 | um passo; no canal, o card que estava no ar |
+| Home | 172, 102 | grade, foco no primeiro card |
 | Del / Escape | 14, 1 | voltar um nível |
 | Menu | 127 | menu |
 | Page Up / Down | 104, 109 | troca de fileira |
@@ -217,7 +218,7 @@ OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome
 
 Sem um frame gravado, o card é o monograma da rede ou, fora dessa lista, o nome do canal num degradê, não o desenho genérico das outras capas. Enquanto o mpv já está no ar, o app pede um `screenshot-to-file` pelo socket IPC (8 segundos depois da imagem, e de novo a cada 3 minutos). O JPEG fica em `~/.local/share/zappe/ota-frames/` e vale por 12 horas. Isso não abre outro sintonizador e não pausa o vídeo. Quando o card usa esse frame, o granulado e as manchas de cor saem de cima da foto. Na próxima vez que o guia mostra o canal, a capa é esse frame.
 
-Voltar no canal fecha o mpv e devolve o guia, mesmo com o mpv em foco. O app trata Back (evdev 158) e Escape (evdev 1) como sair do canal. Enquanto o canal está no ar, o app também captura no X o keycode 166 (`XF86Back`), então `xdotool key 166` fecha o mpv mesmo com ele em foco. O `input.conf` do mpv usa `BACK` e `GO_BACK` (o nome que o mpv dá a essa tecla; `XF86Back` ele ignora) e o keycode `0x21FF26`. Quando o processo termina, o guia volta para a frente.
+Voltar no canal fecha o mpv e devolve o guia no card que estava no ar, mesmo com o mpv em foco. O app trata Back (evdev 158) e Escape (evdev 1) como sair do canal. Enquanto o canal está no ar, o app também captura no X o keycode 166 (`XF86Back`), então `xdotool key 166` fecha o mpv mesmo com ele em foco. O `input.conf` do mpv usa `BACK` e `GO_BACK` (o nome que o mpv dá a essa tecla; `XF86Back` ele ignora) e o keycode `0x21FF26`. Quando o processo termina, o guia volta para a frente.
 
 O Chrome não é a interface de navegar. Ele fica atrás do guia, com o perfil já logado, e um adaptador por streaming (`data/mirrors.json`) lê as respostas JSON do serviço; o DOM só entra se a rede não trouxer títulos. O Qt desenha fileiras, capas, continuar assistindo, perfis e busca. A capa prefere a imagem que o Chrome já baixou e, em seguida, um GET direto do processo do app (user-agent de Chrome, `Accept` com JPEG na frente e `Referer` da home do serviço). URL com `{width}`, `{w}x{h}{c}.{f}` ou `%7Bwidth%7D` recebe um tamanho real antes do GET. WebP e AVIF viram JPEG pelo plugin do Qt ou pelo `ffmpeg`. O arquivo `.jpg` vira `file://` no card. O card visível ainda pode virar um recorte. O log é uma linha de artes e uma linha `capas N/M direto`. A ficha de um título do espelho mostra o nome, a capa e a sinopse quando o DOM tem uma; não inventa episódios nem avisa que o título está fora do catálogo local. Abrir um streaming não mostra as fileiras do catálogo local. Foco, scroll e troca de tela usam as durações de `qml/Motion.qml` (OutCubic, sem spring). Só o Play abre a URL de reprodução e traz o Chrome para a frente. Se o adaptador quebra e existe `~/.local/share/zappe/llm.json` com `url`, o app pede um reparo, valida nas amostras capturadas e versiona o resultado em `adapters/`. Sem essa URL, nada chama IA. Detalhe em [`docs/streaming-mirror.md`](docs/streaming-mirror.md).
 

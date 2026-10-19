@@ -622,6 +622,42 @@ void Guide::home()
         emit menuChanged();
 }
 
+bool Guide::focusOtaChannel(const QString &channel)
+{
+    const QString name = channel.trimmed();
+    if (name.isEmpty())
+        return false;
+    const QString href = QStringLiteral("zappe://ota/") + name;
+    int foundShelf = -1;
+    int foundIndex = -1;
+    for (int s = 0; s < shelfCount(); ++s) {
+        const ShelfData *shelf = m_shelves->shelfAt(s);
+        if (!shelf)
+            continue;
+        for (int i = 0; i < shelf->rows.size(); ++i) {
+            const RowData &row = shelf->rows.at(i);
+            if (row.href == href || (row.live && row.title == name)) {
+                foundShelf = s;
+                foundIndex = i;
+                break;
+            }
+        }
+        if (foundShelf >= 0)
+            break;
+    }
+    if (foundShelf < 0)
+        return false;
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    m_detailOpen = false;
+    m_menuOpen = false;
+    m_shelf = foundShelf;
+    m_index = foundIndex;
+    clampIndex();
+    publishFocus();
+    return true;
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))

@@ -24,10 +24,10 @@ RemoteAction actionForEvdev(int code)
         return RemoteAction::Right;
     case 28:
         return RemoteAction::Ok;
-    case 158:
     case 172:
     case 102:
         return RemoteAction::Home;
+    case 158:
     case 14:
     case 1:
         return RemoteAction::Back;
@@ -237,8 +237,10 @@ QString describeX11Key(int scan, int qtKey)
 
 QString actionNameForQt(int scan, int qtKey)
 {
-    if (scan == 166 || qtKey == Qt::Key_Back || qtKey == Qt::Key_Home || qtKey == Qt::Key_HomePage)
+    if (qtKey == Qt::Key_Home || qtKey == Qt::Key_HomePage)
         return QStringLiteral("home");
+    if (scan == 166 || qtKey == Qt::Key_Back)
+        return QStringLiteral("back");
     switch (qtKey) {
     case Qt::Key_Escape:
     case Qt::Key_Backspace:

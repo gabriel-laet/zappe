@@ -58,18 +58,20 @@ int runLogicSelfCheck()
     if (actionForEvdev(103) != RemoteAction::Up || actionForEvdev(108) != RemoteAction::Down
         || actionForEvdev(105) != RemoteAction::Left || actionForEvdev(106) != RemoteAction::Right)
         return fail("arrows");
-    if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Home
+    if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Back
         || actionForEvdev(172) != RemoteAction::Home || actionForEvdev(102) != RemoteAction::Home
         || actionForEvdev(14) != RemoteAction::Back || actionForEvdev(1) != RemoteAction::Back)
-        return fail("ok/home/del/escape");
+        return fail("158 is back, 172 and 102 are home");
     if (actionForEvdev(127) != RemoteAction::Menu || actionForEvdev(104) != RemoteAction::PageUp
         || actionForEvdev(109) != RemoteAction::PageDown)
         return fail("menu/page");
     if (actionForEvdev(115) != RemoteAction::VolumeUp || actionForEvdev(114) != RemoteAction::VolumeDown
         || actionForEvdev(113) != RemoteAction::Mute || actionForEvdev(582) != RemoteAction::Voice)
         return fail("volume/mic");
-    if (actionForEvdev(158) == RemoteAction::Back)
-        return fail("room home key focuses the guide");
+    if (actionForEvdev(158) == RemoteAction::Home || actionNameForQt(166, int(Qt::Key_Back)) != QLatin1String("back")
+        || actionNameForQt(0, int(Qt::Key_Home)) != QLatin1String("home")
+        || actionNameForQt(0, int(Qt::Key_HomePage)) != QLatin1String("home"))
+        return fail("back is not home");
     if (dialFromEvdev(2) != 1 || dialFromEvdev(11) != 0 || dialFromEvdev(79) != 1 || dialFromEvdev(82) != 0
         || dialFromEvdev(52) != 10 || dialFromEvdev(83) != 10 || dialFromEvdev(172) != -1
         || actionForEvdev(2) != RemoteAction::Unmapped)
@@ -1038,6 +1040,12 @@ int runLogicSelfCheck()
     if (homeGuide.page() != QLatin1String("home") || homeGuide.menuOpen() || homeGuide.shelf() != 0 || homeGuide.index() != 0
         || homeGuide.focusTitle() != QLatin1String("Canal 0"))
         return fail("home focuses the first card");
+    if (!homeGuide.focusOtaChannel(QStringLiteral("2")) || homeGuide.shelf() != 0 || homeGuide.index() != 2
+        || homeGuide.focusTitle() != QLatin1String("Canal 2"))
+        return fail("back from live restores the channel");
+    if (homeGuide.focusOtaChannel(QStringLiteral("ausente")) || homeGuide.index() != 2)
+        return fail("missing channel keeps focus");
+    homeGuide.home();
     homeGuide.move(0, 1);
     homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
     homeGuide.openTvTest();

@@ -46,10 +46,19 @@
       "keys": [{ "name": "KEY_ENTER", "code": 28 }]
     },
     {
+      "button": "Back",
+      "action": "back",
+      "note": "KEY_BACK 158 volta um passo e não fecha o app. No canal ao vivo, o foco volta para o card que estava no ar.",
+      "keys": [{ "name": "KEY_BACK", "code": 158 }]
+    },
+    {
       "button": "Home",
       "action": "home",
-      "note": "No controle da sala o Home sai como KEY_BACK 158. Volta para a grade e foca o primeiro card.",
-      "keys": [{ "name": "KEY_BACK", "code": 158 }]
+      "note": "KEY_HOMEPAGE 172 e KEY_HOME 102 voltam para a grade e focam o primeiro card.",
+      "keys": [
+        { "name": "KEY_HOMEPAGE", "code": 172 },
+        { "name": "KEY_HOME", "code": 102 }
+      ]
     },
     {
       "button": "Menu",
