@@ -88,17 +88,34 @@ bool mirrorUrlIsPlayback(const QString &url);
 QString mirrorRowService(const QString &service, const QString &href);
 // Leitura nova muito menor que a anterior: fica a página mais rica.
 bool mirrorKeepRicherPage(int previousTitles, int incomingTitles);
+// Ainda não há fileira: a tela segue em «Atualizando…», sem «Nada nesta página».
+bool mirrorHoldLoading(int previousTitles, int incomingTitles);
+// Hero de canal ao vivo não entra na fileira do guia. O href sozinho não descarta.
+bool mirrorLiveHero(const QString &title, const QString &href);
+// GIF 1×1 e pixel de rastreio não são capa.
+bool coverUrlIsPlaceholder(const QString &url);
+// YouTube não tem perfis. "Account menu" também não é um perfil.
+bool mirrorKeepsProfiles(const MirrorAdapter &adapter);
+bool mirrorProfileLabel(const QString &name);
+// Casa a capa no card pela URL sem query. changed fica true se algum path mudou.
+int assignCoverFile(QVector<ShelfData> &shelves, const QString &url, const QString &path, bool *changed = nullptr);
+// Apaga covers/*.img e JPEG sem uso há mais de 14 dias.
+int purgeStaleCovers(const QString &cacheDir, const QDateTime &now);
 QString mirrorCoverFetchScript(const QStringList &urls);
-QString mirrorCoverClipScript(const QStringList &urls);
+QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles = {});
 // Host + path, sem query. CDN assinado muda o token e mantém o arquivo.
 QString coverMatchKey(const QString &url);
 bool coverUrlsMatch(const QString &wanted, const QString &loaded);
+// Trecho longo e único do path. Casa a imagem que o Chrome baixou quando o GET direto erra.
+QString coverLooseToken(const QString &url);
 // Referer do serviço (https://www.netflix.com/...), não o host do CDN.
 QString coverDownloadReferer(const QString &homeUrl);
 // Troca {width}, {w}x{h}{c}.{f} e afins por um tamanho real. Idempotente.
 QString expandCoverUrl(const QString &url);
 // JPEG pronto para o card. detail descreve o corpo quando a conversão falha.
-QByteArray coverJpegFromBody(const QByteArray &body, QString *detail);
+// mime (Content-Type) acompanha o GET direto. AVIF cai no ffmpeg por arquivo
+// temporário: o pipe não busca o átomo e -f avif não é demuxer.
+QByteArray coverJpegFromBody(const QByteArray &body, QString *detail, const QString &mime = {});
 QString coverBodyLabel(const QByteArray &body);
 // TypeError de CORS/rede: repetir o fetch não traz a imagem.
 bool coverFetchIsBlocked(const QString &error);
@@ -112,6 +129,7 @@ bool mirrorPageUsable(const MirrorPage &page, int minTitles);
 QString coverCachePath(const QString &cacheDir, const QString &url);
 bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs);
 int mirrorCoverMaxAgeSecs();
+int mirrorCoverUnusedMaxAgeSecs();
 int mirrorRefreshMs();
 int mirrorLoadTimeoutMs();
 // Fileira de erro do espelho: OK dispara de novo em vez de abrir o detalhe.
@@ -125,6 +143,7 @@ struct CoverJob {
     QString url;
     QString path;
     QString referer;
+    QString title;
 };
 
 struct HeldImage {
@@ -181,6 +200,7 @@ private:
     void acceptPage(const MirrorPage &page);
     void beginRepair();
     void postLearn(const QByteArray &png);
+    void postLearnRequest(const QString &serviceId, const QByteArray &png, const QString &model, bool triedFallback);
     void finishEmpty();
     bool applyPage(const MirrorPage &page);
     void downloadNext();
@@ -199,13 +219,16 @@ private:
     void pumpDirectCovers();
     void logDirectCovers();
     void finishAccept();
-    void storeCover(const CoverJob &job, const QByteArray &body);
+    int storeCover(const CoverJob &job, const QByteArray &body);
+    int saveFromNetwork(const CoverJob &job);
+    void attachHeldCover(const QString &url, const QByteArray &body);
     void onFrame(const QString &url);
     void showLoading(const QString &serviceId);
     void showError(const QString &serviceId, const QString &detail);
     void armWatch(const QString &serviceId);
     void scheduleAttach();
     void schedulePump();
+    void noteCdpDown();
 
     Guide *m_guide = nullptr;
     ChromeSession *m_chrome = nullptr;
@@ -243,6 +266,7 @@ private:
     int m_lastDomTitles = -1;
     int m_job = 0;
     int m_attachTries = 0;
+    bool m_cdpGaveUp = false;
     qint64 m_busySince = 0;
     bool m_busy = false;
     bool m_player = false;
@@ -271,7 +295,11 @@ private:
     QVector<CoverJob> m_directJobs;
     int m_directActive = 0;
     int m_directSaved = 0;
+    int m_directCards = 0;
+    int m_directFromNet = 0;
     int m_directTotal = 0;
+    MirrorPage m_feedPage;
+    bool m_feedPending = false;
     QString m_directError;
     QString m_directFile;
 };

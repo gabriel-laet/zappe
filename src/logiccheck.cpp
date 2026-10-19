@@ -5,6 +5,8 @@
 #include "cdp.h"
 #include "chrome.h"
 #include "display.h"
+#include "epg.h"
+#include "guide.h"
 #include "house.h"
 #include "keymap.h"
 #include "learn.h"
@@ -17,9 +19,11 @@
 #include "util.h"
 #include "voice.h"
 
+#include <QDate>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QFileDevice>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -27,9 +31,11 @@
 #include <QJsonObject>
 #include <QBuffer>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 
 #include <cstdio>
+#include <cstring>
 
 namespace zappe {
 namespace {
@@ -56,16 +62,23 @@ int runLogicSelfCheck()
         || actionForEvdev(105) != RemoteAction::Left || actionForEvdev(106) != RemoteAction::Right)
         return fail("arrows");
     if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Back
+        || actionForEvdev(172) != RemoteAction::Home || actionForEvdev(102) != RemoteAction::Home
         || actionForEvdev(14) != RemoteAction::Back || actionForEvdev(1) != RemoteAction::Back)
-        return fail("ok/home/del/escape");
+        return fail("158 is back, 172 and 102 are home");
     if (actionForEvdev(127) != RemoteAction::Menu || actionForEvdev(104) != RemoteAction::PageUp
         || actionForEvdev(109) != RemoteAction::PageDown)
         return fail("menu/page");
     if (actionForEvdev(115) != RemoteAction::VolumeUp || actionForEvdev(114) != RemoteAction::VolumeDown
         || actionForEvdev(113) != RemoteAction::Mute || actionForEvdev(582) != RemoteAction::Voice)
         return fail("volume/mic");
-    if (actionForEvdev(172) != RemoteAction::Unmapped)
-        return fail("old homepage code is not home");
+    if (actionForEvdev(158) == RemoteAction::Home || actionNameForQt(166, int(Qt::Key_Back)) != QLatin1String("back")
+        || actionNameForQt(0, int(Qt::Key_Home)) != QLatin1String("home")
+        || actionNameForQt(0, int(Qt::Key_HomePage)) != QLatin1String("home"))
+        return fail("back is not home");
+    if (dialFromEvdev(2) != 1 || dialFromEvdev(11) != 0 || dialFromEvdev(79) != 1 || dialFromEvdev(82) != 0
+        || dialFromEvdev(52) != 10 || dialFromEvdev(83) != 10 || dialFromEvdev(172) != -1
+        || actionForEvdev(2) != RemoteAction::Unmapped)
+        return fail("number keys");
 
     QFile mapFile(QStringLiteral(":/zappe/data/atongx-map.json"));
     if (!mapFile.open(QIODevice::ReadOnly))
@@ -127,8 +140,82 @@ int runLogicSelfCheck()
                                         "[SBT HD]\nDELIVERY_SYSTEM = ISDBT\n[Band 1-seg]\nDELIVERY_SYSTEM = ISDBT\n");
     const QStringList names = parseChannelNames(conf);
     const QStringList playable = filterAndSortChannels(names);
-    if (playable.contains(QStringLiteral("Globo 1Seg")) || playable.contains(QStringLiteral("Band 1-seg")))
-        return fail("1seg filtered");
+    if (playable.contains(QStringLiteral("Globo 1Seg")))
+        return fail("1seg filtered when the fullseg exists");
+    if (!playable.contains(QStringLiteral("Band 1-seg")))
+        return fail("lone band 1seg stays");
+    if (resolveChannelName(QStringLiteral("Band"), names) != QLatin1String("Band 1-seg"))
+        return fail("band resolves to the only service");
+    const QVector<OtaService> scanned = parseOtaServices(conf);
+    const QString bandGap = fullsegGapReason(scanned, QStringLiteral("band"));
+    if (!bandGap.contains(QStringLiteral("1-seg")) || !bandGap.contains(QStringLiteral("fullseg")))
+        return fail("band 1seg reason");
+    const QString noBand = fullsegGapReason(parseOtaServices(QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n")),
+                                            QStringLiteral("band"));
+    if (!noBand.contains(QStringLiteral("não gravou")) || !noBand.contains(QStringLiteral("13"))
+        || !noBand.contains(QStringLiteral("23")) || bandPhysicalChannel() != 23 || bandFrequencyHz() != 527142857)
+        return fail("band missing from scan");
+    if (!bandScanSeed().contains(QStringLiteral("527142857")) || !bandScanSeed().contains(QStringLiteral("6000000"))
+        || !bandScanSeed().contains(QStringLiteral("ISDBT")))
+        return fail("band scan seed");
+    const QString fullSeed = bandFullScanSeed();
+    if (!fullSeed.contains(QStringLiteral("473142857")) || !fullSeed.contains(QStringLiteral("527142857"))
+        || !fullSeed.contains(QStringLiteral("[UHF 51]")) || !bandFullRescanPrompt().contains(QStringLiteral("faixa")))
+        return fail("band full scan");
+    const QStringList scanArgs = bandScanArguments(QStringLiteral("/tmp/band-initial.conf"), QStringLiteral("/tmp/band-scan.conf"));
+    if (!scanArgs.contains(QStringLiteral("dvbv5-scan")) && scanArgs.first() != QLatin1String("-a"))
+        return fail("band scan args");
+    if (scanArgs.join(QLatin1Char(' ')) != QLatin1String("-a 0 -o /tmp/band-scan.conf /tmp/band-initial.conf"))
+        return fail("band scan args");
+    if (bandRescanPrompt(QStringLiteral("13")).isEmpty() || bandRescanPrompt(QStringLiteral("13.1")).isEmpty()
+        || !bandRescanPrompt(QStringLiteral("7.1")).isEmpty() || !bandRescanPrompt(QStringLiteral("13.2")).isEmpty())
+        return fail("band rescan offer");
+    const QString merged = mergeChannelConfig(QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n"),
+                                              QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n[Band HD]\n"
+                                                             "DELIVERY_SYSTEM = ISDBT\nFREQUENCY = 527142857\n"));
+    if (!merged.contains(QStringLiteral("[Band HD]")) || merged.count(QStringLiteral("[Globo HD]")) != 1)
+        return fail("merge band scan");
+    const QString layerOnly = QStringLiteral("[BAND]\nISDBT_LAYER_ENABLED = 1\nDELIVERY_SYSTEM = ISDBT\n"
+                                             "[Globo HD]\nISDBT_LAYER_ENABLED = 7\n[Globo 1Seg]\nISDBT_LAYER_ENABLED = 1\n");
+    const QVector<OtaService> layered = parseOtaServices(layerOnly);
+    const QStringList layerPlayable = playableNames(layered);
+    if (!layerPlayable.contains(QStringLiteral("BAND")) || layerPlayable.contains(QStringLiteral("Globo 1Seg"))
+        || !layerPlayable.contains(QStringLiteral("Globo HD")))
+        return fail("layer A band kept, globo 1seg dropped");
+    if (!fullsegGapReason(layered, QStringLiteral("band")).contains(QStringLiteral("camada A")))
+        return fail("layer A reason");
+    const QString both = QStringLiteral("[Band HD]\nISDBT_LAYER_ENABLED = 7\n[Band 1-seg]\nISDBT_LAYER_ENABLED = 1\n");
+    if (playableNames(parseOtaServices(both)).contains(QStringLiteral("Band 1-seg"))
+        || !fullsegGapReason(parseOtaServices(both), QStringLiteral("band")).isEmpty())
+        return fail("band fullseg wins");
+    const QString numbered = QStringLiteral("[Globo HD]\nLOGICAL_CHANNEL_NUMBER = 5.1\n[Record HD]\n"
+                                            "[Band 1-seg]\n[SBT HD]\n[Cultura]\n[RedeTV!]\n"
+                                            "[Record News]\nLOGICAL_CHANNEL_NUMBER = 8.1\n");
+    const QVector<OtaChannel> dialChannels = otaChannelsFromConf(numbered);
+    if (resolveDialTarget(QStringLiteral("13"), dialChannels) != QLatin1String("Band 1-seg"))
+        return fail("dial 13 band");
+    if (resolveDialTarget(QStringLiteral("7.1"), dialChannels) != QLatin1String("Record HD"))
+        return fail("dial 7.1 record");
+    if (resolveDialTarget(QStringLiteral("5.1"), dialChannels) != QLatin1String("Globo HD"))
+        return fail("dial 5.1 globo");
+    if (resolveDialTarget(QStringLiteral("8.1"), dialChannels) != QLatin1String("Record News"))
+        return fail("file number wins");
+    if (!resolveDialTarget(QStringLiteral("7.1"),
+                           otaChannelsFromConf(QStringLiteral("[Record HD]\nLOGICAL_CHANNEL_NUMBER = 8.1\n")))
+             .isEmpty())
+        return fail("default does not override the file");
+    if (appendDialText(QString(), QStringLiteral("1")) != QLatin1String("1")
+        || appendDialText(QStringLiteral("1"), QStringLiteral("3")) != QLatin1String("13")
+        || appendDialText(QStringLiteral("13"), QStringLiteral(".")) != QLatin1String("13.")
+        || appendDialText(QStringLiteral("13."), QStringLiteral("1")) != QLatin1String("13.1")
+        || appendDialText(QStringLiteral("13.1"), QStringLiteral("2")) != QLatin1String("13.1"))
+        return fail("dial text");
+    if (dialCommitMs() < 1000 || otaFocusRefreshMs() < 400)
+        return fail("dial and focus timing");
+    if (planFrameRefresh(true, QStringLiteral("Globo HD"), QStringLiteral("Globo HD")) != FrameRefresh::Screenshot
+        || planFrameRefresh(true, QStringLiteral("Globo HD"), QStringLiteral("Band 1-seg")) != FrameRefresh::Busy
+        || planFrameRefresh(false, QString(), QStringLiteral("Band 1-seg")) != FrameRefresh::Preview)
+        return fail("frame refresh plan");
     if (resolveChannelName(QStringLiteral("Globo"), names) != QLatin1String("Globo HD"))
         return fail("globo hd");
     if (resolveChannelName(QStringLiteral("Record"), names) != QLatin1String("Record HD"))
@@ -136,6 +223,71 @@ int runLogicSelfCheck()
     if (resolveChannelName(QStringLiteral("SBT"), names) != QLatin1String("SBT HD"))
         return fail("sbt hd");
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
+    const QString preview = otaPreviewScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Band 1-seg"),
+                                             QStringLiteral("/tmp/preview.ts"), QStringLiteral("/tmp/preview.jpg"));
+    if (!preview.contains(QStringLiteral("dvbv5-zap")) || !preview.contains(QStringLiteral("-P"))
+        || !preview.contains(QStringLiteral("-t 8")) || !preview.contains(QStringLiteral("ffmpeg"))
+        || preview.contains(QStringLiteral("mpv")) || preview.contains(QStringLiteral("--fs")))
+        return fail("ota preview stays off the player");
+    const QByteArray isdbEit = wrapTsSection(buildEitSection(0x4E, 0, 30, QStringLiteral("Jornal")), 0x27);
+    if (parseEpgFromTs(isdbEit).nowTitle != QStringLiteral("Jornal"))
+        return fail("isdb eit pid");
+    const QByteArray present = buildEitSection(0x4E, 0, 30, QStringLiteral("Jornal da Band"));
+    const QByteArray following = buildEitSection(0x4E, 1, 30, QStringLiteral("Sessão"));
+    const QByteArray schedule = buildEitSection(0x50, 0, 30, QStringLiteral("Programa da tarde"));
+    const QByteArray sdt = buildSdtSection(30, QStringLiteral("Band"));
+    QByteArray ts = wrapTsSection(present, 0x12);
+    ts.append(wrapTsSection(following, 0x12));
+    ts.append(wrapTsSection(schedule, 0x12));
+    ts.append(wrapTsSection(sdt, 0x11));
+    ts.append(QByteArray(188, '\0'));
+    if (ts.size() % 188 != 0)
+        return fail("ts alignment");
+    const EpgSnapshot epg = parseEpgFromTs(ts);
+    if (epg.nowTitle != QStringLiteral("Jornal da Band") || epg.nextTitle != QStringLiteral("Sessão"))
+        return fail("eit now next");
+    if (epg.serviceName != QLatin1String("Band"))
+        return fail("sdt name");
+    if (epgGuideLine(epg.nowTitle, epg.nextTitle) != QStringLiteral("Agora: Jornal da Band · A seguir: Sessão"))
+        return fail("epg line");
+    if (epg.packets < 4 || !epg.pids.contains(QStringLiteral("0x12:")) || !epg.tables.contains(QStringLiteral("0x4e:")))
+        return fail("epg trace");
+    QString longTitle = QStringLiteral("Jornal da Noite");
+    longTitle += QString(180, QLatin1Char('A'));
+    const QByteArray spanning = buildEitSection(0x4E, 0, 30, longTitle);
+    const QByteArray after = buildEitSection(0x4E, 1, 30, QStringLiteral("Sessao"));
+    if (spanning.size() <= 184)
+        return fail("spanning section is short");
+    const int head = 183;
+    const int tail = spanning.size() - head;
+    QByteArray split;
+    QByteArray first(188, char(0xFF));
+    first[0] = 0x47;
+    first[1] = char(0x40);
+    first[2] = 0x12;
+    first[3] = 0x10;
+    first[4] = 0;
+    memcpy(first.data() + 5, spanning.constData(), size_t(head));
+    QByteArray second(188, char(0xFF));
+    second[0] = 0x47;
+    second[1] = char(0x40);
+    second[2] = 0x12;
+    second[3] = 0x11;
+    second[4] = char(tail);
+    memcpy(second.data() + 5, spanning.constData() + head, size_t(tail));
+    const int room = 188 - 5 - tail;
+    if (after.size() > room)
+        return fail("following does not fit");
+    memcpy(second.data() + 5 + tail, after.constData(), size_t(after.size()));
+    split.append(first);
+    split.append(second);
+    const EpgSnapshot spanned = parseEpgFromTs(split);
+    if (spanned.nowTitle != longTitle || spanned.nextTitle != QLatin1String("Sessao"))
+        return fail("eit pointer field");
+    if (!spanned.tables.contains(QStringLiteral("0x4e:")))
+        return fail("eit pointer tables");
+    if (parseEitSection(schedule).nowTitle != QLatin1String("Programa da tarde"))
+        return fail("schedule fallback");
     if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
         || !script.contains(QStringLiteral("ESC quit")) || !script.contains(QStringLiteral("BACK quit"))
         || !script.contains(QStringLiteral("GO_BACK quit")) || !script.contains(QStringLiteral("0x21FF26 quit"))
@@ -177,6 +329,45 @@ int runLogicSelfCheck()
         return fail("channel card");
     if (cardImage.pixel(80, 80) == posterImage.pixel(80, 80) && cardImage.pixel(480, 270) == posterImage.pixel(480, 270))
         return fail("channel card matches the generic poster");
+    const ArtPaths globoLogo = makeNetworkLogo(artDir, QStringLiteral("Globo HD"));
+    const ArtPaths globoAgain = makeNetworkLogo(artDir, QStringLiteral("Globo"));
+    const QImage globoImage(globoLogo.artwork);
+    const QColor globoPx(globoImage.pixel(24, 24));
+    if (globoLogo.artwork.isEmpty() || globoLogo.artwork != globoAgain.artwork || globoImage.size() != QSize(960, 540)
+        || globoPx.blue() < globoPx.red() || globoPx.blue() < 100)
+        return fail("globo logo");
+    if (!makeNetworkLogo(artDir, QStringLiteral("Canal Comunitário")).artwork.isEmpty())
+        return fail("unknown network has no logo");
+    const ArtPaths fallback = liveChannelArt(artDir, QStringLiteral("Canal Comunitário"));
+    const ArtPaths plain = makeChannelCard(artDir, QStringLiteral("Canal Comunitário"));
+    if (fallback.artwork.isEmpty() || fallback.artwork != plain.artwork)
+        return fail("logo fallback is the name card");
+    const ArtPaths bandLogo = makeNetworkLogo(artDir, QStringLiteral("Band"));
+    const QColor bandPx(QImage(bandLogo.artwork).pixel(24, 24));
+    if (bandLogo.artwork.isEmpty() || bandLogo.artwork == globoLogo.artwork || bandPx.red() < bandPx.blue())
+        return fail("band logo");
+    const ArtPaths sbtByNumber = liveChannelArt(artDir, QStringLiteral("SISTEMA BRASILEIRO DE TELEVISAO"), artDir,
+                                                QStringLiteral("4.1"));
+    if (!sbtByNumber.mark || sbtByNumber.artwork.isEmpty()
+        || networkMarkFor(QStringLiteral("NGT"), QStringLiteral("3.1")) != QLatin1String("ngt")
+        || networkMarkFor(QStringLiteral("TV Gazeta"), QString()) != QLatin1String("gazeta")
+        || networkMarkFor(QStringLiteral("Novo Tempo"), QString()) != QLatin1String("novotempo"))
+        return fail("virtual number logo");
+    const ArtPaths ngtCard = liveChannelArt(artDir, QStringLiteral("NGT"), artDir, QStringLiteral("3.1"));
+    if (!ngtCard.mark || !QFile::exists(QDir(artDir).filePath(QStringLiteral("logos/ngt.png"))))
+        return fail("ngt logo file");
+    const QString logoDir = QDir(artDir).filePath(QStringLiteral("logos"));
+    QDir().mkpath(logoDir);
+    QImage fileLogo(80, 40, QImage::Format_RGB32);
+    fileLogo.fill(Qt::white);
+    const QString logoFile = QDir(logoDir).filePath(QStringLiteral("globo.png"));
+    if (!fileLogo.save(logoFile, "PNG"))
+        return fail("save network logo");
+    const ArtPaths fromFile = liveChannelArt(artDir, QStringLiteral("TV GLOBO SAO PAULO"), artDir, QStringLiteral("5.1"));
+    const QImage painted(fromFile.artwork);
+    const QColor mid(painted.pixel(480, 270));
+    if (!fromFile.mark || painted.isNull() || mid.red() < 200 || mid.green() < 200)
+        return fail("logo file composed");
 
     if (parseVoicePtBr(QStringLiteral("abrir Netflix")).service != QLatin1String("netflix"))
         return fail("voice netflix");
@@ -191,6 +382,119 @@ int runLogicSelfCheck()
         return fail("voice globoplay");
     if (parseVoicePtBr(QStringLiteral("sincronizar")).ok() || parseVoicePtBr(QStringLiteral("conectar")).ok())
         return fail("harvest and companion phrases are gone");
+    if (whisperAudioCtx(0) != 256 || whisperAudioCtx(1000) != 256 || whisperAudioCtx(-5) != 256)
+        return fail("audio ctx short");
+    if (whisperAudioCtx(5000) != 314)
+        return fail("audio ctx 5s");
+    if (whisperAudioCtx(20000) != 1064)
+        return fail("audio ctx 20s");
+    if (whisperAudioCtx(28720) != 1500 || whisperAudioCtx(40000) != 1500)
+        return fail("audio ctx cap");
+    {
+        constexpr int rate = 16000;
+        const int lead = rate / 2;
+        const int speech = rate / 5;
+        const int tail = rate;
+        QVector<qint16> pcm(lead + speech + tail, 0);
+        for (int i = 0; i < speech; ++i)
+            pcm[lead + i] = (i % 2) ? 8000 : -8000;
+        const SilenceTrim trim = trimSilencePcm(pcm.constData(), pcm.size(), rate);
+        const int end = trim.startSample + trim.sampleCount;
+        const int pad = rate / 10;
+        if (trim.startSample < lead - pad || trim.startSample > lead)
+            return fail("vad start");
+        if (end < lead + speech || end > lead + speech + pad)
+            return fail("vad end");
+        QVector<qint16> quiet(rate, 0);
+        const SilenceTrim all = trimSilencePcm(quiet.constData(), quiet.size(), rate);
+        if (all.startSample != 0 || all.sampleCount != quiet.size())
+            return fail("vad silence");
+    }
+    if (voiceEditDistance(QStringLiteral("almento"), QStringLiteral("aumenta")) != 2)
+        return fail("edit almento");
+    if (fuzzyCorrectVoice(QStringLiteral("Almento")) != QLatin1String("aumenta")
+        || fuzzyCorrectVoice(QStringLiteral("almento")) != QLatin1String("aumenta"))
+        return fail("fuzzy almento");
+    if (fuzzyCorrectVoice(fuzzyCorrectVoice(QStringLiteral("Almento"))) != QLatin1String("aumenta"))
+        return fail("fuzzy idempotent");
+    const VoiceIntent almento = parseVoicePtBr(QStringLiteral("Almento o volume"));
+    if (almento.kind != VoiceKind::Volume || almento.delta != 1)
+        return fail("fuzzy volume");
+    if (fuzzyCorrectVoice(QStringLiteral("mudo sbt hbo max som vai ir")) != QLatin1String("mudo sbt hbo max som vai ir"))
+        return fail("fuzzy short");
+    if (fuzzyCorrectVoice(QStringLiteral("buscar dark na netflix")) != QLatin1String("buscar dark na netflix"))
+        return fail("fuzzy dark");
+    const auto flag = [](const QStringList &args, const char *name) {
+        const int index = args.indexOf(QLatin1String(name));
+        if (index < 0 || index + 1 >= args.size())
+            return QString();
+        return args.at(index + 1);
+    };
+    const QStringList cli = whisperCliArgs(QStringLiteral("m.bin"), QStringLiteral("a.wav"), 314);
+    if (flag(cli, "-ac") != QLatin1String("314") || flag(cli, "-bs") != QLatin1String("1")
+        || flag(cli, "-bo") != QLatin1String("1") || flag(cli, "-t") != QLatin1String("4")
+        || flag(cli, "-l") != QLatin1String("pt") || !cli.contains(QStringLiteral("-nt"))
+        || !cli.contains(QStringLiteral("--prompt")))
+        return fail("cli flags");
+    const QStringList serverArgs = whisperServerArgs(QStringLiteral("m.bin"), 8178);
+    if (!serverArgs.contains(QStringLiteral("--convert")) || serverArgs.contains(QStringLiteral("-ng"))
+        || flag(serverArgs, "-l") != QLatin1String("pt") || !serverArgs.contains(QStringLiteral("-nt"))
+        || flag(serverArgs, "-t") != QLatin1String("4") || flag(serverArgs, "-bs") != QLatin1String("1")
+        || flag(serverArgs, "-bo") != QLatin1String("1") || flag(serverArgs, "--host") != QLatin1String("127.0.0.1")
+        || flag(serverArgs, "--port") != QLatin1String("8178"))
+        return fail("server flags");
+    QProcessEnvironment gamescope;
+    gamescope.insert(QStringLiteral("ENABLE_GAMESCOPE_WSI"), QStringLiteral("1"));
+    gamescope.insert(QStringLiteral("HOME"), QStringLiteral("/tmp/zappe"));
+    const QProcessEnvironment whisperEnv = whisperChildEnvironment(gamescope);
+    if (whisperEnv.value(QStringLiteral("ENABLE_GAMESCOPE_WSI")) != QLatin1String("0")
+        || whisperEnv.value(QStringLiteral("HOME")) != QLatin1String("/tmp/zappe"))
+        return fail("whisper gamescope wsi");
+    {
+        QTemporaryDir voiceDir;
+        if (!voiceDir.isValid())
+            return fail("whisper dir");
+        const QString root = QDir(voiceDir.path()).filePath(QStringLiteral("whisper"));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("models")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("bin")));
+        const QString q8 = QDir(root).filePath(QStringLiteral("models/ggml-small-q8_0.bin"));
+        const QString f16 = QDir(root).filePath(QStringLiteral("models/ggml-small.bin"));
+        const QString custom = QDir(root).filePath(QStringLiteral("models/ggml-tiny.bin"));
+        const QString server = QDir(root).filePath(QStringLiteral("bin/whisper-server"));
+        const auto touch = [](const QString &path) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly))
+                return false;
+            file.write("x");
+            return true;
+        };
+        if (!touch(q8) || !touch(f16) || !touch(custom) || !touch(server))
+            return fail("whisper files");
+        if (!QFile::setPermissions(server, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner))
+            return fail("whisper server mode");
+        qputenv("ZAPPE_WHISPER_MODEL", f16.toUtf8());
+        qputenv("ZAPPE_WHISPER_BIN", "/tmp/zappe-not-the-server/whisper-cli");
+        qunsetenv("ZAPPE_WHISPER_SERVER");
+        qunsetenv("ZAPPE_WHISPER_DIR");
+        const WhisperLayout pinned = whisperLayout(voiceDir.path());
+        qputenv("ZAPPE_WHISPER_MODEL", "ggml-small.bin");
+        const WhisperLayout named = whisperLayout(voiceDir.path());
+        qputenv("ZAPPE_WHISPER_MODEL", custom.toUtf8());
+        const WhisperLayout honored = whisperLayout(voiceDir.path());
+        qunsetenv("ZAPPE_WHISPER_MODEL");
+        qunsetenv("ZAPPE_WHISPER_BIN");
+        if (pinned.model != q8 || named.model != q8)
+            return fail("q8 over f16");
+        if (pinned.serverDisabled || pinned.serverBin != server)
+            return fail("resident server");
+        if (pinned.serverBin.contains(QStringLiteral("whisper-cli")))
+            return fail("bin replaced server");
+        if (honored.model != custom)
+            return fail("explicit model");
+    }
+    const QByteArray wav = wavFromPcm(QByteArray(8, '\x01'), 16000);
+    if (wav.size() != 52 || !wav.startsWith("RIFF") || wav.mid(8, 4) != QByteArray("WAVE"))
+        return fail("wav header");
 
     const HdmiAudio audio = defaultHdmiAudio();
     const QStringList audioArgs = pactlProfileArgs(audio);
@@ -225,6 +529,44 @@ int runLogicSelfCheck()
     const QString ws = samsungWebsocketUrl(samsung, false);
     if (!ws.startsWith(QStringLiteral("ws://192.168.3.6:8001/")) || !ws.contains(QStringLiteral("name=")))
         return fail("samsung url");
+    const QString wss = samsungWebsocketUrl(samsung, true);
+    if (!wss.startsWith(QStringLiteral("wss://192.168.3.6:8002/")) || !wss.contains(QStringLiteral("name=WmFwcGU="))
+        || wss.contains(QStringLiteral("token=")))
+        return fail("samsung secure url");
+    SamsungConfig withToken = samsung;
+    withToken.token = QStringLiteral("tok-test");
+    if (!samsungWebsocketUrl(withToken, true).contains(QStringLiteral("token=tok-test")))
+        return fail("samsung token query");
+    const QByteArray connectMsg = QByteArrayLiteral("{\"event\":\"ms.channel.connect\",\"data\":{\"token\":\"tok-test\"}}");
+    if (samsungConnectToken(connectMsg) != QLatin1String("tok-test"))
+        return fail("samsung token extract");
+    if (!samsungAuthDenied(QByteArrayLiteral("{\"event\":\"ms.channel.unauthorized\"}"))
+        || !samsungAuthDenied(QByteArrayLiteral("{\"event\":\"ms.channel.timeOut\"}"))
+        || samsungAuthDenied(connectMsg))
+        return fail("samsung unauthorized");
+    if (!samsungShouldHoldPairing(true, false, true) || samsungShouldHoldPairing(true, true, true)
+        || samsungShouldHoldPairing(false, false, true))
+        return fail("samsung hold");
+    if (!samsungRetryWithoutToken(true, true, false, true) || samsungRetryWithoutToken(true, true, true, true)
+        || !samsungUpgradeToSecure(false, true) || samsungUpgradeToSecure(true, true))
+        return fail("samsung retry");
+    if (samsungPairingWaitMs() < 45000)
+        return fail("samsung wait");
+    const QString pairDir = dir.filePath(QStringLiteral("pair"));
+    QDir().mkpath(pairDir);
+    QFile macFile(pairDir + QStringLiteral("/samsung.json"));
+    if (!macFile.open(QIODevice::WriteOnly) || macFile.write(QByteArrayLiteral("{\"mac\":\"02:11:22:33:44:55\"}")) < 0)
+        return fail("samsung seed");
+    macFile.close();
+    if (!saveSamsungToken(pairDir, QStringLiteral("192.168.3.6"), QStringLiteral("Zappe"), QStringLiteral("tok-test")))
+        return fail("samsung save");
+    const SamsungConfig paired = loadSamsungConfig(pairDir);
+    if (paired.token != QLatin1String("tok-test") || paired.mac != QLatin1String("02:11:22:33:44:55"))
+        return fail("samsung token roundtrip");
+    const QFileDevice::Permissions perms = QFile::permissions(pairDir + QStringLiteral("/samsung.json"));
+    if (perms & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                 | QFileDevice::WriteOther | QFileDevice::ExeOther))
+        return fail("samsung token mode");
     if (parsePowerState(QStringLiteral("on")) != TvPower::On
         || parsePowerState(QStringLiteral("STANDBY")) != TvPower::Standby
         || parsePowerState(QStringLiteral("ready")) != TvPower::Standby
@@ -240,6 +582,38 @@ int runLogicSelfCheck()
     if (parseUpnpVolume(QByteArrayLiteral("<CurrentVolume>17</CurrentVolume>")) != 17
         || parseUpnpVolume(QByteArrayLiteral("<u>nope</u>")) != -1)
         return fail("upnp volume");
+    if (samsungKeyWaitMs() < 5000 || samsungTimeoutMessage(true) == samsungTimeoutMessage(false)
+        || samsungTimeoutMessage(true).contains(QStringLiteral("aceite"))
+        || !samsungTimeoutMessage(false).contains(QStringLiteral("aceite")))
+        return fail("samsung key wait");
+    if (parseUpnpMute(QByteArrayLiteral("<CurrentMute>1</CurrentMute>")) != 1
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>0</CurrentMute>")) != 0
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>true</CurrentMute>")) != 1
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>false</CurrentMute>")) != 0
+        || parseUpnpMute(QByteArrayLiteral("<u>nope</u>")) != -1)
+        return fail("upnp mute");
+    if (!clearSamsungToken(pairDir))
+        return fail("samsung clear");
+    const SamsungConfig cleared = loadSamsungConfig(pairDir);
+    QFile clearedFile(pairDir + QStringLiteral("/samsung.json"));
+    if (!clearedFile.open(QIODevice::ReadOnly))
+        return fail("samsung clear read");
+    const QByteArray clearedBody = clearedFile.readAll();
+    clearedFile.close();
+    if (!cleared.token.isEmpty() || cleared.host != QLatin1String("192.168.3.6")
+        || cleared.mac != QLatin1String("02:11:22:33:44:55") || clearedBody.contains("tok-test"))
+        return fail("samsung clear kept");
+    const QFileDevice::Permissions clearedPerms = QFile::permissions(pairDir + QStringLiteral("/samsung.json"));
+    if (clearedPerms & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                        | QFileDevice::WriteOther | QFileDevice::ExeOther))
+        return fail("samsung clear mode");
+    const QString trace = tvTraceLine(QStringLiteral("evdev 14 KEY_BACKSPACE"), QStringLiteral("back"), QString(), QString());
+    if (trace != QStringLiteral("evdev 14 KEY_BACKSPACE -> back -> — -> —")
+        || tvTraceLine(QString(), QString(), QString(), QString()) != QStringLiteral("— -> — -> — -> —"))
+        return fail("tv trace line");
+    if (describeEvdevKey(158) != QLatin1String("KEY_BACK") || describeEvdevKey(14) != QLatin1String("KEY_BACKSPACE")
+        || describeX11Key(166, 0) != QLatin1String("XF86Back"))
+        return fail("tv key names");
     quint8 mac[6] = {};
     if (!parseMac(QStringLiteral("02:11:22:33:44:55"), mac) || mac[0] != 0x02 || mac[5] != 0x55)
         return fail("mac");
@@ -315,6 +689,22 @@ int runLogicSelfCheck()
         || chromeCatalogDisplay(QStringLiteral(":99")) != QLatin1String(":98")
         || x11SocketPath(QStringLiteral(":99")) != QLatin1String("/tmp/.X11-unix/X99"))
         return fail("catalog display");
+    if (chromeWatchBackoffMs(0) != 1000 || chromeWatchBackoffMs(1) != 2000 || chromeWatchBackoffMs(2) != 4000
+        || chromeWatchBackoffMs(4) != 16000 || chromeWatchBackoffMs(5) != 30000 || chromeWatchBackoffMs(12) != 30000)
+        return fail("chrome watch backoff");
+    if (chromeExitCause(0, int(QProcess::NormalExit)) != QLatin1String("code 0")
+        || chromeExitCause(9, int(QProcess::CrashExit)) != QLatin1String("signal 9")
+        || chromeExitCause(1, int(QProcess::NormalExit)) != QLatin1String("code 1"))
+        return fail("chrome exit cause");
+    if (!chromeCatalogDown(true, ChromeFace::Hidden, false, false)
+        || !chromeCatalogDown(true, ChromeFace::Hidden, true, false)
+        || chromeCatalogDown(true, ChromeFace::Hidden, true, true)
+        || chromeCatalogDown(true, ChromeFace::Player, false, false)
+        || chromeCatalogDown(false, ChromeFace::Hidden, false, false))
+        return fail("chrome catalog down");
+    if (!chromeDisplayDown(true, false, false, false) || !chromeDisplayDown(true, true, true, false)
+        || chromeDisplayDown(true, true, false, false) || chromeDisplayDown(false, false, true, false))
+        return fail("chrome display down");
     QProcessEnvironment guideEnv;
     guideEnv.insert(QStringLiteral("DISPLAY"), QStringLiteral(":1"));
     guideEnv.insert(QStringLiteral("WAYLAND_DISPLAY"), QStringLiteral("wayland-0"));
@@ -410,7 +800,12 @@ int runLogicSelfCheck()
         || youtube->extraUrls.isEmpty() || !youtube->extraUrls.at(0).contains(QStringLiteral("/feed/history")))
         return fail("youtube home");
     if (!netflixScript.contains(QStringLiteral("data-src")) || !netflixScript.contains(QStringLiteral("srcset"))
-        || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis")))
+        || !netflixScript.contains(QStringLiteral("backgroundImage")) || !netflixScript.contains(QStringLiteral("synopsis"))
+        || !netflixScript.contains(QStringLiteral("indexOf('//') === 0"))
+        || !netflixScript.contains(QStringLiteral("parentElement"))
+        || !netflixScript.contains(QStringLiteral("shadowRoot"))
+        || !netflixScript.contains(QStringLiteral("1x1"))
+        || !netflixScript.contains(QStringLiteral("cfg.profile")))
         return fail("cover art extract");
     if (netflixScript.indexOf(QStringLiteral("el.currentSrc")) < 0
         || netflixScript.indexOf(QStringLiteral("el.currentSrc")) > netflixScript.indexOf(QStringLiteral("srcset")))
@@ -422,8 +817,47 @@ int runLogicSelfCheck()
     if (!coverFetchIsBlocked(QStringLiteral("Failed to fetch")) || coverFetchIsBlocked(QStringLiteral("http 404")))
         return fail("cover fetch stops on cors");
     if (!coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg?r=1"), QStringLiteral("https://cdn.example/a/box.jpg?r=2"))
-        || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg")))
+        || coverUrlsMatch(QStringLiteral("https://cdn.example/a/box.jpg"), QStringLiteral("https://cdn.example/b/other.jpg"))
+        || coverUrlsMatch(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg"),
+                          QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/bb/source/640x360bb.jpg"))
+        || coverUrlsMatch(QStringLiteral("https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"),
+                          QStringLiteral("https://i.ytimg.com/vi/zzzzzzzzzzz/hqdefault.jpg"))
+        || !coverUrlsMatch(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg?a=1"),
+                           QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/aa/source/640x360bb.jpg?a=2")))
         return fail("cover url match");
+    const QString amazonToken = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc123def4567890xyz.jpg"));
+    const QString amazonSized = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/abc123def4567890xyz._SX640_.jpg"));
+    const QString amazonOther = coverLooseToken(
+        QStringLiteral("https://m.media-amazon.com/images/S/pv-target-images/zzz9876543210abcdef.jpg"));
+    const QString hboToken = coverLooseToken(QStringLiteral(
+        "https://images.cdn.prd.api.discomax.com/2024/01/aa11bb22cc33dd44ee55ff6677889900.jpeg"));
+    if (amazonToken.size() < 16 || amazonToken != amazonSized || amazonToken == amazonOther || hboToken.size() < 16
+        || !coverLooseToken(QStringLiteral("https://i.ytimg.com/vi/abcdefghijk/maxresdefault.jpg")).isEmpty())
+        return fail("cover token");
+    const QString queryA = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?r=1"));
+    const QString queryB = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/box.jpg?token=2"));
+    const QString otherArt = coverCachePath(dir.path(), QStringLiteral("https://cdn.example/a/other.jpg"));
+    if (queryA != queryB || queryA == otherArt)
+        return fail("cover cache key ignores query");
+    QVector<ShelfData> linkedShelves(1);
+    RowData linkedRow;
+    linkedRow.title = QStringLiteral("Dark");
+    linkedRow.artworkSpec = QStringLiteral("https://cdn.example/a/box.jpg?r=1");
+    linkedShelves[0].rows.append(linkedRow);
+    const QString linkedPath = dir.filePath(QStringLiteral("covers/box.jpg"));
+    QDir().mkpath(QFileInfo(linkedPath).absolutePath());
+    QFile linkedFile(linkedPath);
+    if (!linkedFile.open(QIODevice::WriteOnly) || linkedFile.write(QByteArray(64, 'j')) != 64)
+        return fail("write linked cover");
+    linkedFile.close();
+    bool linkedChanged = false;
+    const int linkedCards = assignCoverFile(linkedShelves, QStringLiteral("https://cdn.example/a/box.jpg?r=2"), linkedPath,
+                                             &linkedChanged);
+    if (linkedCards != 1 || !linkedChanged || linkedShelves.at(0).rows.at(0).artwork != linkedPath
+        || !fileUrl(linkedShelves.at(0).rows.at(0).artwork).startsWith(QStringLiteral("file://")))
+        return fail("cover links card");
     const QString referer = coverDownloadReferer(QStringLiteral("https://www.netflix.com/browse"));
     if (!referer.contains(QStringLiteral("netflix.com")) || referer.contains(QStringLiteral("nflxso"))
         || !coverDownloadReferer(QStringLiteral("https://www.primevideo.com/")).contains(QStringLiteral("primevideo.com"))
@@ -439,10 +873,13 @@ int runLogicSelfCheck()
     const QString appleArt = expandCoverUrl(
         QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/{w}x{h}{c}.{f}"));
     const QString encodedArt = expandCoverUrl(QStringLiteral("https://cdn.example/a.jpg?w=%7Bwidth%7D"));
+    const QString amazonArt =
+        expandCoverUrl(QStringLiteral("https://m.media-amazon.com/images/I/abc._SX{width}_SY{height}_.jpg"));
     if (hboArt.contains(QLatin1Char('{')) || !hboArt.contains(QStringLiteral("w=640"))
         || !hboArt.contains(QStringLiteral("h=360"))
         || appleArt != QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/Features/v4/xx/source/640x360bb.jpg")
-        || encodedArt.contains(QLatin1Char('{')) || !encodedArt.contains(QStringLiteral("w=640")))
+        || encodedArt.contains(QLatin1Char('{')) || !encodedArt.contains(QStringLiteral("w=640"))
+        || !amazonArt.contains(QStringLiteral("._SX640_SY360_")))
         return fail("cover template");
     QImage solid(40, 30, QImage::Format_RGB32);
     solid.fill(Qt::red);
@@ -467,8 +904,51 @@ int runLogicSelfCheck()
     if (webpJpeg.size() < 32 || static_cast<unsigned char>(webpJpeg.at(0)) != 0xFF
         || static_cast<unsigned char>(webpJpeg.at(1)) != 0xD8)
         return fail("webp cover becomes jpeg");
-    if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect")))
+    QByteArray fakeAvif;
+    fakeAvif.append("\x00\x00\x00\x20", 4);
+    fakeAvif.append("ftyp");
+    fakeAvif.append("mif1");
+    fakeAvif.append("\x00\x00\x00\x00", 4);
+    fakeAvif.append("mif1");
+    fakeAvif.append("avif");
+    fakeAvif.append(QByteArray(16, '\0'));
+    QString avifDetail;
+    const QByteArray avifJpeg = coverJpegFromBody(fakeAvif, &avifDetail, QStringLiteral("image/avif"));
+    if (avifJpeg.size() < 32 && !avifDetail.startsWith(QStringLiteral("avif")))
+        return fail("avif magic");
+    const QString avifPath = QDir::temp().filePath(QStringLiteral("zappe-cover.avif"));
+    QProcess avif;
+    avif.start(QStringLiteral("ffmpeg"),
+               {QStringLiteral("-y"), QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("lavfi"), QStringLiteral("-i"),
+                QStringLiteral("color=c=blue:s=32x24"), QStringLiteral("-frames:v"), QStringLiteral("1"),
+                QStringLiteral("-c:v"), QStringLiteral("libaom-av1"), QStringLiteral("-still-picture"),
+                QStringLiteral("1"), avifPath});
+    if (avif.waitForStarted(2000) && avif.waitForFinished(15000) && avif.exitCode() == 0) {
+        QFile avifFile(avifPath);
+        if (!avifFile.open(QIODevice::ReadOnly))
+            return fail("avif sample open");
+        QString avifBodyDetail;
+        const QByteArray avifBody = avifFile.readAll();
+        const QByteArray avifOut = coverJpegFromBody(avifBody, &avifBodyDetail, QStringLiteral("image/avif"));
+        if (avifOut.size() < 32 || static_cast<unsigned char>(avifOut.at(0)) != 0xFF
+            || static_cast<unsigned char>(avifOut.at(1)) != 0xD8)
+            return fail("avif cover becomes jpeg");
+    }
+    if (!mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}).contains(QStringLiteral("getBoundingClientRect"))
+        || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
+                .contains(QStringLiteral("aria-label"))
+        || !mirrorCoverClipScript({QStringLiteral("https://cdn.example/a/box.jpg")}, {QStringLiteral("Dark")})
+                .contains(QStringLiteral("title.length >= 6")))
         return fail("cover clip script");
+    if (!coverUrlIsPlaceholder(QStringLiteral("https://tv.apple.com/assets/1x1.gif"))
+        || !coverUrlIsPlaceholder(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/a/1x1bb.gif"))
+        || coverUrlIsPlaceholder(QStringLiteral("https://is1-ssl.mzstatic.com/image/thumb/a/640x360bb.jpg")))
+        return fail("ignore 1x1 gif");
+    if (mirrorKeepsProfiles(*youtube) || !mirrorKeepsProfiles(*netflix)
+        || mirrorProfileLabel(QStringLiteral("Account menu")) || mirrorProfileLabel(QStringLiteral("Menu da conta"))
+        || !mirrorProfileLabel(QStringLiteral("Ada")))
+        return fail("youtube has no profiles");
     if (!mirrorUrlIsPlayback(QStringLiteral("https://www.netflix.com/watch/80100172"))
         || !mirrorUrlIsPlayback(QStringLiteral("https://www.youtube.com/watch?v=abcdefghijk"))
         || mirrorUrlIsPlayback(netflix->homeUrl) || mirrorUrlIsPlayback(youtube->homeUrl)
@@ -480,6 +960,8 @@ int runLogicSelfCheck()
         return fail("local mirror row opens the service");
     if (!mirrorKeepRicherPage(10, 1) || mirrorKeepRicherPage(10, 6) || mirrorKeepRicherPage(3, 1))
         return fail("keep richer youtube page");
+    if (!mirrorHoldLoading(0, 0) || mirrorHoldLoading(0, 26) || mirrorHoldLoading(10, 0))
+        return fail("hold loading until first read");
     const MirrorAdapter *disney = findMirrorAdapter(mirrors, QStringLiteral("disney"));
     const MirrorAdapter *globoplay = findMirrorAdapter(mirrors, QStringLiteral("globoplay"));
     if (!disney || disney->playerSeek != QLatin1String("script")
@@ -494,8 +976,21 @@ int runLogicSelfCheck()
         return fail("player video");
     if (!mirrorSearchUrl(*netflix, QStringLiteral("dark")).contains(QStringLiteral("q=dark")))
         return fail("netflix search");
-    if (mirrorChromeInFront(false) || !mirrorChromeInFront(true) || mirrorRefreshMs() != 20 * 60 * 1000)
+    if (mirrorChromeInFront(false) || !mirrorChromeInFront(true))
         return fail("mirror chrome policy");
+    qunsetenv("ZAPPE_MIRROR_REFRESH_MIN");
+    if (mirrorRefreshMs() != 45 * 60 * 1000 || mirrorCoverUnusedMaxAgeSecs() != 14 * 24 * 60 * 60)
+        return fail("mirror refresh default");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "15");
+    if (mirrorRefreshMs() != 30 * 60 * 1000)
+        return fail("mirror refresh floor");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "120");
+    if (mirrorRefreshMs() != 60 * 60 * 1000)
+        return fail("mirror refresh cap");
+    qputenv("ZAPPE_MIRROR_REFRESH_MIN", "40");
+    if (mirrorRefreshMs() != 40 * 60 * 1000)
+        return fail("mirror refresh env");
+    qunsetenv("ZAPPE_MIRROR_REFRESH_MIN");
     MirrorAdapter limited = *netflix;
     limited.limitCards = 2;
     const MirrorPage page = parseMirrorPage(QByteArray(R"json({
@@ -537,6 +1032,117 @@ int runLogicSelfCheck()
     if (!mirrorPageHasTitles(paid) || paid.shelves.isEmpty() || paid.shelves.at(0).rows.size() != 1
         || paid.shelves.at(0).rows.at(0).title != QLatin1String("Dark"))
         return fail("prime paid filter");
+    if (!mirrorLiveHero(QStringLiteral("Assistir ao vivo: Copa do Mundo"), QStringLiteral("https://globoplay.globo.com/v/1"))
+        || !mirrorLiveHero(QStringLiteral("Ao vivo: Jornal"), QStringLiteral("https://globoplay.globo.com/v/2"))
+        || mirrorLiveHero(QStringLiteral("Dark"), QStringLiteral("https://globoplay.globo.com/v/3"))
+        || mirrorLiveHero(QStringLiteral("Copa"), QStringLiteral("https://globoplay.globo.com/ao-vivo/copa"))
+        || mirrorLiveHero(QStringLiteral("Novela"), QStringLiteral("https://globoplay.globo.com/ao-vivo/novela")))
+        return fail("live hero");
+    const MirrorPage globoLive = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Continuar assistindo",
+        "context": "continuar",
+        "rows": [
+          {"title": "Assistir ao vivo: Copa do Mundo Feminina Sub-17", "href": "https://globoplay.globo.com/ao-vivo/copa", "artwork": "https://example.test/live.jpg"},
+          {"title": "Novela", "href": "https://globoplay.globo.com/v/123", "artwork": "https://example.test/novela.jpg"},
+          {"title": "Jornal Nacional", "href": "https://globoplay.globo.com/ao-vivo/jornal", "artwork": "https://example.test/jornal.jpg"}
+        ]
+      }]
+    })json"),
+                                                       *globoplay);
+    if (!globoplay || globoLive.shelves.isEmpty() || globoLive.shelves.at(0).rows.size() != 2
+        || globoLive.shelves.at(0).rows.at(0).title != QLatin1String("Novela")
+        || globoLive.shelves.at(0).rows.at(1).title != QLatin1String("Jornal Nacional"))
+        return fail("globoplay live hero dropped");
+    NetworkSample primeSample;
+    primeSample.url = QStringLiteral("https://www.primevideo.com/api/enrichItemMetadata");
+    primeSample.body = QByteArray(R"json({
+      "items": [{
+        "title": "A Roda",
+        "link": "/detail/RODA1",
+        "images": {"packshot": "//m.media-amazon.com/images/S/pv-target-images/abc123def456.jpg"}
+      }]
+    })json");
+    const MirrorPage primeArt = parseMirrorFeeds({primeSample}, *prime);
+    if (!mirrorPageHasTitles(primeArt) || primeArt.shelves.isEmpty() || primeArt.shelves.at(0).rows.isEmpty()
+        || !primeArt.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("m.media-amazon.com"))
+        || primeArt.shelves.at(0).rows.at(0).artworkSpec.startsWith(QStringLiteral("//")))
+        return fail("prime protocol-relative art");
+    const MirrorPage youtubeAccount = parseMirrorPage(QByteArray(R"json({
+      "profiles": ["Account menu"],
+      "shelves": [{
+        "title": "Em alta",
+        "rows": [{"title": "Dark", "href": "https://www.youtube.com/watch?v=abcdefghijk", "artwork": "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg"}]
+      }]
+    })json"),
+                                                      *youtube);
+    bool youtubeProfiles = false;
+    for (const ShelfData &shelf : youtubeAccount.shelves) {
+        if (shelf.id.endsWith(QStringLiteral(":profiles")))
+            youtubeProfiles = true;
+    }
+    if (youtubeProfiles || !mirrorPageHasTitles(youtubeAccount))
+        return fail("youtube account menu is not a profile shelf");
+    const MirrorAdapter *hbo = findMirrorAdapter(mirrors, QStringLiteral("hbo"));
+    if (!hbo)
+        return fail("hbo adapter");
+    NetworkSample hboSample;
+    hboSample.url = QStringLiteral("https://api.hbomax.com/cms/routes/home");
+    hboSample.body = QByteArray(R"json({
+      "items": [{
+        "title": "Show",
+        "href": "https://play.max.com/show/abc",
+        "image": {
+          "uri": "https://api.hbomax.com/missing.jpg",
+          "src": "https://images.cdn.prd.api.discomax.com/a.jpeg?w={width}&h={height}"
+        }
+      }]
+    })json");
+    const MirrorPage hboPage = parseMirrorFeeds({hboSample}, *hbo);
+    if (!mirrorPageHasTitles(hboPage) || hboPage.shelves.isEmpty() || hboPage.shelves.at(0).rows.isEmpty()
+        || hboPage.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("api.hbomax.com"))
+        || !hboPage.shelves.at(0).rows.at(0).artworkSpec.contains(QStringLiteral("w=640")))
+        return fail("hbo art prefers src");
+    const MirrorAdapter *apple = findMirrorAdapter(mirrors, QStringLiteral("apple"));
+    if (!apple)
+        return fail("apple adapter");
+    MirrorAdapter appleFilter = *apple;
+    const MirrorPage appleGif = parseMirrorPage(QByteArray(R"json({
+      "shelves": [{
+        "title": "Em alta",
+        "rows": [{"title": "Filme", "href": "https://tv.apple.com/movie/filme", "artwork": "https://tv.apple.com/assets/1x1.gif"}]
+      }]
+    })json"),
+                                                 appleFilter);
+    if (!mirrorPageHasTitles(appleGif) || appleGif.shelves.isEmpty() || appleGif.shelves.at(0).rows.isEmpty()
+        || !appleGif.shelves.at(0).rows.at(0).artworkSpec.isEmpty())
+        return fail("apple drops 1x1 gif");
+    ShelfData focusHome;
+    RowData focusDark;
+    focusDark.title = QStringLiteral("Dark");
+    focusDark.href = QStringLiteral("https://example.test/dark");
+    focusHome.rows.append(focusDark);
+    ShelfData focusLive;
+    RowData focusCopa;
+    focusCopa.title = QStringLiteral("Assistir ao vivo: Copa");
+    focusCopa.href = QStringLiteral("https://globoplay.globo.com/ao-vivo/copa");
+    RowData focusNovela;
+    focusNovela.title = QStringLiteral("Novela");
+    focusNovela.href = QStringLiteral("https://globoplay.globo.com/v/1?novo=1");
+    focusLive.rows.append(focusCopa);
+    focusLive.rows.append(focusNovela);
+    const QVector<ShelfData> focusShelves{focusHome, focusLive};
+    int focusShelf = 0;
+    int focusIndex = 0;
+    if (!restoreGuideFocus(focusShelves, {1, 1}, QStringLiteral("https://globoplay.globo.com/v/1?velho=1"),
+                           QStringLiteral("Novela"), 1, 1, focusShelf, focusIndex)
+        || focusShelf != 1 || focusIndex != 1)
+        return fail("focus stays on title");
+    int jumpedShelf = 0;
+    int jumpedIndex = 0;
+    if (!restoreGuideFocus(focusShelves, {0, 1}, QString(), QString(), 4, 3, jumpedShelf, jumpedIndex)
+        || jumpedShelf != 1 || jumpedIndex != 3)
+        return fail("focus does not snap to zero");
     const QString coverPath = coverCachePath(dir.path(), QStringLiteral("https://example.test/dark.jpg"));
     const QDateTime now = QDateTime::currentDateTime();
     if (coverIsFresh(coverPath, now, 3600))
@@ -547,6 +1153,30 @@ int runLogicSelfCheck()
     cover.close();
     if (!coverIsFresh(coverPath, now, 3600))
         return fail("fresh cover");
+    QDir coverDir(dir.filePath(QStringLiteral("covers")));
+    if (!coverDir.mkpath(QStringLiteral(".")))
+        return fail("cover dir");
+    auto writeAged = [&](const QString &name, int days) {
+        const QString path = coverDir.filePath(name);
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly) || file.write(QByteArray(40, 'x')) != 40)
+            return false;
+        file.close();
+        QFile aged(path);
+        if (!aged.open(QIODevice::ReadWrite))
+            return false;
+        const bool ok = aged.setFileTime(now.addDays(days), QFileDevice::FileModificationTime);
+        aged.close();
+        return ok;
+    };
+    if (!writeAged(QStringLiteral("legacy.img"), -1) || !writeAged(QStringLiteral("stale.jpg"), -20)
+        || !writeAged(QStringLiteral("fresh-keep.jpg"), -1))
+        return fail("age covers");
+    const int purged = purgeStaleCovers(dir.path(), now);
+    if (purged < 2 || QFileInfo::exists(coverDir.filePath(QStringLiteral("legacy.img")))
+        || QFileInfo::exists(coverDir.filePath(QStringLiteral("stale.jpg")))
+        || !QFileInfo::exists(coverDir.filePath(QStringLiteral("fresh-keep.jpg"))))
+        return fail("purge stale covers");
     for (const CoverJob &job : coverJobs(page.shelves, dir.path(), now)) {
         if (job.url == QStringLiteral("https://example.test/dark.jpg"))
             return fail("fresh cover still queued");
@@ -724,6 +1354,9 @@ int runLogicSelfCheck()
     qunsetenv("ZAPPE_LLM_URL");
     qunsetenv("ZAPPE_LLM_KEY");
     qunsetenv("ZAPPE_LLM_MODEL");
+    qunsetenv("ZAPPE_LLM_FALLBACK_MODEL");
+    qunsetenv("ZAPPE_LLM_SESSION_HEADER");
+    qunsetenv("ZAPPE_LLM_USER_AGENT");
     QDir().mkpath(dir.filePath(QStringLiteral("llm-off")));
     QFile llmOff(dir.filePath(QStringLiteral("llm-off/llm.json")));
     if (!llmOff.open(QIODevice::WriteOnly) || llmOff.write(QByteArrayLiteral("{\"url\":\"\"}")) < 0)
@@ -744,6 +1377,63 @@ int runLogicSelfCheck()
     if (loadLlmConfig(dir.filePath(QStringLiteral("llm-on"))).url != QLatin1String("https://env.example/v1/chat/completions"))
         return fail("llm env");
     qunsetenv("ZAPPE_LLM_URL");
+    QDir().mkpath(dir.filePath(QStringLiteral("llm-go")));
+    QFile llmGo(dir.filePath(QStringLiteral("llm-go/llm.json")));
+    const QByteArray goJson = QByteArrayLiteral(
+        "{\"url\":\"https://go.example/v1/chat/completions\",\"key\":\"sk-go-secret\","
+        "\"model\":\"go-main\",\"fallbackModel\":\"go-fallback\","
+        "\"sessionHeader\":\"x-opencode-session\",\"userAgent\":\"zappe-tv/9\"}");
+    if (!llmGo.open(QIODevice::WriteOnly) || llmGo.write(goJson) != goJson.size())
+        return fail("llm go file");
+    llmGo.close();
+    const LlmConfig go = loadLlmConfig(dir.filePath(QStringLiteral("llm-go")));
+    const QDate goDay(2026, 10, 18);
+    if (go.url != QLatin1String("https://go.example/v1/chat/completions") || go.key != QLatin1String("sk-go-secret")
+        || go.model != QLatin1String("go-main") || go.fallbackModel != QLatin1String("go-fallback")
+        || go.sessionHeader != QLatin1String("x-opencode-session") || go.userAgent != QLatin1String("zappe-tv/9")
+        || llmSessionId(QStringLiteral("Globoplay"), goDay) != QLatin1String("zappe-globoplay-20261018")
+        || llmSessionId(QStringLiteral("netflix"), goDay) == llmSessionId(QStringLiteral("prime"), goDay))
+        return fail("llm go config");
+    bool sawSession = false;
+    bool sawAgent = false;
+    bool sawAuth = false;
+    bool leaked = false;
+    for (const LlmHeader &header : llmRequestHeaders(go, QStringLiteral("netflix"), goDay)) {
+        if (header.name == "User-Agent" && header.value == "zappe-tv/9")
+            sawAgent = true;
+        if (header.name == "x-opencode-session" && header.value == "zappe-netflix-20261018")
+            sawSession = true;
+        if (header.name == "Authorization" && header.value == "Bearer sk-go-secret")
+            sawAuth = true;
+        if (header.name != "Authorization" && QString::fromUtf8(header.value).contains(QStringLiteral("sk-go-secret")))
+            leaked = true;
+    }
+    LlmConfig bareLlm;
+    bool plainSession = false;
+    QByteArray plainAgent;
+    for (const LlmHeader &header : llmRequestHeaders(bareLlm, QStringLiteral("netflix"), goDay)) {
+        if (header.name == "User-Agent")
+            plainAgent = header.value;
+        if (header.name == "x-opencode-session" || header.value.startsWith("zappe-"))
+            plainSession = true;
+    }
+    if (!sawSession || !sawAgent || !sawAuth || leaked || plainSession || plainAgent != "zappe/0.2.0")
+        return fail("llm headers");
+    if (!llmUseFallback(true, false, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || !llmUseFallback(false, true, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, true, true, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, true, false, QString(), QStringLiteral("go-main"))
+        || llmUseFallback(false, false, false, QStringLiteral("go-fallback"), QStringLiteral("go-main"))
+        || llmUseFallback(true, false, false, QStringLiteral("go-main"), QStringLiteral("go-main")))
+        return fail("llm fallback");
+    const QString goLog = llmResultLog(QStringLiteral("netflix"), QStringLiteral("go-main"), 400, 90);
+    if (!goLog.contains(QStringLiteral("model go-main")) || !goLog.contains(QStringLiteral("http 400"))
+        || !goLog.contains(QStringLiteral("90 ms")) || goLog.contains(QStringLiteral("sk-go-secret")))
+        return fail("llm log");
+    qputenv("ZAPPE_LLM_FALLBACK_MODEL", "from-env");
+    if (loadLlmConfig(dir.filePath(QStringLiteral("llm-go"))).fallbackModel != QLatin1String("from-env"))
+        return fail("llm fallback env");
+    qunsetenv("ZAPPE_LLM_FALLBACK_MODEL");
 
     LlmConfig secret;
     secret.key = QStringLiteral("sk-live-DO-NOT-LEAK");
@@ -756,6 +1446,64 @@ int runLogicSelfCheck()
     const QByteArray huge = llmRepairBody(*netflix, QStringLiteral("dom"), {netflixSample}, QByteArray(80001, 'x'), secret.model);
     if (huge.contains("data:image") || !llmAuthorization(secret).contains(secret.key.toUtf8()) || !llmAuthorization(LlmConfig()).isEmpty())
         return fail("llm secret");
+
+    CatalogFile homeCat;
+    ShelfData homeLive;
+    homeLive.id = QStringLiteral("live");
+    homeLive.status = QStringLiteral("ok");
+    homeLive.live = true;
+    for (int i = 0; i < 4; ++i) {
+        RowData row;
+        row.title = QStringLiteral("Canal %1").arg(i);
+        row.href = QStringLiteral("zappe://ota/%1").arg(i);
+        row.live = true;
+        homeLive.rows.append(row);
+    }
+    homeCat.shelves.append(homeLive);
+    Guide homeGuide;
+    homeGuide.setCoalesceInput(false);
+    homeGuide.setCatalog(homeCat);
+    homeGuide.move(0, 1);
+    homeGuide.move(0, 1);
+    if (homeGuide.index() != 2)
+        return fail("home setup");
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    homeGuide.home();
+    if (homeGuide.page() != QLatin1String("home") || homeGuide.menuOpen() || homeGuide.shelf() != 0 || homeGuide.index() != 0
+        || homeGuide.focusTitle() != QLatin1String("Canal 0"))
+        return fail("home focuses the first card");
+    if (!homeGuide.focusOtaChannel(QStringLiteral("2")) || homeGuide.shelf() != 0 || homeGuide.index() != 2
+        || homeGuide.focusTitle() != QLatin1String("Canal 2"))
+        return fail("back from live restores the channel");
+    if (homeGuide.focusOtaChannel(QStringLiteral("ausente")) || homeGuide.index() != 2)
+        return fail("missing channel keeps focus");
+    homeGuide.home();
+    homeGuide.move(0, 1);
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    homeGuide.openTvTest();
+    homeGuide.move(1, 0);
+    if (!homeGuide.tvTest() || homeGuide.tvTestIndex() != 1 || homeGuide.page() != QLatin1String("settings")
+        || homeGuide.index() != 1 || homeGuide.shelf() != 0)
+        return fail("tv test moves its own list");
+    homeGuide.back();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("back leaves the tv test");
+    homeGuide.openTvTest();
+    homeGuide.home();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("home") || homeGuide.index() != 0
+        || homeGuide.focusTitle() != QLatin1String("Canal 0"))
+        return fail("home closes the tv test");
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    for (int step = 0; step < 7; ++step)
+        homeGuide.move(1, 0);
+    if (homeGuide.settingsIndex() != 7)
+        return fail("tv test row");
+    homeGuide.activate();
+    if (!homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("tv test opens from settings");
+    homeGuide.back();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("back stays in settings");
 
     std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;

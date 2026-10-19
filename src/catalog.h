@@ -20,6 +20,8 @@ struct RowData {
     bool wide = false;
     bool live = false;
     bool frame = false;
+    bool mark = false;
+    QString number;
     double progress = 0;
 };
 
@@ -56,6 +58,7 @@ public:
         WideRole,
         LiveRole,
         FrameRole,
+        MarkRole,
         ProgressRole,
     };
 

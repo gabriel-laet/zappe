@@ -218,6 +218,48 @@ int runSelfCheck()
     }
     guide.closeMirror();
     guide.back();
+    guide.openMirror(QStringLiteral("netflix"));
+    ShelfData blank;
+    blank.id = QStringLiteral("mirror:netflix:0");
+    blank.skillId = QStringLiteral("mirror:netflix");
+    blank.title = QStringLiteral("Vazio");
+    blank.status = QStringLiteral("ok");
+    RowData emptyCard;
+    emptyCard.title = QString();
+    emptyCard.href = QString();
+    blank.rows.append(emptyCard);
+    guide.replaceServiceShelves(QStringLiteral("netflix"), {blank});
+    guide.back();
+    if (!guide.mirrorService().isEmpty() || guide.page() != QLatin1String("home")
+        || guide.focusTitle().isEmpty() || guide.focusTitle() == QLatin1String("Vazio"))
+        return fail("back leaves empty streaming view");
+    guide.openMirror(QStringLiteral("netflix"));
+    ShelfData none;
+    none.id = QStringLiteral("mirror:netflix:empty");
+    none.skillId = QStringLiteral("mirror:netflix");
+    none.title = QStringLiteral("Netflix");
+    none.status = QStringLiteral("empty");
+    none.message = QStringLiteral("Nada nesta página ainda.");
+    guide.replaceServiceShelves(QStringLiteral("netflix"), {none});
+    guide.back();
+    if (!guide.mirrorService().isEmpty() || guide.page() != QLatin1String("home"))
+        return fail("back leaves shelf without cards");
+    guide.openMirror(QStringLiteral("youtube"));
+    ShelfData profiles;
+    profiles.id = QStringLiteral("mirror:youtube:profiles");
+    profiles.skillId = QStringLiteral("mirror:youtube");
+    profiles.title = QStringLiteral("Perfis");
+    profiles.status = QStringLiteral("ok");
+    RowData account;
+    account.title = QStringLiteral("Account menu");
+    account.href = QStringLiteral("zappe://profile/Account%20menu");
+    account.serviceLabel = QStringLiteral("YouTube");
+    profiles.rows.append(account);
+    guide.replaceServiceShelves(QStringLiteral("youtube"), {profiles});
+    guide.back();
+    if (!guide.mirrorService().isEmpty() || guide.page() != QLatin1String("home")
+        || guide.focusTitle() == QLatin1String("Account menu"))
+        return fail("back leaves account menu");
     guide.adjustVolume(5);
     if (guide.volume() != 45 || !guide.volumeHud())
         return fail("volume");

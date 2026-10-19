@@ -1,10 +1,14 @@
 #pragma once
 
 #include "keymap.h"
+#include "samsung.h"
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
+#include <QVector>
 
+class QProcess;
 class QQuickWindow;
 class QTimer;
 
@@ -32,6 +36,7 @@ class House : public QObject {
     Q_PROPERTY(QString loadingStatus READ loadingStatus NOTIFY changed)
     Q_PROPERTY(QString loadingError READ loadingError NOTIFY changed)
     Q_PROPERTY(qreal loadingProgress READ loadingProgress NOTIFY changed)
+    Q_PROPERTY(QStringList tvLog READ tvLog NOTIFY tvLogChanged)
 
 public:
     explicit House(QObject *parent = nullptr);
@@ -56,13 +61,18 @@ public:
     QString loadingStatus() const { return m_loadingStatus; }
     QString loadingError() const { return m_loadingError; }
     qreal loadingProgress() const { return m_loadingProgress; }
+    QStringList tvLog() const { return m_tvLog; }
 
     Q_INVOKABLE void submitPrompt(const QString &value);
     Q_INVOKABLE void cancelPrompt();
     Q_INVOKABLE void stopPlayback();
     Q_INVOKABLE void goBack();
+    Q_INVOKABLE void goHome();
+    Q_INVOKABLE bool acceptBandScan();
     Q_INVOKABLE void cancelLoading();
     Q_INVOKABLE void retryLoading();
+    Q_INVOKABLE void dial(const QString &glyph);
+    Q_INVOKABLE void noteX11Key(int scan, int qtKey);
     QObject *tv() const;
 
     static constexpr int loadingTimeoutMs = 10000;
@@ -70,9 +80,13 @@ public:
 public slots:
     void playRequested(const QString &title, const QString &service, const QString &href);
     void onRemote(int remoteAction);
+    void onDial(int value);
+    void onEvdevKey(int code);
+    void onVoiceHold(bool down);
 
 signals:
     void changed();
+    void tvLogChanged();
 
 private:
     void openService(const QString &id);
@@ -85,6 +99,36 @@ private:
     void handleVoice(const QString &transcript);
     void volume(int delta);
     void mute();
+
+    struct TvTrace {
+        QString key;
+        QString action;
+        QString command;
+        QString result;
+        int waitKey = -1;
+        qint64 at = 0;
+        bool x11 = false;
+        bool evdev = false;
+        bool loggedFinal = false;
+        bool printed = false;
+        int id = 0;
+    };
+
+    void watchCommand(TvKey key);
+    void runTvTest(int index);
+    void noteRemoteAction(RemoteAction action);
+    void finishWait(int waitKey, const QString &result);
+    void onCommandFinished(int key, bool ok, const QString &detail, int latencyMs);
+    void onRepairFinished(bool ok, const QString &detail, int latencyMs);
+    void onTvReported(const QString &message);
+    void logLink();
+    void syncTvTrace();
+    bool tracing() const;
+    void rememberTrace(const TvTrace &line);
+    void publishTrace(int index);
+    void scheduleTraceLog(int id);
+    void writeTraceOnce(int index);
+    QString formatTrace(const TvTrace &line) const;
     bool take(RemoteAction action);
     void onSettings(int index, int verb);
     void beginLoading(const QString &title, const QString &art, const QString &kind);
@@ -98,6 +142,11 @@ private:
     void updateKeyHold();
     bool chromeFocused() const;
     void forwardChromeKey(RemoteAction action);
+    void commitDial();
+    void refreshFocusedArt();
+    void applyEpg(const QString &channel, const QString &nowTitle, const QString &nextTitle);
+    void startBandScan(bool full = false);
+    void finishBandScan();
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -140,7 +189,21 @@ private:
     QString m_retryHref;
     QString m_chromeOwner;
     class QTimer *m_loadTimer = nullptr;
+    class QTimer *m_dialTimer = nullptr;
+    class QTimer *m_focusTimer = nullptr;
     qint64 m_lastBack = 0;
+    QString m_refreshTitle;
+    qint64 m_refreshAt = 0;
+    bool m_bandOffer = false;
+    bool m_bandFull = false;
+    qint64 m_bandConsumed = 0;
+    QProcess *m_bandScan = nullptr;
+    QVector<TvTrace> m_traces;
+    int m_traceSeq = 0;
+    QStringList m_tvLog;
+    QString m_linkLogged;
+    qint64 m_traceUntil = 0;
+    class QTimer *m_tvTimer = nullptr;
 };
 
 } // namespace zappe

@@ -1,5 +1,9 @@
 {
-  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/llm.json. An empty url keeps learning off. Put the API key only in the local key field, never in git. url is the full OpenAI-compatible chat completions endpoint.",
+  "_comment": "EXAMPLE ONLY — copy to ~/.local/share/zappe/llm.json. An empty url keeps learning off. Put the API key only in the local key field, never in git. url is the full OpenAI-compatible chat completions endpoint. sessionHeader is the header name (x-opencode-session for the opencode Go plan); the value is zappe-<service>-<yyyymmdd>. userAgent empty sends zappe/<version>. fallbackModel is tried once if the request or the learned adapter fails.",
   "url": "",
-  "model": ""
+  "key": "",
+  "model": "",
+  "fallbackModel": "",
+  "sessionHeader": "",
+  "userAgent": ""
 }

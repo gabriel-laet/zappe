@@ -13,6 +13,12 @@ class QQuickWindow;
 
 namespace zappe {
 
+// Depois de republicar as fileiras, o foco volta ao mesmo href ou ao mesmo título.
+// Fileira escondida nesta página não vira o hero. O índice não cai em 0 de outra fileira
+// quando o título ainda está na tela.
+bool restoreGuideFocus(const QVector<ShelfData> &shelves, const QVector<int> &shown, const QString &keepHref,
+                       const QString &keepTitle, int keepShelf, int keepIndex, int &shelf, int &index);
+
 class Guide : public QObject {
     Q_OBJECT
     Q_PROPERTY(ShelfModel *shelves READ shelves CONSTANT)
@@ -30,6 +36,8 @@ class Guide : public QObject {
     Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY menuChanged)
     Q_PROPERTY(int menuIndex READ menuIndex NOTIFY menuChanged)
     Q_PROPERTY(int settingsIndex READ settingsIndex NOTIFY settingsChanged)
+    Q_PROPERTY(bool tvTest READ tvTest NOTIFY tvTestChanged)
+    Q_PROPERTY(int tvTestIndex READ tvTestIndex NOTIFY tvTestChanged)
     Q_PROPERTY(QString resolution READ resolution NOTIFY settingsChanged)
     Q_PROPERTY(bool brandingOn READ brandingOn NOTIFY brandingChanged)
     Q_PROPERTY(bool brandCustom READ brandCustom CONSTANT)
@@ -46,6 +54,7 @@ class Guide : public QObject {
     Q_PROPERTY(bool focusLive READ focusLive NOTIFY focusChanged)
     Q_PROPERTY(bool focusMirrored READ focusMirrored NOTIFY focusChanged)
     Q_PROPERTY(QString focusSynopsis READ focusSynopsis NOTIFY focusChanged)
+    Q_PROPERTY(QString dialText READ dialText NOTIFY dialChanged)
 
     Q_PROPERTY(QString brandName READ brandName NOTIFY brandingChanged)
     Q_PROPERTY(QString accent READ accent NOTIFY brandingChanged)
@@ -105,6 +114,8 @@ public:
     bool menuOpen() const { return m_menuOpen; }
     int menuIndex() const { return m_menuIndex; }
     int settingsIndex() const { return m_settingsIndex; }
+    bool tvTest() const { return m_tvTest; }
+    int tvTestIndex() const { return m_tvTestIndex; }
     QString resolution() const { return m_resolution; }
     bool brandingOn() const { return m_brandingOn; }
     bool brandCustom() const { return m_loaded.source == QLatin1String("user"); }
@@ -121,6 +132,7 @@ public:
     bool focusLive() const { return m_focusLive; }
     bool focusMirrored() const { return m_focusMirrored; }
     QString focusSynopsis() const { return m_focusSynopsis; }
+    QString dialText() const { return m_dialText; }
 
     QString brandName() const { return m_brand.name; }
     QString accent() const { return m_brand.accent; }
@@ -155,29 +167,40 @@ public:
     Q_INVOKABLE void move(int dShelf, int dIndex);
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
+    Q_INVOKABLE void home();
+    // Card do canal que estava no ar. Não mexe no foco se o canal não está na grade.
+    bool focusOtaChannel(const QString &channel);
+    Q_INVOKABLE void openTvTest();
     Q_INVOKABLE void toggleMenu();
     Q_INVOKABLE void adjustVolume(int delta);
     Q_INVOKABLE void toggleMute();
     Q_INVOKABLE bool shelfShown(int index) const;
     Q_INVOKABLE QString episodeTitle(int index) const;
+    Q_INVOKABLE void pushDial(const QString &glyph);
+    Q_INVOKABLE void clearDial();
 
     void openMirror(const QString &serviceId);
     void closeMirror();
     void setMirrorServiceIds(const QStringList &ids);
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
     void noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color);
+    void noteLiveEpg(const QString &href, const QString &line);
+    void refreshLiveChannels();
 
 signals:
     void focusChanged();
+    void dialChanged();
     void detailChanged();
     void activated();
     void fpsChanged();
     void pageChanged();
     void menuChanged();
     void settingsChanged();
-    // index: 0 resolução, 1 marca, 2 estado da TV, 3 força, 4 volume, 5 mudo, 6 HDMI.
+    // index: 0 resolução, 1 marca, 2 estado da TV, 3 força, 4 volume, 5 mudo, 6 HDMI, 7 Testar TV.
     // verb: 0 ativa, -1 esquerda, 1 direita.
     void settingsCommand(int index, int verb);
+    void tvTestChanged();
+    void tvTestCommand(int index);
     void brandingChanged();
     void savedChanged();
     void volumeChanged();
@@ -199,9 +222,11 @@ private:
     void setMenuIndex(int index);
     void clampFocusToPage();
     void clampIndex();
+    void ensureFocusableShelf();
     void moveShelves(int dShelf, int dIndex);
     void moveDetail(int dShelf, int dIndex);
     void moveSettings(int dShelf, int dIndex);
+    void closeTvTest();
     void activateDetail();
     void toggleSaved();
     void nudgeResolution(int direction);
@@ -249,6 +274,8 @@ private:
     bool m_menuOpen = false;
     int m_menuIndex = 0;
     int m_settingsIndex = 0;
+    bool m_tvTest = false;
+    int m_tvTestIndex = 0;
     QString m_resolution = QStringLiteral("1080p");
     QString m_dataDir;
     bool m_coalesce = false;
@@ -282,6 +309,7 @@ private:
     bool m_focusLive = false;
     bool m_focusMirrored = false;
     QString m_focusSynopsis;
+    QString m_dialText;
 };
 
 QString cacheDir();

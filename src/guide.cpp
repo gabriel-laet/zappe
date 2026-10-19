@@ -1,7 +1,9 @@
 #include "guide.h"
 
+#include "branding.h"
 #include "display.h"
 #include "mirror.h"
+#include "ota.h"
 #include "posters.h"
 #include "util.h"
 
@@ -19,6 +21,71 @@
 #include <cmath>
 
 namespace zappe {
+
+bool restoreGuideFocus(const QVector<ShelfData> &shelves, const QVector<int> &shown, const QString &keepHref,
+                       const QString &keepTitle, int keepShelf, int keepIndex, int &shelf, int &index)
+{
+    auto shownOk = [&](int row) { return row >= 0 && row < shown.size() && shown.at(row) != 0 && row < shelves.size(); };
+    if (!keepHref.isEmpty()) {
+        for (int s = 0; s < shelves.size(); ++s) {
+            if (!shownOk(s))
+                continue;
+            for (int i = 0; i < shelves.at(s).rows.size(); ++i) {
+                if (shelves.at(s).rows.at(i).href == keepHref) {
+                    shelf = s;
+                    index = i;
+                    return true;
+                }
+            }
+        }
+    }
+    if (!keepTitle.isEmpty()) {
+        const int prefer = shownOk(keepShelf) ? keepShelf : -1;
+        for (int pass = 0; pass < 2; ++pass) {
+            for (int s = 0; s < shelves.size(); ++s) {
+                if (!shownOk(s))
+                    continue;
+                if (pass == 0 && s != prefer)
+                    continue;
+                if (pass == 1 && s == prefer)
+                    continue;
+                for (int i = 0; i < shelves.at(s).rows.size(); ++i) {
+                    if (shelves.at(s).rows.at(i).title == keepTitle) {
+                        shelf = s;
+                        index = i;
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    if (shownOk(keepShelf)) {
+        shelf = keepShelf;
+        index = keepIndex;
+        return true;
+    }
+    int pick = -1;
+    const int start = std::max(0, keepShelf);
+    for (int s = start; s < shelves.size(); ++s) {
+        if (shownOk(s)) {
+            pick = s;
+            break;
+        }
+    }
+    if (pick < 0) {
+        for (int s = 0; s < shelves.size(); ++s) {
+            if (shownOk(s)) {
+                pick = s;
+                break;
+            }
+        }
+    }
+    if (pick < 0)
+        return false;
+    shelf = pick;
+    index = keepIndex;
+    return true;
+}
 
 QString cacheDir()
 {
@@ -274,6 +341,8 @@ QString Guide::pageForMenu(int index)
 
 void Guide::setPage(const QString &page)
 {
+    if (page != QLatin1String("settings"))
+        closeTvTest();
     if (page == m_page)
         return;
     m_page = page;
@@ -294,6 +363,8 @@ void Guide::setMenuIndex(int index)
         return;
     m_menuIndex = index;
     if (page != m_page) {
+        if (page != QLatin1String("settings"))
+            closeTvTest();
         m_page = page;
         clampFocusToPage();
         emit pageChanged();
@@ -341,6 +412,17 @@ void Guide::move(int dShelf, int dIndex)
     }
     if (m_detailOpen) {
         moveDetail(dShelf, dIndex);
+        return;
+    }
+    if (m_tvTest) {
+        const int step = dShelf != 0 ? dShelf : dIndex;
+        if (step != 0) {
+            const int next = std::clamp(m_tvTestIndex + (step > 0 ? 1 : -1), 0, 4);
+            if (next != m_tvTestIndex) {
+                m_tvTestIndex = next;
+                emit tvTestChanged();
+            }
+        }
         return;
     }
     if (m_page == QLatin1String("settings")) {
@@ -416,8 +498,8 @@ void Guide::moveDetail(int dShelf, int dIndex)
 
 void Guide::moveSettings(int dShelf, int dIndex)
 {
-    // 0 resolução, 1 marca, 2 estado, 3 força, 4 volume, 5 mudo, 6 HDMI.
-    constexpr int kLast = 6;
+    // 0 resolução, 1 marca, 2 estado, 3 força, 4 volume, 5 mudo, 6 HDMI, 7 Testar TV.
+    constexpr int kLast = 7;
     if (dShelf != 0) {
         const int next = std::clamp(m_settingsIndex + dShelf, 0, kLast);
         if (next != m_settingsIndex) {
@@ -430,7 +512,7 @@ void Guide::moveSettings(int dShelf, int dIndex)
             nudgeResolution(dIndex);
         else if (m_settingsIndex == 1)
             setBrandingEnabled(dIndex > 0);
-        else
+        else if (m_settingsIndex != 7)
             emit settingsCommand(m_settingsIndex, dIndex > 0 ? 1 : -1);
     }
 }
@@ -472,11 +554,17 @@ void Guide::activate()
         emit menuChanged();
         return;
     }
+    if (m_tvTest) {
+        emit tvTestCommand(m_tvTestIndex);
+        return;
+    }
     if (m_page == QLatin1String("settings") && !m_detailOpen) {
         if (m_settingsIndex == 0)
             nudgeResolution(m_resolution == QLatin1String("1080p") ? 1 : -1);
         else if (m_settingsIndex == 1)
             setBrandingEnabled(!m_brandingOn);
+        else if (m_settingsIndex == 7)
+            openTvTest();
         else
             emit settingsCommand(m_settingsIndex, 0);
         return;
@@ -567,6 +655,102 @@ void Guide::toggleSaved()
     emit savedChanged();
 }
 
+void Guide::ensureFocusableShelf()
+{
+    auto good = [this](int shelf) {
+        if (!shelfShown(shelf))
+            return false;
+        const ShelfData *data = m_shelves->shelfAt(shelf);
+        if (!data || data->id.endsWith(QStringLiteral(":profiles")))
+            return false;
+        for (const RowData &row : data->rows) {
+            if (!row.title.trimmed().isEmpty() && !row.href.trimmed().isEmpty())
+                return true;
+        }
+        return false;
+    };
+    if (good(m_shelf))
+        return;
+    for (int i = 0; i < shelfCount(); ++i) {
+        if (!good(i))
+            continue;
+        m_shelf = i;
+        m_index = 0;
+        clampIndex();
+        syncFocusFields();
+        emit focusChanged();
+        return;
+    }
+}
+
+void Guide::home()
+{
+    if (!coalesce(QStringLiteral("home")))
+        return;
+    closeTvTest();
+    const bool detailWas = m_detailOpen;
+    const bool menuWas = m_menuOpen;
+    m_detailOpen = false;
+    m_menuOpen = false;
+    m_menuIndex = 0;
+    m_mirrorService.clear();
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    int shelf = 0;
+    for (int i = 0; i < shelfCount(); ++i) {
+        if (shelfShown(i)) {
+            shelf = i;
+            break;
+        }
+    }
+    m_shelf = shelf;
+    m_index = 0;
+    clampIndex();
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    publishFocus();
+    if (detailWas)
+        emit detailChanged();
+    if (menuWas)
+        emit menuChanged();
+}
+
+bool Guide::focusOtaChannel(const QString &channel)
+{
+    const QString name = channel.trimmed();
+    if (name.isEmpty())
+        return false;
+    const QString href = QStringLiteral("zappe://ota/") + name;
+    int foundShelf = -1;
+    int foundIndex = -1;
+    for (int s = 0; s < shelfCount(); ++s) {
+        const ShelfData *shelf = m_shelves->shelfAt(s);
+        if (!shelf)
+            continue;
+        for (int i = 0; i < shelf->rows.size(); ++i) {
+            const RowData &row = shelf->rows.at(i);
+            if (row.href == href || (row.live && row.title == name)) {
+                foundShelf = s;
+                foundIndex = i;
+                break;
+            }
+        }
+        if (foundShelf >= 0)
+            break;
+    }
+    if (foundShelf < 0)
+        return false;
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    m_detailOpen = false;
+    m_menuOpen = false;
+    m_shelf = foundShelf;
+    m_index = foundIndex;
+    clampIndex();
+    publishFocus();
+    return true;
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))
@@ -582,14 +766,95 @@ void Guide::back()
         emit focusChanged();
         return;
     }
-    if (!m_mirrorService.isEmpty() && m_page == QLatin1String("streaming")) {
-        closeMirror();
+    // Uma view de streaming, mesmo vazia ou só com card vazio, sempre sai.
+    if (!m_mirrorService.isEmpty() || m_page == QLatin1String("streaming")) {
+        m_mirrorService.clear();
+        if (m_page != QLatin1String("home"))
+            setPage(QStringLiteral("home"));
+        else {
+            ++m_layoutEpoch;
+            emit layoutChanged();
+            clampFocusToPage();
+            emit focusChanged();
+        }
+        ensureFocusableShelf();
+        return;
+    }
+    if (m_tvTest) {
+        closeTvTest();
         return;
     }
     if (m_page != QLatin1String("home")) {
         setPage(QStringLiteral("home"));
+        ensureFocusableShelf();
         return;
     }
+    ensureFocusableShelf();
+}
+
+void Guide::openTvTest()
+{
+    if (m_page != QLatin1String("settings"))
+        setPage(QStringLiteral("settings"));
+    if (m_tvTest)
+        return;
+    m_tvTest = true;
+    m_tvTestIndex = 0;
+    emit tvTestChanged();
+}
+
+void Guide::closeTvTest()
+{
+    if (!m_tvTest)
+        return;
+    m_tvTest = false;
+    emit tvTestChanged();
+}
+
+void Guide::pushDial(const QString &glyph)
+{
+    const QString next = appendDialText(m_dialText, glyph);
+    if (next == m_dialText)
+        return;
+    m_dialText = next;
+    emit dialChanged();
+}
+
+void Guide::clearDial()
+{
+    if (m_dialText.isEmpty())
+        return;
+    m_dialText.clear();
+    emit dialChanged();
+}
+
+void Guide::refreshLiveChannels()
+{
+    CatalogFile catalog;
+    catalog.path = m_catalogPath;
+    catalog.shelves = m_baseShelves;
+    const QString data = m_dataDir.isEmpty() ? resolveDataDir() : m_dataDir;
+    mergeLiveChannels(catalog, listOtaChannels());
+    decorateCatalog(catalog, data, cacheDir());
+    m_baseShelves = std::move(catalog.shelves);
+    publishShelves(false);
+}
+
+void Guide::noteLiveEpg(const QString &href, const QString &line)
+{
+    if (href.isEmpty() || line.isEmpty())
+        return;
+    bool changed = false;
+    for (ShelfData &shelf : m_baseShelves) {
+        for (RowData &row : shelf.rows) {
+            if (row.href != href)
+                continue;
+            row.synopsis = line;
+            changed = true;
+        }
+    }
+    if (changed)
+        publishShelves(false);
 }
 
 void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color)
@@ -615,7 +880,9 @@ void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QSt
 void Guide::publishShelves(bool resetFocus)
 {
     const QString keepHref = resetFocus ? QString() : m_focusHref;
+    const QString keepTitle = resetFocus ? QString() : m_focusTitle;
     const int keepShelf = m_shelf;
+    const int keepIndex = m_index;
     QVector<ShelfData> merged;
     merged.reserve(m_baseShelves.size() + m_mirrorShelves.size());
     bool inserted = false;
@@ -635,24 +902,22 @@ void Guide::publishShelves(bool resetFocus)
         m_shelf = 0;
         m_index = 0;
         m_detailOpen = false;
-    } else if (!keepHref.isEmpty()) {
-        bool found = false;
-        for (int shelf = 0; shelf < shelfCount() && !found; ++shelf) {
-            const RowModel *rows = m_shelves->rowsAt(shelf);
-            if (!rows)
-                continue;
-            for (int i = 0; i < rows->rowCount(); ++i) {
-                const RowData *row = rows->at(i);
-                if (row && row->href == keepHref) {
-                    m_shelf = shelf;
-                    m_index = i;
-                    found = true;
-                    break;
-                }
-            }
+    } else {
+        QVector<ShelfData> shelves;
+        QVector<int> shown;
+        shelves.reserve(shelfCount());
+        shown.reserve(shelfCount());
+        for (int i = 0; i < shelfCount(); ++i) {
+            const ShelfData *shelf = m_shelves->shelfAt(i);
+            shelves.append(shelf ? *shelf : ShelfData{});
+            shown.append(shelfShown(i) ? 1 : 0);
         }
-        if (!found)
-            m_shelf = shelfCount() == 0 ? 0 : std::clamp(keepShelf, 0, shelfCount() - 1);
+        int shelf = keepShelf;
+        int index = keepIndex;
+        if (restoreGuideFocus(shelves, shown, keepHref, keepTitle, keepShelf, keepIndex, shelf, index)) {
+            m_shelf = shelf;
+            m_index = index;
+        }
     }
     clampFocusToPage();
     syncFocusFields();

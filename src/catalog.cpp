@@ -117,6 +117,8 @@ QVariant RowModel::data(const QModelIndex &index, int role) const
         return row.live;
     case FrameRole:
         return row.frame;
+    case MarkRole:
+        return row.mark;
     case ProgressRole:
         return row.progress;
     default:
@@ -137,6 +139,7 @@ QHash<int, QByteArray> RowModel::roleNames() const
         {WideRole, "wide"},
         {LiveRole, "live"},
         {FrameRole, "frame"},
+        {MarkRole, "mark"},
         {ProgressRole, "progress"},
     };
 }
@@ -367,11 +370,12 @@ void decorateCatalog(CatalogFile &catalog, const QString &dataDir, const QString
             const QString artwork = resolveArtwork(row.artworkSpec, catalog.path, dataDir);
             const ArtPaths art = !artwork.isEmpty()
                                      ? artFromFile(cacheDir, artwork, row.title, row.serviceLabel, row.wide)
-                                     : (row.live ? makeChannelCard(cacheDir, row.title)
+                                     : (row.live ? liveChannelArt(cacheDir, row.title, dataDir, row.number)
                                                  : makePoster(cacheDir, row.title, row.serviceLabel, row.wide));
             row.artwork = art.artwork;
             row.ambient = art.ambient;
             row.color = art.color;
+            row.mark = row.live && !row.frame && art.mark;
         }
     }
 }

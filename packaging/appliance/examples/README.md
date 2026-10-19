@@ -8,7 +8,7 @@ Remote capture lives next to this folder: [`../zappe-atongx-capture`](../zappe-a
 
 ## Learned adapters and the LLM
 
-Streaming adapters ship in `data/mirrors.json`. A repaired copy is written only on the machine, under `~/.local/share/zappe/adapters/`, with older copies in `adapters/history/`. Learning stays off until `llm.json` has a chat-completions `url`. Copy [`llm.json`](llm.json) and add the key locally. Do not commit that key.
+Streaming adapters ship in `data/mirrors.json`. A repaired copy is written only on the machine, under `~/.local/share/zappe/adapters/`, with older copies in `adapters/history/`. Learning stays off until `llm.json` has a chat-completions `url`. Copy [`llm.json`](llm.json) and add the key locally. Do not commit that key. Optional fields: `fallbackModel` (one retry), `sessionHeader` (for example `x-opencode-session`, value `zappe-<service>-<yyyymmdd>`) and `userAgent` (default `zappe/<version>`).
 
 ## Custom branding (not in git)
 

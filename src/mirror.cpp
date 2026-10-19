@@ -9,7 +9,9 @@
 
 #include <QBuffer>
 #include <QCryptographicHash>
+#include <QDate>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -23,6 +25,7 @@
 #include <QNetworkRequest>
 #include <QRegularExpression>
 #include <QSet>
+#include <QTemporaryFile>
 #include <QTimer>
 #include <QUrl>
 #include <QUrlQuery>
@@ -31,6 +34,15 @@
 #include <cstdio>
 
 namespace zappe {
+
+void touchCoverFile(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadWrite))
+        return;
+    file.setFileTime(QDateTime::currentDateTime(), QFileDevice::FileModificationTime);
+}
+
 namespace {
 
 enum Job {
@@ -155,7 +167,9 @@ QString jsonArt(const QJsonValue &value, int depth)
     if (depth > 5)
         return QString();
     if (value.isString()) {
-        const QString text = value.toString().trimmed();
+        QString text = value.toString().trimmed();
+        if (text.startsWith(QStringLiteral("//")))
+            text.prepend(QStringLiteral("https:"));
         if (text.startsWith(QStringLiteral("http://")) || text.startsWith(QStringLiteral("https://")))
             return text;
         return QString();
@@ -172,12 +186,27 @@ QString jsonArt(const QJsonValue &value, int depth)
     if (!value.isObject())
         return QString();
     const QJsonObject obj = value.toObject();
-    if (obj.contains(QStringLiteral("thumbnails")))
-        return jsonArt(obj.value(QStringLiteral("thumbnails")), depth + 1);
-    if (obj.contains(QStringLiteral("url")))
-        return jsonArt(obj.value(QStringLiteral("url")), depth + 1);
-    if (obj.contains(QStringLiteral("src")))
-        return jsonArt(obj.value(QStringLiteral("src")), depth + 1);
+    // url/src antes de uri/images: a HBO manda os dois e o uri sem cookie responde 404.
+    const QStringList keys = {QStringLiteral("thumbnails"), QStringLiteral("url"),       QStringLiteral("src"),
+                              QStringLiteral("packshot"),   QStringLiteral("thumbnail"), QStringLiteral("poster"),
+                              QStringLiteral("artwork"),    QStringLiteral("boxart"),    QStringLiteral("storyArt"),
+                              QStringLiteral("cover"),      QStringLiteral("image"),     QStringLiteral("images"),
+                              QStringLiteral("uri")};
+    for (const QString &key : keys) {
+        if (!obj.contains(key))
+            continue;
+        const QString art = jsonArt(obj.value(key), depth + 1);
+        if (!art.isEmpty())
+            return art;
+    }
+    for (auto it = obj.constBegin(); it != obj.constEnd(); ++it) {
+        if (!it.value().isString())
+            continue;
+        const QString art = jsonArt(it.value(), depth + 1);
+        const QString lower = art.toLower();
+        if (lower.contains(QStringLiteral("media-amazon.com")) || lower.contains(QStringLiteral("mzstatic.com")))
+            return art;
+    }
     return QString();
 }
 
@@ -384,6 +413,7 @@ void paintMissingCovers(QVector<ShelfData> &shelves, const QString &cacheDir, co
             const QString path = coverCachePath(cacheDir, row.artworkSpec);
             if (coverIsFresh(path, now, mirrorCoverMaxAgeSecs())) {
                 row.artwork = path;
+                touchCoverFile(path);
                 continue;
             }
             const ArtPaths art = makePoster(cacheDir, row.title, row.serviceLabel, row.wide);
@@ -401,9 +431,20 @@ int mirrorCoverMaxAgeSecs()
     return 12 * 60 * 60;
 }
 
+int mirrorCoverUnusedMaxAgeSecs()
+{
+    return 14 * 24 * 60 * 60;
+}
+
 int mirrorRefreshMs()
 {
-    return 20 * 60 * 1000;
+    // 45 min. ZAPPE_MIRROR_REFRESH_MIN fica entre 30 e 60.
+    int minutes = 45;
+    bool ok = false;
+    const int env = qEnvironmentVariableIntValue("ZAPPE_MIRROR_REFRESH_MIN", &ok);
+    if (ok)
+        minutes = std::clamp(env, 30, 60);
+    return minutes * 60 * 1000;
 }
 
 int mirrorLoadTimeoutMs()
@@ -609,7 +650,7 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     for (const part of text.split(',')) {
       const bits = part.trim().split(/\s+/);
       const url = bits[0] || '';
-      if (url.indexOf('http') !== 0) continue;
+      if (url.indexOf('http') !== 0 && url.indexOf('//') !== 0) continue;
       const w = bits[1] && /[\d.]+w$/.test(bits[1]) ? parseInt(bits[1], 10) : 1;
       if (w >= bestW) { bestW = w; best = url; }
     }
@@ -618,19 +659,45 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
   const bgUrl = (el) => {
     if (!el) return '';
     const raw = ((el.style && el.style.backgroundImage) || '') + ' ' + ((el.getAttribute && el.getAttribute('style')) || '');
-    const match = /url\((['"]?)(https?:[^'")]+)\1\)/.exec(raw);
+    const match = /url\((['"]?)((?:https?:)?\/\/[^'")]+)\1\)/.exec(raw);
     return match ? match[2] : '';
   };
-  const httpUrl = (value) => {
-    const url = pickSrc(value);
-    return url && url.indexOf('http') === 0 ? url : '';
+  const placeholder = (url) => {
+    const u = String(url || '').toLowerCase();
+    if (u.indexOf('.gif') < 0) return false;
+    return u.indexOf('1x1') >= 0 || u.indexOf('pixel') >= 0 || u.indexOf('spacer') >= 0;
   };
-  const artOf = (root) => {
+  const httpUrl = (value) => {
+    let url = pickSrc(value);
+    if (!url) return '';
+    if (url.indexOf('//') === 0) url = 'https:' + url;
+    if (placeholder(url)) return '';
+    return url.indexOf('http') === 0 ? url : '';
+  };
+  const collectArt = (root, nodes, depth) => {
+    if (!root || depth > 3 || nodes.length >= 8) return;
+    const queue = [root];
+    let seen = 0;
+    while (queue.length && nodes.length < 8 && seen < 40) {
+      const el = queue.shift();
+      if (!el) continue;
+      seen++;
+      try {
+        const tag = String(el.tagName || '').toLowerCase();
+        const style = (el.getAttribute && (el.getAttribute('style') || '')) || '';
+        if (tag === 'img' || tag === 'source' || style.indexOf('background') >= 0) nodes.push(el);
+      } catch (e) {}
+      try { if (el.shadowRoot) collectArt(el.shadowRoot, nodes, depth + 1); } catch (e) {}
+      try {
+        const kids = el.children || [];
+        for (let i = 0; i < kids.length && queue.length < 40; i++) queue.push(kids[i]);
+      } catch (e) {}
+    }
+  };
+  const artIn = (root) => {
     if (!root) return '';
     const nodes = [];
-    if (root.querySelectorAll) {
-      for (const el of root.querySelectorAll('img, source, [style*="background"]')) nodes.push(el);
-    }
+    collectArt(root, nodes, 0);
     nodes.push(root);
     for (const el of nodes) {
       if (!el) continue;
@@ -652,6 +719,21 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const url = httpUrl(value);
         if (url) return url;
       }
+    }
+    return '';
+  };
+  const artOf = (root) => {
+    const own = artIn(root);
+    if (own) return own;
+    const tag = root && root.tagName ? String(root.tagName).toLowerCase() : '';
+    if (tag === 'a') return '';
+    const parent = root && root.parentElement;
+    if (!parent || !parent.children) return '';
+    for (const kid of parent.children) {
+      if (!kid || kid === root) continue;
+      if (kid.querySelector && kid.querySelector('a[href]')) continue;
+      const url = artIn(kid);
+      if (url) return url;
     }
     return '';
   };
@@ -682,7 +764,11 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
     return 0;
   };
   try {
-    const profiles = [...document.querySelectorAll(cfg.profile)].map(label).filter(Boolean);
+    let profiles = [];
+    if (cfg.profile) {
+      try { profiles = [...document.querySelectorAll(cfg.profile)].map(label).filter(Boolean); }
+      catch (e) { profiles = []; }
+    }
     const shelves = [];
     const seenRow = new Set();
     for (const rowEl of document.querySelectorAll(cfg.row)) {
@@ -693,13 +779,15 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
       const seen = new Set();
       for (const card of rowEl.querySelectorAll(cfg.card)) {
         if (rows.length >= cfg.maxCards) break;
-        const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
-        const img = card.querySelector(cfg.image);
-        const href = abs(link && link.getAttribute('href'));
-        const name = label(link) || label(img) || label(card);
-        if (!href || !name || seen.has(href)) continue;
-        seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+        try {
+          const link = (card.matches && card.matches('a[href]')) ? card : (card.querySelector(cfg.link) || card.querySelector('a[href]'));
+          const img = card.querySelector(cfg.image);
+          const href = abs(link && link.getAttribute('href'));
+          const name = label(link) || label(img) || label(card);
+          if (!href || !name || seen.has(href)) continue;
+          seen.add(href);
+          rows.push({title: name, href: href, artwork: artOf(card), synopsis: synopsisOf(card, name), progress: progressOf(card.querySelector(cfg.progress))});
+        } catch (e) {}
       }
       if (!rows.length) continue;
       const key = (title || 'row') + ':' + rows[0].href;
@@ -718,7 +806,9 @@ QString mirrorExtractScript(const MirrorAdapter &adapter)
         const name = label(link) || label(img);
         if (!href || !name || seen.has(href)) continue;
         seen.add(href);
-        rows.push({title: name, href: href, artwork: artOf(link), synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
+        let art = '';
+        try { art = artOf(link); } catch (e) { art = ''; }
+        rows.push({title: name, href: href, artwork: art, synopsis: synopsisOf(link, name), progress: progressOf(link.querySelector(cfg.progress))});
       }
       if (rows.length)
         shelves.push({title: '', context: 'flatLinks', rows: rows});
@@ -878,6 +968,11 @@ bool mirrorKeepRicherPage(int previousTitles, int incomingTitles)
     return previousTitles >= 4 && incomingTitles * 2 < previousTitles;
 }
 
+bool mirrorHoldLoading(int previousTitles, int incomingTitles)
+{
+    return previousTitles <= 0 && incomingTitles <= 0;
+}
+
 QString mirrorCoverFetchScript(const QStringList &urls)
 {
     QStringList quoted;
@@ -922,6 +1017,52 @@ QString coverMatchKey(const QString &url)
     return parsed.host().toLower() + parsed.path();
 }
 
+bool coverTokenIsGeneric(const QString &token)
+{
+    const QString lower = token.toLower();
+    const QStringList generic = {QStringLiteral("maxresdefault"), QStringLiteral("hqdefault"),
+                                 QStringLiteral("mqdefault"),     QStringLiteral("sddefault"),
+                                 QStringLiteral("thumbnail"),     QStringLiteral("packshot"),
+                                 QStringLiteral("640x360bb"),     QStringLiteral("background")};
+    return generic.contains(lower);
+}
+
+bool coverFileIsDistinctive(const QString &file)
+{
+    const QString name = file.trimmed().toLower();
+    if (name.size() < 12 || coverTokenIsGeneric(name.section(QLatin1Char('.'), 0, 0)))
+        return false;
+    const QStringList generic = {QStringLiteral("640x360bb.jpg"), QStringLiteral("hqdefault.jpg"),
+                                 QStringLiteral("mqdefault.jpg"), QStringLiteral("sddefault.jpg"),
+                                 QStringLiteral("maxresdefault.jpg"), QStringLiteral("bb.jpg"),
+                                 QStringLiteral("source.jpg"), QStringLiteral("default.jpg")};
+    if (generic.contains(name))
+        return false;
+    static const QRegularExpression sizeRe(QStringLiteral("^\\d+x\\d+(?:bb)?\\.(?:jpe?g|png|webp|avif|gif)$"),
+                                            QRegularExpression::CaseInsensitiveOption);
+    return !sizeRe.match(name).hasMatch();
+}
+
+QString coverLooseToken(const QString &url)
+{
+    const QString path = QUrl(url).path();
+    QString best;
+    QString current;
+    const auto take = [&]() {
+        if (current.size() >= 12 && current.size() > best.size() && !coverTokenIsGeneric(current))
+            best = current;
+        current.clear();
+    };
+    for (const QChar c : path) {
+        if (c.isLetterOrNumber())
+            current.append(c);
+        else
+            take();
+    }
+    take();
+    return best;
+}
+
 bool coverUrlsMatch(const QString &wanted, const QString &loaded)
 {
     if (wanted.isEmpty() || loaded.isEmpty())
@@ -931,7 +1072,7 @@ bool coverUrlsMatch(const QString &wanted, const QString &loaded)
     if (coverMatchKey(wanted) == coverMatchKey(loaded))
         return true;
     const QString file = QUrl(wanted).fileName();
-    return file.size() >= 12 && QUrl(loaded).fileName() == file;
+    return coverFileIsDistinctive(file) && QUrl(loaded).fileName() == file;
 }
 
 QString coverDownloadReferer(const QString &homeUrl)
@@ -972,15 +1113,37 @@ QString expandCoverUrl(const QString &input)
     return url;
 }
 
+bool ftypMentionsAvif(const QByteArray &body)
+{
+    if (body.size() < 12 || body.mid(4, 4) != "ftyp")
+        return false;
+    const auto brandAt = [&](int offset) {
+        return offset + 4 <= body.size() ? body.mid(offset, 4) : QByteArray();
+    };
+    const auto avifBrand = [](const QByteArray &brand) {
+        return brand == "avif" || brand == "avis" || brand == "mif1" || brand == "miaf";
+    };
+    if (avifBrand(brandAt(8)))
+        return true;
+    int box = 0;
+    for (int i = 0; i < 4; ++i)
+        box = (box << 8) | static_cast<unsigned char>(body.at(i));
+    if (box < 16 || box > body.size())
+        box = qMin(body.size(), 64);
+    const int limit = qMin(box, 64);
+    for (int i = 16; i + 4 <= limit; i += 4) {
+        if (avifBrand(brandAt(i)))
+            return true;
+    }
+    return false;
+}
+
 QString coverKind(const QByteArray &body)
 {
     if (body.size() >= 12 && body.startsWith("RIFF") && body.mid(8, 4) == "WEBP")
         return QStringLiteral("webp");
-    if (body.size() >= 12 && body.mid(4, 4) == "ftyp") {
-        const QByteArray brand = body.mid(8, 4);
-        if (brand == "avif" || brand == "avis")
-            return QStringLiteral("avif");
-    }
+    if (ftypMentionsAvif(body))
+        return QStringLiteral("avif");
     if (body.size() >= 3 && static_cast<unsigned char>(body.at(0)) == 0xFF
         && static_cast<unsigned char>(body.at(1)) == 0xD8)
         return QStringLiteral("jpeg");
@@ -1025,17 +1188,23 @@ QImage imageFromCover(const QByteArray &body, const QByteArray &format)
 
 QByteArray ffmpegJpeg(const QByteArray &body)
 {
+    // AVIF é ISOBMFF: o ffmpeg só acha o átomo se puder buscar. O pipe não busca,
+    // e -f avif neste ffmpeg é só muxer. O arquivo temporário deixa a sonda ver a marca.
+    QTemporaryFile tmp;
+    if (!tmp.open() || tmp.write(body) != body.size())
+        return {};
+    tmp.flush();
+    const QString path = tmp.fileName();
+    tmp.close();
     QProcess proc;
     proc.start(QStringLiteral("ffmpeg"),
                {QStringLiteral("-nostdin"), QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                QStringLiteral("error"), QStringLiteral("-i"), QStringLiteral("pipe:0"), QStringLiteral("-an"),
+                QStringLiteral("error"), QStringLiteral("-i"), path, QStringLiteral("-an"),
                 QStringLiteral("-frames:v"), QStringLiteral("1"), QStringLiteral("-f"), QStringLiteral("image2pipe"),
                 QStringLiteral("-vcodec"), QStringLiteral("mjpeg"), QStringLiteral("-q:v"), QStringLiteral("3"),
                 QStringLiteral("pipe:1")});
     if (!proc.waitForStarted(2000))
         return {};
-    proc.write(body);
-    proc.closeWriteChannel();
     if (!proc.waitForFinished(8000)) {
         proc.kill();
         proc.waitForFinished(400);
@@ -1059,7 +1228,7 @@ void logImageFormatsOnce()
     std::fprintf(stderr, "zappe: formatos de imagem Qt: %s\n", qPrintable(names.join(QLatin1Char(' '))));
 }
 
-QByteArray coverJpegFromBody(const QByteArray &body, QString *detail)
+QByteArray coverJpegFromBody(const QByteArray &body, QString *detail, const QString &mime)
 {
     const auto note = [detail](const QString &text) {
         if (detail)
@@ -1090,6 +1259,7 @@ QByteArray coverJpegFromBody(const QByteArray &body, QString *detail)
         note(QString());
         return jpeg;
     }
+    Q_UNUSED(mime);
     jpeg = ffmpegJpeg(body);
     if (jpeg.size() >= 32) {
         const QImage check = imageFromCover(jpeg, "jpeg");
@@ -1112,12 +1282,16 @@ bool coverFetchIsBlocked(const QString &error)
            || text.contains(QStringLiteral("cors")) || text.contains(QStringLiteral("opaque"));
 }
 
-QString mirrorCoverClipScript(const QStringList &urls)
+QString mirrorCoverClipScript(const QStringList &urls, const QStringList &titles)
 {
     QStringList quoted;
-    for (const QString &url : urls)
-        quoted.append(jsString(url));
+    QStringList quotedTitles;
+    for (int i = 0; i < urls.size(); ++i) {
+        quoted.append(jsString(urls.at(i)));
+        quotedTitles.append(jsString(i < titles.size() ? titles.at(i) : QString()));
+    }
     return QStringLiteral("(() => { const urls = [") + quoted.join(QLatin1Char(','))
+           + QStringLiteral("]; const titles = [") + quotedTitles.join(QLatin1Char(','))
            + QStringLiteral(R"js(];
   const tail = (url) => {
     try {
@@ -1144,7 +1318,8 @@ QString mirrorCoverClipScript(const QStringList &urls)
   const vw = window.innerWidth || 1920;
   const vh = window.innerHeight || 1080;
   const rects = [];
-  for (const url of urls) {
+  for (let i = 0; i < urls.length; i++) {
+    const url = urls[i];
     if (rects.length >= 6) break;
     const key = tail(url);
     const bare = String(url).split('?')[0];
@@ -1152,9 +1327,25 @@ QString mirrorCoverClipScript(const QStringList &urls)
     for (const node of nodes) {
       const blob = blobOf(node);
       if (!blob) continue;
+      const generic = key === '640x360bb.jpg' || key === 'hqdefault.jpg' || key === 'mqdefault.jpg'
+        || key === 'sddefault.jpg' || key === 'maxresdefault.jpg';
       if (blob.indexOf(url) >= 0 || (bare.length > 12 && blob.indexOf(bare) >= 0)
-          || (key.length >= 12 && blob.indexOf(key) >= 0)) {
+          || (key.length >= 12 && !generic && blob.indexOf(key) >= 0)) {
         el = node;
+        break;
+      }
+    }
+    const title = String(titles[i] || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    if (!el && title.length >= 4) {
+      const cards = document.querySelectorAll('a, [aria-label], [role="link"]');
+      for (const card of cards) {
+        const name = ((card.getAttribute && (card.getAttribute('aria-label') || '')) || card.innerText || '')
+          .replace(/\s+/g, ' ').trim().toLowerCase();
+        if (!name || name.length > 120) continue;
+        const prefix = name === title || name.indexOf(title) === 0;
+        const contains = title.length >= 6 && name.indexOf(title) >= 0;
+        if (!prefix && !contains) continue;
+        el = (card.querySelector && card.querySelector('img, source')) || card;
         break;
       }
     }
@@ -1177,6 +1368,43 @@ QString mirrorCoverClipScript(const QStringList &urls)
 })())js");
 }
 
+bool coverUrlIsPlaceholder(const QString &url)
+{
+    const QString lower = url.toLower();
+    const bool gif = lower.contains(QStringLiteral(".gif"));
+    if (!gif)
+        return false;
+    return lower.contains(QStringLiteral("1x1")) || lower.contains(QStringLiteral("pixel"))
+           || lower.contains(QStringLiteral("spacer"));
+}
+
+bool mirrorKeepsProfiles(const MirrorAdapter &adapter)
+{
+    return adapter.kind.compare(QStringLiteral("youtube"), Qt::CaseInsensitive) != 0
+           && adapter.id.compare(QStringLiteral("youtube"), Qt::CaseInsensitive) != 0;
+}
+
+bool mirrorProfileLabel(const QString &name)
+{
+    const QString lower = name.trimmed().toLower();
+    if (lower.size() < 2)
+        return false;
+    if (lower == QLatin1String("account menu") || lower == QLatin1String("menu da conta")
+        || lower == QLatin1String("perfis") || lower == QLatin1String("profiles")
+        || lower.contains(QStringLiteral("account menu")) || lower.contains(QStringLiteral("menu da conta")))
+        return false;
+    return true;
+}
+
+bool mirrorLiveHero(const QString &title, const QString &href)
+{
+    Q_UNUSED(href);
+    const QString name = title.trimmed().toLower();
+    if (name.startsWith(QStringLiteral("assistir ao vivo")))
+        return true;
+    return name == QLatin1String("ao vivo") || name.startsWith(QStringLiteral("ao vivo:"));
+}
+
 MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
 {
     MirrorPage page;
@@ -1191,13 +1419,15 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             page.profiles.append(name);
     }
     const QString skill = QStringLiteral("mirror:") + adapter.id;
-    if (!page.profiles.isEmpty()) {
+    if (mirrorKeepsProfiles(adapter) && !page.profiles.isEmpty()) {
         ShelfData profiles;
         profiles.id = skill + QStringLiteral(":profiles");
         profiles.skillId = skill;
         profiles.title = QStringLiteral("Perfis");
         profiles.status = QStringLiteral("ok");
         for (const QString &name : page.profiles) {
+            if (!mirrorProfileLabel(name))
+                continue;
             RowData row;
             row.title = name;
             row.service = adapter.id;
@@ -1205,7 +1435,8 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             row.href = QStringLiteral("zappe://profile/") + QString::fromUtf8(QUrl::toPercentEncoding(name));
             profiles.rows.append(row);
         }
-        page.shelves.append(profiles);
+        if (!profiles.rows.isEmpty())
+            page.shelves.append(profiles);
     }
     int index = 0;
     int content = 0;
@@ -1227,14 +1458,16 @@ MirrorPage parseMirrorPage(const QByteArray &json, const MirrorAdapter &adapter)
             const QJsonObject rowObj = rowValue.toObject();
             const QString href = mirrorPlayUrl(adapter, rowObj.value(QStringLiteral("href")).toString());
             QString name = rowObj.value(QStringLiteral("title")).toString().trimmed();
-            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")) || titleRejected(adapter, name))
+            if (name.isEmpty() || href.isEmpty() || href.startsWith(QStringLiteral("zappe://")) || titleRejected(adapter, name)
+                || mirrorLiveHero(name, href))
                 continue;
             RowData row;
             row.title = name;
             row.service = adapter.id;
             row.serviceLabel = adapter.name;
             row.href = href;
-            row.artworkSpec = expandCoverUrl(rowObj.value(QStringLiteral("artwork")).toString());
+            const QString art = expandCoverUrl(rowObj.value(QStringLiteral("artwork")).toString());
+            row.artworkSpec = coverUrlIsPlaceholder(art) ? QString() : art;
             row.synopsis = rowObj.value(QStringLiteral("synopsis")).toString().simplified();
             if (row.synopsis.compare(name, Qt::CaseInsensitive) == 0)
                 row.synopsis.clear();
@@ -1389,7 +1622,8 @@ QString mirrorDomSnapshotScript()
 
 QString coverCachePath(const QString &cacheDir, const QString &url)
 {
-    const QByteArray hash = QCryptographicHash::hash(url.toUtf8(), QCryptographicHash::Sha1).toHex();
+    const QByteArray hash =
+        QCryptographicHash::hash(coverMatchKey(expandCoverUrl(url)).toUtf8(), QCryptographicHash::Sha1).toHex();
     QDir dir(cacheDir);
     dir.mkpath(QStringLiteral("covers"));
     return dir.filePath(QStringLiteral("covers/%1.jpg").arg(QString::fromLatin1(hash)));
@@ -1404,22 +1638,64 @@ bool coverIsFresh(const QString &path, const QDateTime &now, int maxAgeSecs)
     return age >= -60 && age <= maxAgeSecs;
 }
 
+int assignCoverFile(QVector<ShelfData> &shelves, const QString &url, const QString &path, bool *changed)
+{
+    int linked = 0;
+    bool didChange = false;
+    for (ShelfData &shelf : shelves) {
+        for (RowData &row : shelf.rows) {
+            if (!coverUrlsMatch(row.artworkSpec, url))
+                continue;
+            ++linked;
+            if (row.artwork != path) {
+                row.artwork = path;
+                didChange = true;
+            }
+        }
+    }
+    if (changed)
+        *changed = didChange;
+    if (linked > 0)
+        touchCoverFile(path);
+    return linked;
+}
+
+int purgeStaleCovers(const QString &cacheDir, const QDateTime &now)
+{
+    QDir dir(QDir(cacheDir).filePath(QStringLiteral("covers")));
+    if (!dir.exists())
+        return 0;
+    int removed = 0;
+    const QFileInfoList files = dir.entryInfoList(QDir::Files);
+    for (const QFileInfo &info : files) {
+        const QString name = info.fileName().toLower();
+        const bool legacy = name.endsWith(QStringLiteral(".img"));
+        const qint64 age = info.lastModified().secsTo(now);
+        if (!legacy && !(name.endsWith(QStringLiteral(".jpg")) && age > mirrorCoverUnusedMaxAgeSecs()))
+            continue;
+        if (QFile::remove(info.absoluteFilePath()))
+            ++removed;
+    }
+    return removed;
+}
+
 QVector<CoverJob> coverJobs(const QVector<ShelfData> &shelves, const QString &cacheDir, const QDateTime &now)
 {
     QVector<CoverJob> jobs;
     QSet<QString> seen;
     for (const ShelfData &shelf : shelves) {
         for (const RowData &row : shelf.rows) {
-            if (!row.artworkSpec.startsWith(QStringLiteral("http")) || seen.contains(row.artworkSpec))
+            if (!row.artworkSpec.startsWith(QStringLiteral("http")))
                 continue;
             const QString path = coverCachePath(cacheDir, row.artworkSpec);
-            if (coverIsFresh(path, now, mirrorCoverMaxAgeSecs()))
+            if (seen.contains(path) || coverIsFresh(path, now, mirrorCoverMaxAgeSecs()))
                 continue;
-            seen.insert(row.artworkSpec);
+            seen.insert(path);
             CoverJob job;
             job.serviceId = shelf.skillId.mid(QStringLiteral("mirror:").size());
             job.url = row.artworkSpec;
             job.path = path;
+            job.title = row.title;
             jobs.append(job);
         }
     }
@@ -1449,6 +1725,7 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     m_chrome = chrome;
     m_dataDir = dataDir;
     m_cacheDir = cacheDir();
+    purgeStaleCovers(m_cacheDir, QDateTime::currentDateTime());
     m_cdp = new CdpClient(this);
     connect(m_cdp, &CdpClient::attached, this, &MirrorSession::onAttached);
     connect(m_cdp, &CdpClient::navigated, this, &MirrorSession::onNavigated);
@@ -1524,6 +1801,7 @@ void MirrorSession::start(Guide *guide, ChromeSession *chrome, const QString &da
     m_refresh = new QTimer(this);
     m_refresh->setInterval(mirrorRefreshMs());
     connect(m_refresh, &QTimer::timeout, this, [this] {
+        purgeStaleCovers(m_cacheDir, QDateTime::currentDateTime());
         if (m_player)
             return;
         m_queue.clear();
@@ -1540,6 +1818,7 @@ void MirrorSession::onChromeReady()
     if (!m_cdp || !m_chrome)
         return;
     m_attachTries = 0;
+    m_cdpGaveUp = false;
     m_tabService.clear();
     if (m_job == JobPlay) {
         scheduleAttach();
@@ -1559,7 +1838,7 @@ void MirrorSession::scheduleAttach()
     if (!m_cdp || !m_chrome || m_cdp->connected())
         return;
     if (m_attachTries >= 12) {
-        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        noteCdpDown();
         return;
     }
     const int attempt = m_attachTries++;
@@ -1583,7 +1862,7 @@ void MirrorSession::schedulePump()
     if (!m_cdp || !m_chrome || m_busy)
         return;
     if (m_attachTries >= 12) {
-        std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+        noteCdpDown();
         return;
     }
     const int attempt = m_attachTries++;
@@ -1595,6 +1874,16 @@ void MirrorSession::schedulePump()
         if (!m_busy)
             pump();
     });
+}
+
+void MirrorSession::noteCdpDown()
+{
+    if (m_cdpGaveUp || !m_chrome)
+        return;
+    m_cdpGaveUp = true;
+    std::fprintf(stderr, "zappe: espelho sem CDP na porta %d\n", m_chrome->port());
+    if (m_chrome->face() == ChromeFace::Hidden)
+        m_chrome->reviveCatalog();
 }
 
 void MirrorSession::onAttached()
@@ -1817,6 +2106,7 @@ void MirrorSession::begin(const QString &serviceId, const QString &url, int job)
         return;
     }
     ++m_epoch;
+    m_feedPending = false;
     m_current = serviceId;
     const QString previous = m_navUrl;
     m_navUrl = url;
@@ -1901,6 +2191,20 @@ void MirrorSession::settle(int epoch, const QString &serviceId, int job, int wai
     considerExtract();
 }
 
+int httpArtworkCount(const MirrorPage &page)
+{
+    int count = 0;
+    for (const ShelfData &shelf : page.shelves) {
+        if (shelf.id.endsWith(QStringLiteral(":profiles")))
+            continue;
+        for (const RowData &row : shelf.rows) {
+            if (row.artworkSpec.startsWith(QStringLiteral("http")))
+                ++count;
+        }
+    }
+    return count;
+}
+
 void MirrorSession::considerExtract()
 {
     if (m_player || (m_job != JobExtract && m_job != JobSearch) || !m_cdp)
@@ -1921,9 +2225,17 @@ void MirrorSession::considerExtract()
         std::fprintf(stderr, "zappe: espelho %s feed %d títulos em %s\n", qPrintable(m_current), n,
                      qPrintable(sample.url.left(180)));
     }
-    if (mirrorPageHasTitles(network)) {
+    if (mirrorPageHasTitles(network) && httpArtworkCount(network) > 0) {
+        m_feedPending = false;
         acceptPage(network);
         return;
+    }
+    if (mirrorPageHasTitles(network)) {
+        m_feedPage = network;
+        m_feedPending = true;
+        std::fprintf(stderr, "zappe: espelho %s feed sem arte; extrator DOM\n", qPrintable(m_current));
+    } else {
+        m_feedPending = false;
     }
     std::fprintf(stderr, "zappe: espelho %s extrator DOM de mirrors.json\n", qPrintable(m_current));
     m_cdp->evaluate(mirrorExtractScript(*adapter));
@@ -1998,6 +2310,11 @@ void MirrorSession::finishEmpty()
 {
     m_busy = false;
     m_job = JobNone;
+    if (mirrorHoldLoading(shelfTitleCount(m_pages.value(m_current)), 0)) {
+        std::fprintf(stderr, "zappe: espelho %s leitura vazia; segue o loading\n", qPrintable(m_current));
+        QTimer::singleShot(500, this, &MirrorSession::pump);
+        return;
+    }
     MirrorPage empty;
     empty.ok = true;
     applyPage(empty);
@@ -2062,24 +2379,43 @@ void MirrorSession::postLearn(const QByteArray &png)
         finishEmpty();
         return;
     }
-    const QString serviceId = adapter->id;
-    const QByteArray body = llmRepairBody(*adapter, m_domSnap, m_samples, png, config.model);
+    postLearnRequest(adapter->id, png, config.model, false);
+}
+
+void MirrorSession::postLearnRequest(const QString &serviceId, const QByteArray &png, const QString &model, bool triedFallback)
+{
+    const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, serviceId);
+    const LlmConfig config = loadLlmConfig(m_dataDir);
+    if (!adapter || !llmEnabled(config) || !m_http) {
+        finishEmpty();
+        return;
+    }
+    const QByteArray body = llmRepairBody(*adapter, m_domSnap, m_samples, png, model);
     QNetworkRequest request{QUrl(config.url)};
-    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    const QByteArray authorization = llmAuthorization(config);
-    if (!authorization.isEmpty())
-        request.setRawHeader("Authorization", authorization);
+    for (const LlmHeader &header : llmRequestHeaders(config, serviceId, QDate::currentDate())) {
+        if (header.name == "Content-Type")
+            request.setHeader(QNetworkRequest::ContentTypeHeader, QString::fromUtf8(header.value));
+        else if (header.name == "User-Agent")
+            request.setHeader(QNetworkRequest::UserAgentHeader, QString::fromUtf8(header.value));
+        else
+            request.setRawHeader(header.name, header.value);
+    }
+    QElapsedTimer clock;
+    clock.start();
     QNetworkReply *reply = m_http->post(request, body);
     QTimer *timer = new QTimer(this);
     timer->setSingleShot(true);
     connect(timer, &QTimer::timeout, reply, &QNetworkReply::abort);
     timer->start(25000);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, timer, serviceId] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, timer, serviceId, model, triedFallback, png, clock] {
         timer->stop();
         timer->deleteLater();
         const QByteArray payload = reply->readAll();
         const bool httpOk = reply->error() == QNetworkReply::NoError;
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const qint64 elapsed = clock.elapsed();
         reply->deleteLater();
+        std::fprintf(stderr, "%s\n", qPrintable(llmResultLog(serviceId, model, status, elapsed)));
         if (m_current != serviceId || (m_job != JobLearnShot && m_job != JobLearnDom))
             return;
         const MirrorAdapter *current = findMirrorAdapter(m_adapters, serviceId);
@@ -2095,6 +2431,11 @@ void MirrorSession::postLearn(const QByteArray &png)
                     return;
                 }
             }
+        }
+        const LlmConfig again = loadLlmConfig(m_dataDir);
+        if (llmUseFallback(!httpOk, !saved, triedFallback, again.fallbackModel, model)) {
+            postLearnRequest(serviceId, png, again.fallbackModel, true);
+            return;
         }
         std::fprintf(stderr, "zappe: adaptador %s não foi salvo\n", qPrintable(serviceId));
         finishEmpty();
@@ -2359,6 +2700,11 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
     }
     if (m_job != JobExtract && m_job != JobSearch)
         return;
+    const QString extractError =
+        QJsonDocument::fromJson(value.toUtf8()).object().value(QStringLiteral("error")).toString();
+    if (!extractError.isEmpty())
+        std::fprintf(stderr, "zappe: espelho %s extrator falhou: %s\n", qPrintable(m_current),
+                     qPrintable(extractError.left(180)));
     const bool search = m_job == JobSearch;
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_current);
     if (search) {
@@ -2372,10 +2718,23 @@ void MirrorSession::onEvaluated(const QString &value, bool ok)
         return;
     }
     if (!adapter || !ok) {
+        if (m_feedPending && mirrorPageHasTitles(m_feedPage)) {
+            m_feedPending = false;
+            acceptPage(m_feedPage);
+            return;
+        }
         beginRepair();
         return;
     }
-    const MirrorPage page = parseMirrorPage(value.toUtf8(), *adapter);
+    MirrorPage page = parseMirrorPage(value.toUtf8(), *adapter);
+    if (m_feedPending) {
+        const int domArt = httpArtworkCount(page);
+        const int feedArt = httpArtworkCount(m_feedPage);
+        if ((domArt == 0 && feedArt > 0) || (!mirrorPageHasTitles(page) && mirrorPageHasTitles(m_feedPage))
+            || (domArt == 0 && feedArt == 0 && mirrorTitleCount(m_feedPage) > mirrorTitleCount(page)))
+            page = m_feedPage;
+        m_feedPending = false;
+    }
     m_lastDomTitles = mirrorTitleCount(page);
     std::fprintf(stderr, "zappe: espelho %s dom %d títulos login=%d\n", qPrintable(m_current), m_lastDomTitles,
                  page.needsLogin ? 1 : 0);
@@ -2393,7 +2752,6 @@ bool MirrorSession::applyPage(const MirrorPage &page)
     const MirrorAdapter *adapter = findMirrorAdapter(m_adapters, m_current);
     if (!adapter)
         return false;
-    m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     QVector<ShelfData> shelves = page.shelves;
     if (m_mergePage) {
         QVector<ShelfData> prior;
@@ -2404,6 +2762,16 @@ bool MirrorSession::applyPage(const MirrorPage &page)
         prior += shelves;
         shelves = prior;
     }
+    if (!m_mergePage && !page.needsLogin) {
+        const int previous = shelfTitleCount(m_pages.value(adapter->id));
+        const int incoming = shelfTitleCount(shelves);
+        if (mirrorKeepRicherPage(previous, incoming)) {
+            std::fprintf(stderr, "zappe: espelho %s manteve %d títulos (a leitura nova tem %d)\n", qPrintable(adapter->id),
+                         previous, incoming);
+            return false;
+        }
+    }
+    m_loadToken.insert(adapter->id, m_loadToken.value(adapter->id) + 1);
     if (shelves.isEmpty() && !page.needsLogin) {
         ShelfData empty;
         empty.id = QStringLiteral("mirror:%1:empty").arg(adapter->id);
@@ -2415,15 +2783,6 @@ bool MirrorSession::applyPage(const MirrorPage &page)
     }
     if (shelves.isEmpty())
         return false;
-    if (!m_mergePage && !page.needsLogin) {
-        const int previous = shelfTitleCount(m_pages.value(adapter->id));
-        const int incoming = shelfTitleCount(shelves);
-        if (mirrorKeepRicherPage(previous, incoming)) {
-            std::fprintf(stderr, "zappe: espelho %s manteve %d títulos (a leitura nova tem %d)\n", qPrintable(adapter->id),
-                         previous, incoming);
-            return false;
-        }
-    }
     paintMissingCovers(shelves, m_cacheDir, QDateTime::currentDateTime());
     m_pages.insert(adapter->id, shelves);
     m_guide->replaceServiceShelves(adapter->id, shelves);
@@ -2431,12 +2790,11 @@ bool MirrorSession::applyPage(const MirrorPage &page)
     for (const CoverJob &job : jobs) {
         bool queued = false;
         for (const CoverJob &have : m_covers) {
-            if (have.url == job.url)
+            if (have.path == job.path || coverUrlsMatch(have.url, job.url))
                 queued = true;
         }
         if (!queued) {
-            CoverJob queuedJob{adapter->id, job.url, job.path, {}};
-            queuedJob.referer = adapter->homeUrl;
+            CoverJob queuedJob{adapter->id, job.url, job.path, adapter->homeUrl, job.title};
             m_covers.append(queuedJob);
         }
     }
@@ -2474,18 +2832,28 @@ QByteArray MirrorSession::heldImage(const QString &url) const
 {
     const QString key = coverMatchKey(url);
     const QString file = QUrl(url).fileName();
+    const bool fileOk = coverFileIsDistinctive(file);
+    const QString token = coverLooseToken(url);
     QByteArray byFile;
     int fileHits = 0;
+    QByteArray byToken;
+    int tokenHits = 0;
     for (const HeldImage &image : m_images) {
         if (image.url == url || image.key == key)
             return image.body;
-        if (file.size() >= 12 && image.file == file) {
+        if (fileOk && image.file == file) {
             byFile = image.body;
             ++fileHits;
+        }
+        if (!token.isEmpty() && coverLooseToken(image.url) == token) {
+            byToken = image.body;
+            ++tokenHits;
         }
     }
     if (fileHits == 1)
         return byFile;
+    if (tokenHits == 1)
+        return byToken;
     return {};
 }
 
@@ -2512,6 +2880,7 @@ void MirrorSession::rememberImage(const QString &url, const QByteArray &body)
     held.file = QUrl(url).fileName();
     held.body = body;
     m_images.append(held);
+    attachHeldCover(held.url, body);
 }
 
 int MirrorSession::takeHeldCovers()
@@ -2617,13 +2986,16 @@ bool MirrorSession::startCoverClips()
         }
     }
     QStringList urls;
-    for (const CoverJob &job : m_clipJobs)
+    QStringList titles;
+    for (const CoverJob &job : m_clipJobs) {
         urls.append(job.url);
+        titles.append(job.title);
+    }
     const int gen = ++m_coverGen;
     m_coverPhase = 2;
     m_job = JobCovers;
     m_busy = true;
-    m_cdp->evaluate(mirrorCoverClipScript(urls), false);
+    m_cdp->evaluate(mirrorCoverClipScript(urls, titles), false);
     QTimer::singleShot(12000, this, [this, gen] { coverTimedOut(gen); });
     return true;
 }
@@ -2698,33 +3070,68 @@ void MirrorSession::finishAccept()
     QTimer::singleShot(500, this, &MirrorSession::pump);
 }
 
-void MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
+int MirrorSession::storeCover(const CoverJob &job, const QByteArray &body)
 {
-    QByteArray jpeg = body;
-    if (coverKind(body) != QLatin1String("jpeg")) {
-        QString detail;
-        jpeg = coverJpegFromBody(body, &detail);
-    }
+    QString detail;
+    const QByteArray jpeg = coverJpegFromBody(body, &detail);
     if (jpeg.size() < 32)
-        return;
+        return -1;
     QDir().mkpath(QFileInfo(job.path).absolutePath());
     QFile out(job.path);
-    if (!out.open(QIODevice::WriteOnly))
-        return;
-    out.write(jpeg);
+    if (!out.open(QIODevice::WriteOnly) || out.write(jpeg) != jpeg.size())
+        return -1;
     QVector<ShelfData> shelves = m_pages.value(job.serviceId);
     bool changed = false;
-    for (ShelfData &shelf : shelves) {
-        for (RowData &row : shelf.rows) {
-            if (row.artworkSpec == job.url) {
-                row.artwork = job.path;
-                changed = true;
-            }
-        }
-    }
+    const int linked = assignCoverFile(shelves, job.url, job.path, &changed);
     if (changed && m_guide) {
         m_pages.insert(job.serviceId, shelves);
         m_guide->replaceServiceShelves(job.serviceId, shelves);
+    }
+    return linked;
+}
+
+int MirrorSession::saveFromNetwork(const CoverJob &job)
+{
+    const QByteArray body = heldImage(job.url);
+    if (body.isEmpty())
+        return 0;
+    const int cards = storeCover(job, body);
+    return cards < 0 ? 0 : cards;
+}
+
+void MirrorSession::attachHeldCover(const QString &url, const QByteArray &body)
+{
+    if (url.isEmpty() || body.isEmpty() || m_pages.isEmpty())
+        return;
+    for (auto it = m_pages.cbegin(); it != m_pages.cend(); ++it) {
+        bool match = false;
+        for (const ShelfData &shelf : it.value()) {
+            for (const RowData &row : shelf.rows) {
+                if (coverUrlsMatch(row.artworkSpec, url))
+                    match = true;
+            }
+        }
+        if (!match)
+            continue;
+        const QString path = coverCachePath(m_cacheDir, url);
+        bool fresh = false;
+        for (const ShelfData &shelf : it.value()) {
+            for (const RowData &row : shelf.rows) {
+                if (coverUrlsMatch(row.artworkSpec, url) && row.artwork == path)
+                    fresh = true;
+            }
+        }
+        if (fresh && coverIsFresh(path, QDateTime::currentDateTime(), mirrorCoverMaxAgeSecs()))
+            continue;
+        CoverJob job;
+        job.serviceId = it.key();
+        job.url = url;
+        job.path = path;
+        const int cards = storeCover(job, body);
+        if (cards > 0) {
+            std::fprintf(stderr, "zappe: espelho %s capa da rede cards %d %s\n", qPrintable(it.key()), cards,
+                         qPrintable(fileUrl(path)));
+        }
     }
 }
 
@@ -2733,6 +3140,8 @@ void MirrorSession::startDirectCovers(const QVector<CoverJob> &jobs)
     m_directJobs = jobs;
     m_directActive = 0;
     m_directSaved = 0;
+    m_directCards = 0;
+    m_directFromNet = 0;
     m_directTotal = int(jobs.size());
     m_directError.clear();
     m_directFile.clear();
@@ -2753,8 +3162,8 @@ void MirrorSession::logDirectCovers()
         extra += QStringLiteral(" ") + m_directFile;
     if (!m_directError.isEmpty())
         extra += QStringLiteral(" erro ") + m_directError.left(240);
-    std::fprintf(stderr, "zappe: espelho %s capas %d/%d direto%s\n", qPrintable(m_current), m_directSaved,
-                 m_directTotal, qPrintable(extra));
+    std::fprintf(stderr, "zappe: espelho %s capas %d/%d direto, cards %d, rede %d%s\n", qPrintable(m_current),
+                 m_directSaved, m_directTotal, m_directCards, m_directFromNet, qPrintable(extra));
     m_directTotal = -1;
 }
 
@@ -2787,20 +3196,36 @@ void MirrorSession::pumpDirectCovers()
             const QString type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
             reply->deleteLater();
             QString detail;
-            const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail) : QByteArray();
+            const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail, type) : QByteArray();
             if (jpeg.size() >= 32) {
-                storeCover(job, jpeg);
-                ++m_directSaved;
-                if (m_directFile.isEmpty())
-                    m_directFile = fileUrl(job.path);
-            } else if (m_directError.isEmpty()) {
-                const QString mime = type.section(QLatin1Char(';'), 0, 0).trimmed();
-                if (!httpOk && status <= 0)
-                    m_directError = netErr.left(120);
-                else
-                    m_directError = QStringLiteral("http %1 %2 %3 %4")
-                                        .arg(QString::number(status), mime.isEmpty() ? QStringLiteral("-") : mime.left(40),
-                                             detail.isEmpty() ? coverBodyLabel(body) : detail, job.url.left(90));
+                const int cards = storeCover(job, jpeg);
+                if (cards >= 0) {
+                    ++m_directSaved;
+                    m_directCards += cards;
+                    if (m_directFile.isEmpty())
+                        m_directFile = fileUrl(job.path);
+                }
+            } else {
+                const int netCards = saveFromNetwork(job);
+                if (netCards > 0) {
+                    m_directFromNet += netCards;
+                    m_directCards += netCards;
+                    if (m_directFile.isEmpty())
+                        m_directFile = fileUrl(job.path);
+                } else if (m_directError.isEmpty()) {
+                    const QString mime = type.section(QLatin1Char(';'), 0, 0).trimmed();
+                    const QString shown = expandCoverUrl(job.url).left(220);
+                    std::fprintf(stderr, "zappe: espelho %s capa direta falhou http %d %s %s\n", qPrintable(job.serviceId),
+                                 status, qPrintable(mime.isEmpty() ? QStringLiteral("-") : mime.left(40)),
+                                 qPrintable(shown));
+                    if (!httpOk && status <= 0)
+                        m_directError = netErr.left(120);
+                    else
+                        m_directError = QStringLiteral("http %1 %2 %3")
+                                            .arg(QString::number(status),
+                                                 mime.isEmpty() ? QStringLiteral("-") : mime.left(40),
+                                                 detail.isEmpty() ? coverBodyLabel(body) : detail);
+                }
             }
             --m_directActive;
             if (m_directJobs.isEmpty() && m_directActive == 0)
@@ -2833,11 +3258,14 @@ void MirrorSession::downloadNext()
     connect(reply, &QNetworkReply::finished, this, [this, reply, job] {
         const QByteArray body = reply->readAll();
         const bool httpOk = reply->error() == QNetworkReply::NoError;
+        const QString type = reply->header(QNetworkRequest::ContentTypeHeader).toString();
         reply->deleteLater();
         QString detail;
-        const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail) : QByteArray();
+        const QByteArray jpeg = httpOk ? coverJpegFromBody(body, &detail, type) : QByteArray();
         if (jpeg.size() >= 32)
             storeCover(job, jpeg);
+        else
+            saveFromNetwork(job);
         m_downloading = false;
         downloadNext();
     });

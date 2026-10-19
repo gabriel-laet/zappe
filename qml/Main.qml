@@ -69,6 +69,11 @@ Window {
             z: 3
         }
 
+        TvTestView {
+            anchors.fill: parent
+            z: 8
+        }
+
         Item {
             id: header
             z: 4
@@ -79,7 +84,7 @@ Window {
             anchors.rightMargin: 80
             anchors.topMargin: 36
             height: 64
-            opacity: win.splashOn ? 0 : 1
+            opacity: win.splashOn || guide.page === "settings" ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
 
             Row {
@@ -147,6 +152,40 @@ Window {
     VolumeHud {}
     Toast {}
 
+    Rectangle {
+        visible: guide.dialText.length > 0
+        z: 18
+        anchors.centerIn: parent
+        width: dialLabel.implicitWidth + 96
+        height: 168
+        radius: 28
+        color: "#E6141416"
+        border.color: guide.accent
+        border.width: 3
+        Column {
+            anchors.centerIn: parent
+            spacing: 6
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "CANAL"
+                color: "#aeaeb2"
+                font.family: guide.uiFont
+                font.pixelSize: 18
+                font.weight: 700
+                font.letterSpacing: 2
+            }
+            Text {
+                id: dialLabel
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: guide.dialText
+                color: "#f5f5f7"
+                font.family: guide.uiFont
+                font.pixelSize: 84
+                font.weight: 600
+            }
+        }
+    }
+
     SplashView {
         anchors.fill: parent
         z: 6
@@ -200,23 +239,29 @@ Window {
         focus: true
         z: 20
         Keys.onPressed: function (event) {
-            // XF86Back é o keycode 166. Em algumas sessões o Qt não o mapeia
-            // para Key_Back, e o mpv em foco ignora a tecla.
-            const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Back
-                    || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home
-                    || event.key === Qt.Key_HomePage || event.nativeScanCode === 166
-            if (backKey && event.isAutoRepeat) {
+            // XF86Back é o keycode 166 (evdev KEY_BACK 158). Em algumas sessões
+            // o Qt não o mapeia para Key_Back, e o mpv em foco ignora a tecla.
+            const homeKey = event.key === Qt.Key_Home || event.key === Qt.Key_HomePage
+            const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace
+                    || event.key === Qt.Key_Back || event.nativeScanCode === 166
+            if ((homeKey || backKey) && event.isAutoRepeat) {
                 event.accepted = true
                 return
             }
+            if (!event.isAutoRepeat)
+                house.noteX11Key(event.nativeScanCode, event.key)
             if (win.splashOn) {
                 win.splashOn = false
                 event.accepted = true
                 return
             }
+            if (homeKey) {
+                house.goHome()
+                event.accepted = true
+                return
+            }
             if (house.promptOpen) {
-                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Home
-                        || event.key === Qt.Key_HomePage)
+                if (backKey)
                     house.cancelPrompt()
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                     house.submitPrompt(house.draft)
@@ -224,8 +269,7 @@ Window {
                 return
             }
             if (house.loading) {
-                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Backspace
-                        || event.key === Qt.Key_Home || event.key === Qt.Key_HomePage)
+                if (backKey)
                     house.cancelLoading()
                 else if (house.loadingFailed && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                         || event.key === Qt.Key_Select))
@@ -240,12 +284,6 @@ Window {
                 return
             }
             if (house.playing && backKey) {
-                house.goBack()
-                event.accepted = true
-                return
-            }
-            if (event.nativeScanCode === 166 && event.key !== Qt.Key_Escape && event.key !== Qt.Key_Back
-                    && event.key !== Qt.Key_Backspace && event.key !== Qt.Key_Home && event.key !== Qt.Key_HomePage) {
                 house.goBack()
                 event.accepted = true
                 return
@@ -266,14 +304,17 @@ Window {
             case Qt.Key_Return:
             case Qt.Key_Enter:
             case Qt.Key_Select:
-                guide.activate()
+                if (!house.acceptBandScan())
+                    guide.activate()
                 break
             case Qt.Key_Escape:
-            case Qt.Key_Back:
             case Qt.Key_Backspace:
+            case Qt.Key_Back:
+                house.goBack()
+                break
             case Qt.Key_Home:
             case Qt.Key_HomePage:
-                house.goBack()
+                house.goHome()
                 break
             case Qt.Key_Menu:
             case Qt.Key_Multi_key:
@@ -293,6 +334,21 @@ Window {
                 break
             case Qt.Key_PageDown:
                 guide.move(1, 0)
+                break
+            case Qt.Key_0:
+            case Qt.Key_1:
+            case Qt.Key_2:
+            case Qt.Key_3:
+            case Qt.Key_4:
+            case Qt.Key_5:
+            case Qt.Key_6:
+            case Qt.Key_7:
+            case Qt.Key_8:
+            case Qt.Key_9:
+                house.dial(event.text)
+                break
+            case Qt.Key_Period:
+                house.dial(".")
                 break
             default:
                 event.accepted = false

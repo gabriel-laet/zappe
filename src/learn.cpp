@@ -1,5 +1,6 @@
 #include "learn.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -164,20 +165,29 @@ LlmConfig loadLlmConfig(const QString &dataDir)
         config.url = opt(obj, "url");
         config.key = opt(obj, "key");
         config.model = opt(obj, "model");
+        config.fallbackModel = opt(obj, "fallbackModel");
+        config.sessionHeader = opt(obj, "sessionHeader");
+        config.userAgent = opt(obj, "userAgent");
     }
-    const QByteArray envUrl = qgetenv("ZAPPE_LLM_URL");
-    if (!envUrl.isEmpty())
-        config.url = QString::fromUtf8(envUrl);
-    const QByteArray envKey = qgetenv("ZAPPE_LLM_KEY");
-    if (!envKey.isEmpty())
-        config.key = QString::fromUtf8(envKey);
-    const QByteArray envModel = qgetenv("ZAPPE_LLM_MODEL");
-    if (!envModel.isEmpty())
-        config.model = QString::fromUtf8(envModel);
+    const auto fromEnv = [](const char *name, QString &field) {
+        const QByteArray env = qgetenv(name);
+        if (!env.isEmpty())
+            field = QString::fromUtf8(env);
+    };
+    fromEnv("ZAPPE_LLM_URL", config.url);
+    fromEnv("ZAPPE_LLM_KEY", config.key);
+    fromEnv("ZAPPE_LLM_MODEL", config.model);
+    fromEnv("ZAPPE_LLM_FALLBACK_MODEL", config.fallbackModel);
+    fromEnv("ZAPPE_LLM_SESSION_HEADER", config.sessionHeader);
+    fromEnv("ZAPPE_LLM_USER_AGENT", config.userAgent);
     if (config.model.trimmed().isEmpty())
         config.model = QStringLiteral("gpt-4o-mini");
     config.url = config.url.trimmed();
     config.key = config.key.trimmed();
+    config.model = config.model.trimmed();
+    config.fallbackModel = config.fallbackModel.trimmed();
+    config.sessionHeader = config.sessionHeader.trimmed();
+    config.userAgent = config.userAgent.trimmed();
     return config;
 }
 
@@ -191,6 +201,68 @@ QByteArray llmAuthorization(const LlmConfig &config)
     if (config.key.isEmpty())
         return {};
     return QByteArrayLiteral("Bearer ") + config.key.toUtf8();
+}
+
+QString llmUserAgent(const LlmConfig &config)
+{
+    const QString custom = config.userAgent.trimmed();
+    if (!custom.isEmpty())
+        return custom;
+    QString version = QCoreApplication::applicationVersion().trimmed();
+    if (version.isEmpty())
+        version = QStringLiteral("0.2.0");
+    return QStringLiteral("zappe/") + version;
+}
+
+QString llmSessionId(const QString &serviceId, const QDate &day)
+{
+    QString id;
+    const QString raw = serviceId.trimmed().toLower();
+    for (const QChar c : raw) {
+        if (c.isLetterOrNumber() || c == QLatin1Char('-') || c == QLatin1Char('_'))
+            id.append(c);
+    }
+    if (id.isEmpty())
+        id = QStringLiteral("catalog");
+    const QDate when = day.isValid() ? day : QDate::currentDate();
+    return QStringLiteral("zappe-%1-%2").arg(id, when.toString(QStringLiteral("yyyyMMdd")));
+}
+
+QVector<LlmHeader> llmRequestHeaders(const LlmConfig &config, const QString &serviceId, const QDate &day)
+{
+    QVector<LlmHeader> headers;
+    headers.append({QByteArrayLiteral("Content-Type"), QByteArrayLiteral("application/json")});
+    headers.append({QByteArrayLiteral("User-Agent"), llmUserAgent(config).toUtf8()});
+    const QByteArray authorization = llmAuthorization(config);
+    if (!authorization.isEmpty())
+        headers.append({QByteArrayLiteral("Authorization"), authorization});
+    QString sessionName;
+    for (const QChar c : config.sessionHeader.trimmed()) {
+        if (c.unicode() >= 33 && c.unicode() < 127 && c != QLatin1Char(':'))
+            sessionName.append(c);
+    }
+    if (!sessionName.isEmpty())
+        headers.append({sessionName.toUtf8(), llmSessionId(serviceId, day).toUtf8()});
+    return headers;
+}
+
+bool llmUseFallback(bool requestFailed, bool adapterRejected, bool alreadyTriedFallback, const QString &fallbackModel,
+                    const QString &usedModel)
+{
+    if (alreadyTriedFallback)
+        return false;
+    const QString next = fallbackModel.trimmed();
+    if (next.isEmpty() || next == usedModel.trimmed())
+        return false;
+    return requestFailed || adapterRejected;
+}
+
+QString llmResultLog(const QString &serviceId, const QString &model, int httpStatus, qint64 elapsedMs)
+{
+    if (elapsedMs < 0)
+        elapsedMs = 0;
+    return QStringLiteral("zappe: llm %1 model %2 http %3 %4 ms")
+        .arg(serviceId.left(40), model.left(80), QString::number(httpStatus), QString::number(elapsedMs));
 }
 
 QByteArray llmRepairBody(const MirrorAdapter &current, const QString &dom, const QVector<NetworkSample> &samples,
