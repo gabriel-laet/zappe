@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QHash>
 #include <QJsonArray>
+#include <QSet>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
@@ -381,7 +382,7 @@ QString fullsegGapReason(const QVector<OtaService> &services, const QString &net
     }
     if (hits.isEmpty()) {
         return QStringLiteral(
-            "A varredura não gravou a Band. O dvbv5 costuma travar na camada A (1-seg) ou o nome do SDT não contém Band; o canal físico usual é o 13.");
+            "A varredura não gravou a Band. O dvbv5 costuma travar na camada A (1-seg) ou o nome do SDT não contém Band; o virtual é 13.1 e o físico em São Paulo é o 23 (527 MHz).");
     }
     bool full = false;
     for (const OtaService &service : hits) {
@@ -583,10 +584,120 @@ FrameRefresh planFrameRefresh(bool playing, const QString &playingChannel, const
     return FrameRefresh::Preview;
 }
 
+int bandPhysicalChannel()
+{
+    return 23;
+}
+
+int bandFrequencyHz()
+{
+    return 527142857;
+}
+
+QString bandScanSeed()
+{
+    return QStringLiteral("[Band SP]\n"
+                          "\tDELIVERY_SYSTEM = ISDBT\n"
+                          "\tFREQUENCY = 527142857\n"
+                          "\tBANDWIDTH_HZ = 6000000\n"
+                          "\tISDBT_LAYER_ENABLED = 7\n");
+}
+
+QStringList bandScanArguments(const QString &seedPath, const QString &outPath)
+{
+    return {QStringLiteral("-a"), QStringLiteral("0"), QStringLiteral("-o"), outPath, seedPath};
+}
+
+QString bandRescanPrompt(const QString &typed)
+{
+    const VirtualChannel channel = parseVirtualChannel(typed);
+    if (!channel.ok || channel.major != 13)
+        return {};
+    if (!(channel.minor < 0 || channel.minor == 1))
+        return {};
+    return QStringLiteral("A Band não está na varredura. OK busca o canal físico 23 (527 MHz). Voltar cancela.");
+}
+
+namespace {
+
+struct ConfBlock {
+    QString name;
+    QString body;
+};
+
+QVector<ConfBlock> confBlocks(const QString &text)
+{
+    QVector<ConfBlock> out;
+    ConfBlock current;
+    bool open = false;
+    const auto flush = [&] {
+        if (!open)
+            return;
+        out.append(current);
+        current = {};
+        open = false;
+    };
+    for (const QString &raw : text.split(QLatin1Char('\n'))) {
+        const QString line = raw.trimmed();
+        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']')) && line.size() > 2) {
+            flush();
+            current.name = line.mid(1, line.size() - 2).trimmed();
+            current.body = raw + QLatin1Char('\n');
+            open = true;
+            continue;
+        }
+        if (open)
+            current.body += raw + QLatin1Char('\n');
+    }
+    flush();
+    return out;
+}
+
+} // namespace
+
+QString mergeChannelConfig(const QString &existing, const QString &scanned)
+{
+    QSet<QString> names;
+    for (const ConfBlock &block : confBlocks(existing))
+        names.insert(block.name);
+    QString extra;
+    for (const ConfBlock &block : confBlocks(scanned)) {
+        if (block.name.isEmpty() || names.contains(block.name))
+            continue;
+        names.insert(block.name);
+        extra += block.body;
+        if (!extra.endsWith(QLatin1Char('\n')))
+            extra += QLatin1Char('\n');
+    }
+    if (extra.isEmpty())
+        return existing;
+    QString out = existing;
+    if (!out.isEmpty() && !out.endsWith(QLatin1Char('\n')))
+        out += QLatin1Char('\n');
+    if (!out.isEmpty() && !out.endsWith(QStringLiteral("\n\n")))
+        out += QLatin1Char('\n');
+    return out + extra;
+}
+
+QString primaryChannelConfigPath()
+{
+    for (const QString &path : channelConfigPaths()) {
+        const QFileInfo info(path);
+        if (info.exists() && info.isWritable())
+            return info.absoluteFilePath();
+        if (!info.exists() && QFileInfo(info.absolutePath()).isWritable())
+            return info.absoluteFilePath();
+    }
+    return QDir(resolveDataDir()).filePath(QStringLiteral("channels.conf"));
+}
+
 QVector<OtaChannel> listOtaChannels()
 {
     QVector<OtaChannel> out;
     static QString logged;
+    static bool bandLogged = false;
+    QString bandPending;
+    bool bandCovered = false;
     for (const QString &path : channelConfigPaths()) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly))
@@ -609,11 +720,17 @@ QVector<OtaChannel> listOtaChannels()
                 std::fprintf(stderr, "zappe: ota: %s %s%s\n", kept ? "fica" : "sai", qPrintable(service.name),
                              service.oneSeg ? " (1-seg)" : "");
             }
-            const QString band = fullsegGapReason(services, QStringLiteral("band"));
-            if (!band.isEmpty())
-                std::fprintf(stderr, "zappe: ota: %s\n", qPrintable(band));
         }
+        const QString band = fullsegGapReason(services, QStringLiteral("band"));
+        if (band.isEmpty())
+            bandCovered = true;
+        else if (bandPending.isEmpty())
+            bandPending = band;
         out += channels;
+    }
+    if (!bandCovered && !bandPending.isEmpty() && !bandLogged) {
+        bandLogged = true;
+        std::fprintf(stderr, "zappe: ota: %s\n", qPrintable(bandPending));
     }
     return out;
 }
@@ -646,6 +763,7 @@ void mergeLiveChannels(CatalogFile &catalog, const QVector<OtaChannel> &channels
         row.href = QStringLiteral("zappe://ota/") + channel.name;
         row.live = true;
         row.wide = true;
+        row.number = channel.number;
         if (!channel.number.isEmpty())
             row.synopsis = QStringLiteral("Canal %1").arg(channel.number);
         assignOtaFrame(row, resolveDataDir(), QDateTime::currentDateTime());
@@ -702,6 +820,14 @@ void signalPipeline(qint64 pid, const QString &sig)
 }
 
 } // namespace
+
+bool OtaPlayer::releaseTuner()
+{
+    if (m_process)
+        return false;
+    stopPreview();
+    return true;
+}
 
 void OtaPlayer::stopPreview()
 {
@@ -985,15 +1111,21 @@ void OtaPlayer::refreshFocused(const QString &requested)
             return;
         }
         QFile ts(tsPath);
-        if (ts.open(QIODevice::ReadOnly)) {
+        const bool opened = ts.open(QIODevice::ReadOnly);
+        const qint64 bytes = opened ? ts.size() : qint64(QFile::exists(tsPath) ? QFileInfo(tsPath).size() : 0);
+        if (!opened || bytes < 188) {
+            std::fprintf(stderr, "zappe: ota: epg \"%s\" ts ausente ou curto (%lld bytes)\n", qPrintable(resolved),
+                         static_cast<long long>(bytes));
+        } else {
             const QByteArray payload = ts.read(6 * 1024 * 1024);
             ts.close();
             const EpgSnapshot epg = parseEpgFromTs(payload);
-            if (!epg.nowTitle.isEmpty() || !epg.nextTitle.isEmpty()) {
-                std::fprintf(stderr, "zappe: ota: epg \"%s\" agora=\"%s\" a seguir=\"%s\"\n", qPrintable(resolved),
-                             qPrintable(epg.nowTitle), qPrintable(epg.nextTitle));
+            std::fprintf(stderr,
+                         "zappe: ota: epg \"%s\" bytes=%lld pacotes=%d pids=%s tabelas=%s agora=\"%s\" a seguir=\"%s\"\n",
+                         qPrintable(resolved), static_cast<long long>(bytes), epg.packets, qPrintable(epg.pids),
+                         qPrintable(epg.tables), qPrintable(epg.nowTitle), qPrintable(epg.nextTitle));
+            if (!epg.nowTitle.isEmpty() || !epg.nextTitle.isEmpty())
                 emit epgReady(resolved, epg.nowTitle, epg.nextTitle);
-            }
         }
         if (otaFrameIsFresh(jpgPath, QDateTime::currentDateTime()))
             emit frameReady(resolved, jpgPath);

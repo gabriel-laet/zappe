@@ -36,6 +36,16 @@ QVector<OtaService> parseOtaServices(const QString &text);
 QStringList filterAndSortChannels(QStringList names);
 QStringList playableNames(const QVector<OtaService> &services);
 QString fullsegGapReason(const QVector<OtaService> &services, const QString &networkId);
+// São Paulo: Band virtual 13.1, físico 23 UHF, 527,143 MHz. Não é o físico 13.
+int bandPhysicalChannel();
+int bandFrequencyHz();
+QString bandScanSeed();
+QStringList bandScanArguments(const QString &seedPath, const QString &outPath);
+// Texto do toast quando 13 ou 13.1 não está na varredura. Vazio nos outros números.
+QString bandRescanPrompt(const QString &typed);
+// Acrescenta seções novas sem repetir o nome. O texto existente fica no começo.
+QString mergeChannelConfig(const QString &existing, const QString &scanned);
+QString primaryChannelConfigPath();
 QVector<OtaChannel> otaChannelsFromConf(const QString &text);
 QString resolveChannelName(const QString &requested, const QStringList &names);
 QString resolveDialTarget(const QString &typed, const QVector<OtaChannel> &channels);
@@ -66,6 +76,8 @@ public:
     // Capa do canal em foco. Se esse canal já está no ar, só tira um frame.
     // Se outro está no ar, não troca. Se o sintonizador está livre, grava um TS curto.
     void refreshFocused(const QString &requested);
+    // Solta a prévia. Falso se um canal já está no ar: a busca não toma o sintonizador.
+    bool releaseTuner();
 
 signals:
     void started(const QString &channel);

@@ -1,5 +1,6 @@
 #include "guide.h"
 
+#include "branding.h"
 #include "display.h"
 #include "mirror.h"
 #include "ota.h"
@@ -568,6 +569,37 @@ void Guide::toggleSaved()
     emit savedChanged();
 }
 
+void Guide::home()
+{
+    if (!coalesce(QStringLiteral("home")))
+        return;
+    const bool detailWas = m_detailOpen;
+    const bool menuWas = m_menuOpen;
+    m_detailOpen = false;
+    m_menuOpen = false;
+    m_menuIndex = 0;
+    m_mirrorService.clear();
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    int shelf = 0;
+    for (int i = 0; i < shelfCount(); ++i) {
+        if (shelfShown(i)) {
+            shelf = i;
+            break;
+        }
+    }
+    m_shelf = shelf;
+    m_index = 0;
+    clampIndex();
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    publishFocus();
+    if (detailWas)
+        emit detailChanged();
+    if (menuWas)
+        emit menuChanged();
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))
@@ -608,6 +640,18 @@ void Guide::clearDial()
         return;
     m_dialText.clear();
     emit dialChanged();
+}
+
+void Guide::refreshLiveChannels()
+{
+    CatalogFile catalog;
+    catalog.path = m_catalogPath;
+    catalog.shelves = m_baseShelves;
+    const QString data = m_dataDir.isEmpty() ? resolveDataDir() : m_dataDir;
+    mergeLiveChannels(catalog, listOtaChannels());
+    decorateCatalog(catalog, data, cacheDir());
+    m_baseShelves = std::move(catalog.shelves);
+    publishShelves(false);
 }
 
 void Guide::noteLiveEpg(const QString &href, const QString &line)

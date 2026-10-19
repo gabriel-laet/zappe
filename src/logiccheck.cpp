@@ -6,6 +6,7 @@
 #include "chrome.h"
 #include "display.h"
 #include "epg.h"
+#include "guide.h"
 #include "house.h"
 #include "keymap.h"
 #include "learn.h"
@@ -31,6 +32,7 @@
 #include <QTemporaryDir>
 
 #include <cstdio>
+#include <cstring>
 
 namespace zappe {
 namespace {
@@ -56,7 +58,8 @@ int runLogicSelfCheck()
     if (actionForEvdev(103) != RemoteAction::Up || actionForEvdev(108) != RemoteAction::Down
         || actionForEvdev(105) != RemoteAction::Left || actionForEvdev(106) != RemoteAction::Right)
         return fail("arrows");
-    if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Back
+    if (actionForEvdev(28) != RemoteAction::Ok || actionForEvdev(158) != RemoteAction::Home
+        || actionForEvdev(172) != RemoteAction::Home || actionForEvdev(102) != RemoteAction::Home
         || actionForEvdev(14) != RemoteAction::Back || actionForEvdev(1) != RemoteAction::Back)
         return fail("ok/home/del/escape");
     if (actionForEvdev(127) != RemoteAction::Menu || actionForEvdev(104) != RemoteAction::PageUp
@@ -65,8 +68,8 @@ int runLogicSelfCheck()
     if (actionForEvdev(115) != RemoteAction::VolumeUp || actionForEvdev(114) != RemoteAction::VolumeDown
         || actionForEvdev(113) != RemoteAction::Mute || actionForEvdev(582) != RemoteAction::Voice)
         return fail("volume/mic");
-    if (actionForEvdev(172) != RemoteAction::Unmapped)
-        return fail("old homepage code is not home");
+    if (actionForEvdev(158) == RemoteAction::Back)
+        return fail("room home key focuses the guide");
     if (dialFromEvdev(2) != 1 || dialFromEvdev(11) != 0 || dialFromEvdev(79) != 1 || dialFromEvdev(82) != 0
         || dialFromEvdev(52) != 10 || dialFromEvdev(83) != 10 || dialFromEvdev(172) != -1
         || actionForEvdev(2) != RemoteAction::Unmapped)
@@ -144,8 +147,25 @@ int runLogicSelfCheck()
         return fail("band 1seg reason");
     const QString noBand = fullsegGapReason(parseOtaServices(QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n")),
                                             QStringLiteral("band"));
-    if (!noBand.contains(QStringLiteral("não gravou")) || !noBand.contains(QStringLiteral("13")))
+    if (!noBand.contains(QStringLiteral("não gravou")) || !noBand.contains(QStringLiteral("13"))
+        || !noBand.contains(QStringLiteral("23")) || bandPhysicalChannel() != 23 || bandFrequencyHz() != 527142857)
         return fail("band missing from scan");
+    if (!bandScanSeed().contains(QStringLiteral("527142857")) || !bandScanSeed().contains(QStringLiteral("6000000"))
+        || !bandScanSeed().contains(QStringLiteral("ISDBT")))
+        return fail("band scan seed");
+    const QStringList scanArgs = bandScanArguments(QStringLiteral("/tmp/band-initial.conf"), QStringLiteral("/tmp/band-scan.conf"));
+    if (!scanArgs.contains(QStringLiteral("dvbv5-scan")) && scanArgs.first() != QLatin1String("-a"))
+        return fail("band scan args");
+    if (scanArgs.join(QLatin1Char(' ')) != QLatin1String("-a 0 -o /tmp/band-scan.conf /tmp/band-initial.conf"))
+        return fail("band scan args");
+    if (bandRescanPrompt(QStringLiteral("13")).isEmpty() || bandRescanPrompt(QStringLiteral("13.1")).isEmpty()
+        || !bandRescanPrompt(QStringLiteral("7.1")).isEmpty() || !bandRescanPrompt(QStringLiteral("13.2")).isEmpty())
+        return fail("band rescan offer");
+    const QString merged = mergeChannelConfig(QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n"),
+                                              QStringLiteral("[Globo HD]\nDELIVERY_SYSTEM = ISDBT\n[Band HD]\n"
+                                                             "DELIVERY_SYSTEM = ISDBT\nFREQUENCY = 527142857\n"));
+    if (!merged.contains(QStringLiteral("[Band HD]")) || merged.count(QStringLiteral("[Globo HD]")) != 1)
+        return fail("merge band scan");
     const QString layerOnly = QStringLiteral("[BAND]\nISDBT_LAYER_ENABLED = 1\nDELIVERY_SYSTEM = ISDBT\n"
                                              "[Globo HD]\nISDBT_LAYER_ENABLED = 7\n[Globo 1Seg]\nISDBT_LAYER_ENABLED = 1\n");
     const QVector<OtaService> layered = parseOtaServices(layerOnly);
@@ -218,6 +238,42 @@ int runLogicSelfCheck()
         return fail("sdt name");
     if (epgGuideLine(epg.nowTitle, epg.nextTitle) != QStringLiteral("Agora: Jornal da Band · A seguir: Sessão"))
         return fail("epg line");
+    if (epg.packets < 4 || !epg.pids.contains(QStringLiteral("0x12:")) || !epg.tables.contains(QStringLiteral("0x4e:")))
+        return fail("epg trace");
+    QString longTitle = QStringLiteral("Jornal da Noite");
+    longTitle += QString(180, QLatin1Char('A'));
+    const QByteArray spanning = buildEitSection(0x4E, 0, 30, longTitle);
+    const QByteArray after = buildEitSection(0x4E, 1, 30, QStringLiteral("Sessao"));
+    if (spanning.size() <= 184)
+        return fail("spanning section is short");
+    const int head = 183;
+    const int tail = spanning.size() - head;
+    QByteArray split;
+    QByteArray first(188, char(0xFF));
+    first[0] = 0x47;
+    first[1] = char(0x40);
+    first[2] = 0x12;
+    first[3] = 0x10;
+    first[4] = 0;
+    memcpy(first.data() + 5, spanning.constData(), size_t(head));
+    QByteArray second(188, char(0xFF));
+    second[0] = 0x47;
+    second[1] = char(0x40);
+    second[2] = 0x12;
+    second[3] = 0x11;
+    second[4] = char(tail);
+    memcpy(second.data() + 5, spanning.constData() + head, size_t(tail));
+    const int room = 188 - 5 - tail;
+    if (after.size() > room)
+        return fail("following does not fit");
+    memcpy(second.data() + 5 + tail, after.constData(), size_t(after.size()));
+    split.append(first);
+    split.append(second);
+    const EpgSnapshot spanned = parseEpgFromTs(split);
+    if (spanned.nowTitle != longTitle || spanned.nextTitle != QLatin1String("Sessao"))
+        return fail("eit pointer field");
+    if (!spanned.tables.contains(QStringLiteral("0x4e:")))
+        return fail("eit pointer tables");
     if (parseEitSection(schedule).nowTitle != QLatin1String("Programa da tarde"))
         return fail("schedule fallback");
     if (!script.contains(QStringLiteral("dvbv5-zap")) || !script.contains(QStringLiteral("mpv"))
@@ -278,6 +334,27 @@ int runLogicSelfCheck()
     const QColor bandPx(QImage(bandLogo.artwork).pixel(24, 24));
     if (bandLogo.artwork.isEmpty() || bandLogo.artwork == globoLogo.artwork || bandPx.red() < bandPx.blue())
         return fail("band logo");
+    const ArtPaths sbtByNumber = liveChannelArt(artDir, QStringLiteral("SISTEMA BRASILEIRO DE TELEVISAO"), artDir,
+                                                QStringLiteral("4.1"));
+    if (!sbtByNumber.mark || sbtByNumber.artwork.isEmpty() || networkMarkFor(QStringLiteral("NGT"), QStringLiteral("3.1"))
+        != QString())
+        return fail("virtual number logo");
+    const ArtPaths ngtCard = liveChannelArt(artDir, QStringLiteral("NGT"), artDir, QStringLiteral("3.1"));
+    const ArtPaths ngtPlain = makeChannelCard(artDir, QStringLiteral("NGT"));
+    if (ngtCard.mark || ngtCard.artwork != ngtPlain.artwork)
+        return fail("ngt stays a name card");
+    const QString logoDir = QDir(artDir).filePath(QStringLiteral("logos"));
+    QDir().mkpath(logoDir);
+    QImage fileLogo(80, 40, QImage::Format_RGB32);
+    fileLogo.fill(Qt::white);
+    const QString logoFile = QDir(logoDir).filePath(QStringLiteral("globo.png"));
+    if (!fileLogo.save(logoFile, "PNG"))
+        return fail("save network logo");
+    const ArtPaths fromFile = liveChannelArt(artDir, QStringLiteral("TV GLOBO SAO PAULO"), artDir, QStringLiteral("5.1"));
+    const QImage painted(fromFile.artwork);
+    const QColor mid(painted.pixel(480, 270));
+    if (!fromFile.mark || painted.isNull() || mid.red() < 200 || mid.green() < 200)
+        return fail("logo file composed");
 
     if (parseVoicePtBr(QStringLiteral("abrir Netflix")).service != QLatin1String("netflix"))
         return fail("voice netflix");
@@ -895,6 +972,32 @@ int runLogicSelfCheck()
     const QByteArray huge = llmRepairBody(*netflix, QStringLiteral("dom"), {netflixSample}, QByteArray(80001, 'x'), secret.model);
     if (huge.contains("data:image") || !llmAuthorization(secret).contains(secret.key.toUtf8()) || !llmAuthorization(LlmConfig()).isEmpty())
         return fail("llm secret");
+
+    CatalogFile homeCat;
+    ShelfData homeLive;
+    homeLive.id = QStringLiteral("live");
+    homeLive.status = QStringLiteral("ok");
+    homeLive.live = true;
+    for (int i = 0; i < 4; ++i) {
+        RowData row;
+        row.title = QStringLiteral("Canal %1").arg(i);
+        row.href = QStringLiteral("zappe://ota/%1").arg(i);
+        row.live = true;
+        homeLive.rows.append(row);
+    }
+    homeCat.shelves.append(homeLive);
+    Guide homeGuide;
+    homeGuide.setCoalesceInput(false);
+    homeGuide.setCatalog(homeCat);
+    homeGuide.move(0, 1);
+    homeGuide.move(0, 1);
+    if (homeGuide.index() != 2)
+        return fail("home setup");
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    homeGuide.home();
+    if (homeGuide.page() != QLatin1String("home") || homeGuide.menuOpen() || homeGuide.shelf() != 0 || homeGuide.index() != 0
+        || homeGuide.focusTitle() != QLatin1String("Canal 0"))
+        return fail("home focuses the first card");
 
     std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;

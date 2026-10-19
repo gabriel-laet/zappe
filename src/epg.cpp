@@ -1,8 +1,10 @@
 #include "epg.h"
 
 #include <QHash>
+#include <QList>
 #include <QStringList>
 
+#include <algorithm>
 #include <cstring>
 
 namespace zappe {
@@ -24,8 +26,22 @@ void append16(QByteArray &out, int value)
 QString latinText(const QByteArray &raw)
 {
     QByteArray text = raw;
+    if (!text.isEmpty() && static_cast<unsigned char>(text.at(0)) == 0x15)
+        return QString::fromUtf8(text.mid(1)).trimmed();
+    if (!text.isEmpty() && static_cast<unsigned char>(text.at(0)) == 0x11 && text.size() > 2) {
+        QString utf16;
+        for (int i = 1; i + 1 < text.size(); i += 2) {
+            const char16_t unit = char16_t((static_cast<unsigned char>(text.at(i)) << 8)
+                                           | static_cast<unsigned char>(text.at(i + 1)));
+            utf16.append(QChar(unit));
+        }
+        return utf16.trimmed();
+    }
     if (!text.isEmpty() && static_cast<unsigned char>(text.at(0)) < 0x20)
         text.remove(0, 1);
+    const QString utf8 = QString::fromUtf8(text);
+    if (!utf8.contains(QChar::ReplacementCharacter))
+        return utf8.trimmed();
     return QString::fromLatin1(text).trimmed();
 }
 
@@ -79,7 +95,36 @@ bool isEitTable(int tableId)
     return tableId == 0x4E || tableId == 0x4F || (tableId >= 0x50 && tableId <= 0x5F);
 }
 
-void takeSection(EpgSnapshot &snap, QStringList &schedule, QHash<int, QString> &names, const QByteArray &section)
+void takeSection(EpgSnapshot &snap, QStringList &schedule, QHash<int, QString> &names, QHash<int, int> &tables,
+                 const QByteArray &section);
+
+QString formatIdCounts(const QHash<int, int> &counts)
+{
+    QList<int> keys = counts.keys();
+    std::sort(keys.begin(), keys.end());
+    QStringList parts;
+    for (int key : keys)
+        parts.append(QStringLiteral("0x%1:%2").arg(key, 0, 16).arg(counts.value(key)));
+    return parts.join(QLatin1Char(','));
+}
+
+void consumeSections(EpgSnapshot &snap, QStringList &schedule, QHash<int, QString> &names, QHash<int, int> &tables,
+                     QByteArray &buf)
+{
+    while (buf.size() >= 3 && u8(buf, 0) != 0xFF) {
+        const int sectionLength = ((u8(buf, 1) & 0x0f) << 8) | u8(buf, 2);
+        const int total = 3 + sectionLength;
+        if (sectionLength < 4 || buf.size() < total)
+            break;
+        takeSection(snap, schedule, names, tables, buf.left(total));
+        buf.remove(0, total);
+    }
+    if (!buf.isEmpty() && u8(buf, 0) == 0xFF)
+        buf.clear();
+}
+
+void takeSection(EpgSnapshot &snap, QStringList &schedule, QHash<int, QString> &names, QHash<int, int> &tables,
+                 const QByteArray &section)
 {
     if (section.size() < 3)
         return;
@@ -88,6 +133,7 @@ void takeSection(EpgSnapshot &snap, QStringList &schedule, QHash<int, QString> &
     const int total = 3 + sectionLength;
     if (sectionLength < 4 || section.size() < total)
         return;
+    tables[tableId] += 1;
     const int end = total - 4;
 
     if (tableId == 0x42 && section.size() >= 11) {
@@ -264,7 +310,8 @@ EpgSnapshot parseEitSection(const QByteArray &section)
     EpgSnapshot snap;
     QStringList schedule;
     QHash<int, QString> names;
-    takeSection(snap, schedule, names, section);
+    QHash<int, int> tables;
+    takeSection(snap, schedule, names, tables, section);
     if (snap.nowTitle.isEmpty()) {
         for (const QString &title : schedule) {
             snap.nowTitle = title;
@@ -289,16 +336,30 @@ EpgSnapshot parseEpgFromTs(const QByteArray &ts)
     EpgSnapshot snap;
     QStringList schedule;
     QHash<int, QString> names;
+    QHash<int, int> tables;
+    QHash<int, int> pidCounts;
     QHash<int, QByteArray> partial;
+    QHash<int, int> lastCc;
     const int packets = ts.size() / 188;
+    int synced = 0;
     for (int n = 0; n < packets; ++n) {
         const int at = n * 188;
         if (u8(ts, at) != 0x47)
             continue;
+        ++synced;
         const int pid = ((u8(ts, at + 1) & 0x1f) << 8) | u8(ts, at + 2);
+        pidCounts[pid] += 1;
         if (pid != 0x11 && pid != 0x12)
             continue;
-        const int adaptation = (u8(ts, at + 3) >> 4) & 0x03;
+        const int header = u8(ts, at + 3);
+        const int cc = header & 0x0f;
+        const bool discontinuity = lastCc.contains(pid) && cc != ((lastCc.value(pid) + 1) & 0x0f);
+        lastCc.insert(pid, cc);
+        if (discontinuity)
+            partial.remove(pid);
+        if (((header >> 6) & 0x03) != 0)
+            continue;
+        const int adaptation = (header >> 4) & 0x03;
         if (adaptation == 0 || adaptation == 2)
             continue;
         int pos = at + 4;
@@ -310,10 +371,19 @@ EpgSnapshot parseEpgFromTs(const QByteArray &ts)
         }
         const bool start = (u8(ts, at + 1) & 0x40) != 0;
         if (start) {
+            // pointer_field é o resto da seção anterior. Sem esses bytes a
+            // seção fica curta e o EIT real (que cruza o pacote) some.
             const int pointer = u8(ts, pos);
-            pos += 1 + pointer;
-            if (!partial.value(pid).isEmpty())
-                takeSection(snap, schedule, names, partial.take(pid));
+            if (pos + 1 + pointer > at + 188)
+                continue;
+            ++pos;
+            if (partial.contains(pid) && !partial.value(pid).isEmpty()) {
+                if (pointer > 0)
+                    partial[pid].append(ts.mid(pos, pointer));
+                consumeSections(snap, schedule, names, tables, partial[pid]);
+                partial.remove(pid);
+            }
+            pos += pointer;
         }
         if (pos >= at + 188)
             continue;
@@ -321,21 +391,15 @@ EpgSnapshot parseEpgFromTs(const QByteArray &ts)
         if (!start && buf.isEmpty())
             continue;
         buf.append(ts.mid(pos, at + 188 - pos));
-        while (buf.size() >= 3 && u8(buf, 0) != 0xFF) {
-            const int sectionLength = ((u8(buf, 1) & 0x0f) << 8) | u8(buf, 2);
-            const int total = 3 + sectionLength;
-            if (sectionLength < 4 || buf.size() < total)
-                break;
-            takeSection(snap, schedule, names, buf.left(total));
-            buf.remove(0, total);
-        }
-        if (!buf.isEmpty() && u8(buf, 0) == 0xFF)
-            buf.clear();
+        consumeSections(snap, schedule, names, tables, buf);
     }
-    for (auto it = partial.cbegin(); it != partial.cend(); ++it) {
+    for (auto it = partial.begin(); it != partial.end(); ++it) {
         if (it.value().size() >= 3)
-            takeSection(snap, schedule, names, it.value());
+            consumeSections(snap, schedule, names, tables, it.value());
     }
+    snap.packets = synced;
+    snap.pids = formatIdCounts(pidCounts);
+    snap.tables = formatIdCounts(tables);
     if (snap.nowTitle.isEmpty()) {
         for (const QString &title : schedule) {
             snap.nowTitle = title;

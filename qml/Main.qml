@@ -236,10 +236,10 @@ Window {
         Keys.onPressed: function (event) {
             // XF86Back é o keycode 166. Em algumas sessões o Qt não o mapeia
             // para Key_Back, e o mpv em foco ignora a tecla.
-            const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Back
-                    || event.key === Qt.Key_Backspace || event.key === Qt.Key_Home
+            const homeKey = event.key === Qt.Key_Back || event.key === Qt.Key_Home
                     || event.key === Qt.Key_HomePage || event.nativeScanCode === 166
-            if (backKey && event.isAutoRepeat) {
+            const backKey = event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace
+            if ((homeKey || backKey) && event.isAutoRepeat) {
                 event.accepted = true
                 return
             }
@@ -248,9 +248,13 @@ Window {
                 event.accepted = true
                 return
             }
+            if (homeKey) {
+                house.goHome()
+                event.accepted = true
+                return
+            }
             if (house.promptOpen) {
-                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Home
-                        || event.key === Qt.Key_HomePage)
+                if (backKey)
                     house.cancelPrompt()
                 else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                     house.submitPrompt(house.draft)
@@ -258,8 +262,7 @@ Window {
                 return
             }
             if (house.loading) {
-                if (event.key === Qt.Key_Escape || event.key === Qt.Key_Back || event.key === Qt.Key_Backspace
-                        || event.key === Qt.Key_Home || event.key === Qt.Key_HomePage)
+                if (backKey)
                     house.cancelLoading()
                 else if (house.loadingFailed && (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                         || event.key === Qt.Key_Select))
@@ -274,12 +277,6 @@ Window {
                 return
             }
             if (house.playing && backKey) {
-                house.goBack()
-                event.accepted = true
-                return
-            }
-            if (event.nativeScanCode === 166 && event.key !== Qt.Key_Escape && event.key !== Qt.Key_Back
-                    && event.key !== Qt.Key_Backspace && event.key !== Qt.Key_Home && event.key !== Qt.Key_HomePage) {
                 house.goBack()
                 event.accepted = true
                 return
@@ -300,14 +297,17 @@ Window {
             case Qt.Key_Return:
             case Qt.Key_Enter:
             case Qt.Key_Select:
-                guide.activate()
+                if (!house.acceptBandScan())
+                    guide.activate()
                 break
             case Qt.Key_Escape:
-            case Qt.Key_Back:
             case Qt.Key_Backspace:
+                house.goBack()
+                break
+            case Qt.Key_Back:
             case Qt.Key_Home:
             case Qt.Key_HomePage:
-                house.goBack()
+                house.goHome()
                 break
             case Qt.Key_Menu:
             case Qt.Key_Multi_key:

@@ -157,6 +157,7 @@ public:
     Q_INVOKABLE void move(int dShelf, int dIndex);
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
+    Q_INVOKABLE void home();
     Q_INVOKABLE void toggleMenu();
     Q_INVOKABLE void adjustVolume(int delta);
     Q_INVOKABLE void toggleMute();
@@ -171,6 +172,7 @@ public:
     void replaceServiceShelves(const QString &serviceId, QVector<ShelfData> shelves);
     void noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color);
     void noteLiveEpg(const QString &href, const QString &line);
+    void refreshLiveChannels();
 
 signals:
     void focusChanged();

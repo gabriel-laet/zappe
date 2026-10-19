@@ -47,8 +47,8 @@
     },
     {
       "button": "Home",
-      "action": "back",
-      "note": "No controle da sala o Home sai como KEY_BACK 158 e significa voltar.",
+      "action": "home",
+      "note": "No controle da sala o Home sai como KEY_BACK 158. Volta para a grade e foca o primeiro card.",
       "keys": [{ "name": "KEY_BACK", "code": 158 }]
     },
     {

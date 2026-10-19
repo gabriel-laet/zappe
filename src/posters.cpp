@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QFont>
+#include <QSet>
 #include <QFontDatabase>
 #include <QFontMetricsF>
 #include <QImage>
@@ -16,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace zappe {
 namespace {
@@ -496,68 +498,173 @@ QString networkMarkId(const QString &name)
     return {};
 }
 
-ArtPaths makeNetworkLogo(const QString &cacheDir, const QString &name)
+QString networkMarkFor(const QString &name, const QString &number)
 {
-    const QString id = networkMarkId(name);
-    struct Mark {
-        const char *id;
-        const char *label;
-        const char *color;
-    };
-    static const Mark marks[] = {
+    const QString byName = networkMarkId(name);
+    if (!byName.isEmpty())
+        return byName;
+    static const QRegularExpression re(QStringLiteral("^(\\d{1,3})(?:\\.(\\d))?$"));
+    const QRegularExpressionMatch match = re.match(number.trimmed());
+    if (!match.hasMatch())
+        return {};
+    const int minor = match.captured(2).isEmpty() ? -1 : match.captured(2).toInt();
+    if (!(minor < 0 || minor == 1))
+        return {};
+    switch (match.captured(1).toInt()) {
+    case 5:
+        return QStringLiteral("globo");
+    case 4:
+        return QStringLiteral("sbt");
+    case 7:
+        return QStringLiteral("record");
+    case 13:
+        return QStringLiteral("band");
+    case 2:
+        return QStringLiteral("cultura");
+    case 9:
+        return QStringLiteral("redetv");
+    default:
+        return {};
+    }
+}
+
+namespace {
+
+struct NetworkMark {
+    const char *id;
+    const char *label;
+    const char *color;
+};
+
+const NetworkMark *networkMark(const QString &id)
+{
+    static const NetworkMark marks[] = {
         {"globo", "GLOBO", "#2457A6"},     {"sbt", "SBT", "#E10600"},
         {"record", "RECORD", "#B00020"},   {"band", "BAND", "#D71920"},
         {"cultura", "CULTURA", "#0E7A3D"}, {"redetv", "REDETV", "#F15A22"},
         {"tvbrasil", "TV BRASIL", "#0055A5"},
     };
-    const Mark *mark = nullptr;
-    for (const Mark &item : marks) {
-        if (id == QLatin1String(item.id)) {
-            mark = &item;
-            break;
+    for (const NetworkMark &item : marks) {
+        if (id == QLatin1String(item.id))
+            return &item;
+    }
+    return nullptr;
+}
+
+QString findNetworkAsset(const QString &dataDir, const QString &id)
+{
+    if (dataDir.isEmpty() || id.isEmpty())
+        return {};
+    const QStringList dirs = {QDir(dataDir).filePath(QStringLiteral("logos")),
+                              QDir(dataDir).filePath(QStringLiteral("ota-logos"))};
+    const QStringList exts = {QStringLiteral("png"), QStringLiteral("jpg"), QStringLiteral("jpeg"),
+                              QStringLiteral("webp")};
+    for (const QString &dir : dirs) {
+        for (const QString &ext : exts) {
+            const QString path = QDir(dir).filePath(id + QLatin1Char('.') + ext);
+            if (QFileInfo::exists(path))
+                return path;
         }
     }
-    if (!mark)
-        return {};
-    const QString key = QStringLiteral("v%1-net-%2").arg(kArtVersion).arg(QString::fromLatin1(mark->id));
+    return {};
+}
+
+ArtPaths paintNetworkMark(const QString &cacheDir, const NetworkMark &mark, const QString &assetPath)
+{
+    QString key = QStringLiteral("v%1-net-%2").arg(kArtVersion).arg(QString::fromLatin1(mark.id));
+    if (!assetPath.isEmpty()) {
+        const QFileInfo info(assetPath);
+        key = QStringLiteral("v%1-netfile-%2-%3-%4")
+                  .arg(kArtVersion)
+                  .arg(QString::fromLatin1(mark.id))
+                  .arg(info.size())
+                  .arg(info.lastModified().toSecsSinceEpoch());
+    }
+    const QColor color(QString::fromLatin1(mark.color));
     const QString artwork = artFile(cacheDir, key);
     const QString ambient = artFile(cacheDir, key + QStringLiteral("-ambient"));
-    const QColor color(QString::fromLatin1(mark->color));
     if (QFileInfo::exists(artwork) && QFileInfo::exists(ambient)) {
         ArtPaths cached;
         cached.artwork = artwork;
         cached.ambient = ambient;
         cached.color = hexColor(color);
+        cached.mark = true;
         return cached;
     }
     QImage image(960, 540, QImage::Format_RGB32);
     QPainter painter(&image);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
     painter.fillRect(image.rect(), color);
-    QColor disc = color.lighter(125);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(disc);
-    painter.drawEllipse(QPointF(720, 150), 180, 180);
-    painter.setBrush(color.darker(140));
-    painter.drawRoundedRect(QRectF(72, 168, 420, 220), 36, 36);
-    QFont font(uiFamily());
-    font.setPixelSize(id == QLatin1String("tvbrasil") ? 64 : 92);
-    font.setWeight(QFont::Black);
-    font.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
-    painter.setFont(font);
-    painter.setPen(Qt::white);
-    painter.drawText(image.rect().adjusted(48, 0, -48, 0), Qt::AlignCenter, QString::fromLatin1(mark->label));
+    QImage logo;
+    if (!assetPath.isEmpty())
+        logo.load(assetPath);
+    if (!logo.isNull()) {
+        const QImage scaled = logo.scaled(800, 420, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        painter.drawImage((image.width() - scaled.width()) / 2, (image.height() - scaled.height()) / 2, scaled);
+    } else {
+        QColor disc = color.lighter(125);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(disc);
+        painter.drawEllipse(QPointF(720, 150), 180, 180);
+        painter.setBrush(color.darker(140));
+        painter.drawRoundedRect(QRectF(72, 168, 420, 220), 36, 36);
+        QFont font(uiFamily());
+        font.setPixelSize(qstrcmp(mark.id, "tvbrasil") == 0 ? 64 : 92);
+        font.setWeight(QFont::Black);
+        font.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
+        painter.setFont(font);
+        painter.setPen(Qt::white);
+        painter.drawText(image.rect().adjusted(48, 0, -48, 0), Qt::AlignCenter, QString::fromLatin1(mark.label));
+    }
     painter.end();
-    return finish(cacheDir, key, image, hexColor(color));
+    ArtPaths painted = finish(cacheDir, key, image, hexColor(color));
+    painted.mark = !painted.artwork.isEmpty();
+    return painted;
 }
 
-ArtPaths liveChannelArt(const QString &cacheDir, const QString &name)
+} // namespace
+
+ArtPaths makeNetworkLogo(const QString &cacheDir, const QString &name)
 {
-    const ArtPaths logo = makeNetworkLogo(cacheDir, name);
-    if (!logo.artwork.isEmpty())
-        return logo;
-    return makeChannelCard(cacheDir, name);
+    const NetworkMark *mark = networkMark(networkMarkId(name));
+    if (!mark)
+        return {};
+    return paintNetworkMark(cacheDir, *mark, {});
+}
+
+ArtPaths liveChannelArt(const QString &cacheDir, const QString &name, const QString &dataDir, const QString &number)
+{
+    const QString id = networkMarkFor(name, number);
+    static QSet<QString> logged;
+    const QString asset = findNetworkAsset(dataDir, id);
+    if (!logged.contains(name)) {
+        logged.insert(name);
+        if (id.isEmpty()) {
+            std::fprintf(stderr, "zappe: ota: logo \"%s\" numero=%s sem marca, card de nome\n", qPrintable(name),
+                         qPrintable(number));
+        } else if (asset.isEmpty()) {
+            std::fprintf(stderr, "zappe: ota: logo \"%s\" numero=%s marca=%s arquivo=nenhum (logos, ota-logos)\n",
+                         qPrintable(name), qPrintable(number), qPrintable(id));
+        } else {
+            std::fprintf(stderr, "zappe: ota: logo \"%s\" numero=%s marca=%s arquivo=%s\n", qPrintable(name),
+                         qPrintable(number), qPrintable(id), qPrintable(asset));
+        }
+    }
+    const NetworkMark *mark = networkMark(id);
+    if (!mark)
+        return makeChannelCard(cacheDir, name);
+    QImage probe;
+    const bool readable = asset.isEmpty() || probe.load(asset);
+    if (!asset.isEmpty() && !readable) {
+        std::fprintf(stderr, "zappe: ota: logo \"%s\" arquivo ilegível %s\n", qPrintable(name), qPrintable(asset));
+    }
+    ArtPaths logo = paintNetworkMark(cacheDir, *mark, readable ? asset : QString());
+    if (logo.artwork.isEmpty())
+        return makeChannelCard(cacheDir, name);
+    logo.mark = true;
+    return logo;
 }
 
 ArtPaths artFromFile(const QString &cacheDir, const QString &imagePath, const QString &title, const QString &serviceLabel,

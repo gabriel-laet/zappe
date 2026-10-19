@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QString>
 
+class QProcess;
 class QQuickWindow;
 class QTimer;
 
@@ -61,6 +62,8 @@ public:
     Q_INVOKABLE void cancelPrompt();
     Q_INVOKABLE void stopPlayback();
     Q_INVOKABLE void goBack();
+    Q_INVOKABLE void goHome();
+    Q_INVOKABLE bool acceptBandScan();
     Q_INVOKABLE void cancelLoading();
     Q_INVOKABLE void retryLoading();
     Q_INVOKABLE void dial(const QString &glyph);
@@ -103,6 +106,8 @@ private:
     void commitDial();
     void refreshFocusedArt();
     void applyEpg(const QString &channel, const QString &nowTitle, const QString &nextTitle);
+    void startBandScan();
+    void finishBandScan();
 
     Guide *m_guide = nullptr;
     QQuickWindow *m_window = nullptr;
@@ -150,6 +155,9 @@ private:
     qint64 m_lastBack = 0;
     QString m_refreshTitle;
     qint64 m_refreshAt = 0;
+    bool m_bandOffer = false;
+    qint64 m_bandConsumed = 0;
+    QProcess *m_bandScan = nullptr;
 };
 
 } // namespace zappe

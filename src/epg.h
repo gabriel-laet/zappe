@@ -11,6 +11,10 @@ struct EpgSnapshot {
     QString nextTitle;
     QString serviceName;
     int serviceId = 0;
+    // O que o TS realmente trouxe, mesmo sem título. O hover loga isso.
+    int packets = 0;
+    QString pids;
+    QString tables;
 };
 
 QString epgGuideLine(const QString &nowTitle, const QString &nextTitle);

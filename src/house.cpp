@@ -5,17 +5,24 @@
 #include "guide.h"
 #include "logins.h"
 #include "mirror.h"
+#include "branding.h"
 #include "epg.h"
 #include "ota.h"
 #include "posters.h"
+
+#include <cstdio>
 #include "remote.h"
 #include "samsung.h"
 #include "voice.h"
 #include "xback.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QProcess>
 #include <QQuickWindow>
+#include <QStandardPaths>
 #include <QTimer>
 
 namespace zappe {
@@ -32,7 +39,7 @@ House::House(QObject *parent)
     , m_mirror(new MirrorSession(this))
     , m_xback(new XBackGrab(this))
 {
-    connect(m_xback, &XBackGrab::pressed, this, &House::goBack);
+    connect(m_xback, &XBackGrab::pressed, this, &House::goHome);
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
             failLoading(message);
@@ -440,12 +447,43 @@ void House::chromeBack()
         m_login->historyBack();
 }
 
+void House::goHome()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (now - m_lastBack < 150)
+        return;
+    m_lastBack = now;
+    m_bandOffer = false;
+    if (m_guide && !m_guide->dialText().isEmpty()) {
+        m_guide->clearDial();
+        if (m_dialTimer)
+            m_dialTimer->stop();
+    }
+    if (m_loading)
+        cancelLoading();
+    if (m_promptOpen)
+        cancelPrompt();
+    if (m_player)
+        leavePlayer();
+    if (m_ota && m_ota->playing())
+        stopPlayback();
+    else if (m_playing)
+        stopPlayback();
+    if (m_guide)
+        m_guide->home();
+    showGuide();
+}
+
 void House::goBack()
 {
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (now - m_lastBack < 150)
         return;
     m_lastBack = now;
+    if (m_bandOffer) {
+        m_bandOffer = false;
+        return;
+    }
     if (m_guide && !m_guide->dialText().isEmpty()) {
         m_guide->clearDial();
         if (m_dialTimer)
@@ -639,9 +677,7 @@ void House::handleVoice(const QString &transcript)
     }
     switch (intent.kind) {
     case VoiceKind::Home:
-        stopPlayback();
-        if (m_guide)
-            m_guide->back();
+        goHome();
         break;
     case VoiceKind::Back:
         goBack();
@@ -745,10 +781,111 @@ void House::commitDial()
     }
     const QString name = resolveDialTarget(typed, channels);
     if (name.isEmpty()) {
+        const QString offer = bandRescanPrompt(typed);
+        if (!offer.isEmpty()) {
+            m_bandOffer = true;
+            toast(offer);
+            return;
+        }
         toast(QStringLiteral("Canal %1 não está na varredura").arg(typed));
         return;
     }
     playRequested(name, QStringLiteral("ota"), QStringLiteral("zappe://ota/") + name);
+}
+
+bool House::acceptBandScan()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!m_bandOffer) {
+        // O evdev e o Qt entregam o mesmo OK. O segundo não abre o card.
+        return now - m_bandConsumed < 400;
+    }
+    m_bandOffer = false;
+    m_bandConsumed = now;
+    startBandScan();
+    return true;
+}
+
+void House::startBandScan()
+{
+    if (m_bandScan && m_bandScan->state() != QProcess::NotRunning) {
+        toast(QStringLiteral("A busca da Band já está em andamento."));
+        return;
+    }
+    if (m_ota && !m_ota->releaseTuner()) {
+        toast(QStringLiteral("Feche o canal no ar antes de buscar a Band."));
+        return;
+    }
+    const QString bin = QStandardPaths::findExecutable(QStringLiteral("dvbv5-scan"));
+    if (bin.isEmpty()) {
+        toast(QStringLiteral("dvbv5-scan não está instalado."));
+        return;
+    }
+    const QString dir = m_dataDir.isEmpty() ? resolveDataDir() : m_dataDir;
+    QDir().mkpath(dir);
+    const QString seedPath = QDir(dir).filePath(QStringLiteral("band-initial.conf"));
+    const QString outPath = QDir(dir).filePath(QStringLiteral("band-scan.conf"));
+    QFile seed(seedPath);
+    if (!seed.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        toast(QStringLiteral("Não consegui gravar a busca da Band."));
+        return;
+    }
+    seed.write(bandScanSeed().toUtf8());
+    seed.close();
+    QFile::remove(outPath);
+    if (!m_bandScan) {
+        m_bandScan = new QProcess(this);
+        m_bandScan->setProcessChannelMode(QProcess::ForwardedChannels);
+        connect(m_bandScan, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart)
+                toast(QStringLiteral("Não abriu o dvbv5-scan."));
+        });
+        connect(m_bandScan, &QProcess::finished, this, [this](int, QProcess::ExitStatus) { finishBandScan(); });
+    }
+    m_bandScan->setProperty("outPath", outPath);
+    m_bandScan->start(bin, bandScanArguments(seedPath, outPath));
+    toast(QStringLiteral("Buscando a Band no canal físico %1…").arg(bandPhysicalChannel()));
+    std::fprintf(stderr, "zappe: ota: rescan físico %d (%d Hz)\n", bandPhysicalChannel(), bandFrequencyHz());
+}
+
+void House::finishBandScan()
+{
+    const QString outPath = m_bandScan ? m_bandScan->property("outPath").toString() : QString();
+    QString scanned;
+    QFile out(outPath);
+    if (out.open(QIODevice::ReadOnly))
+        scanned = QString::fromUtf8(out.readAll());
+    const QVector<OtaService> found = parseOtaServices(scanned);
+    if (found.isEmpty()) {
+        toast(QStringLiteral("A busca no canal físico %1 não achou canal.").arg(bandPhysicalChannel()));
+        std::fprintf(stderr, "zappe: ota: rescan físico %d sem serviço\n", bandPhysicalChannel());
+        return;
+    }
+    const QString dest = primaryChannelConfigPath();
+    QString existing;
+    QFile current(dest);
+    if (current.open(QIODevice::ReadOnly))
+        existing = QString::fromUtf8(current.readAll());
+    const QString merged = mergeChannelConfig(existing, scanned);
+    QDir().mkpath(QFileInfo(dest).absolutePath());
+    QFile written(dest);
+    if (!written.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        toast(QStringLiteral("Não consegui gravar o channels.conf."));
+        return;
+    }
+    written.write(merged.toUtf8());
+    written.close();
+    bool band = false;
+    for (const OtaService &service : found) {
+        if (networkMarkId(service.name) == QLatin1String("band"))
+            band = true;
+    }
+    std::fprintf(stderr, "zappe: ota: rescan físico %d gravou %d serviços em %s\n", bandPhysicalChannel(),
+                 int(found.size()), qPrintable(dest));
+    if (m_guide)
+        m_guide->refreshLiveChannels();
+    toast(band ? QStringLiteral("A Band entrou na varredura.")
+               : QStringLiteral("A busca gravou %1 serviço(s), sem a Band no nome.").arg(found.size()));
 }
 
 void House::refreshFocusedArt()
@@ -788,6 +925,10 @@ void House::onRemote(int remoteAction)
         return;
     if (action == RemoteAction::Power) {
         m_samsung->togglePower();
+        return;
+    }
+    if (action == RemoteAction::Home) {
+        goHome();
         return;
     }
     if (m_loading) {
@@ -836,6 +977,8 @@ void House::onRemote(int remoteAction)
             m_guide->move(0, 1);
         break;
     case RemoteAction::Ok:
+        if (acceptBandScan())
+            break;
         if (chromeFocused())
             forwardChromeKey(action);
         else if (m_guide && !m_playing)
@@ -855,6 +998,9 @@ void House::onRemote(int remoteAction)
         break;
     case RemoteAction::Back:
         goBack();
+        break;
+    case RemoteAction::Home:
+        goHome();
         break;
     case RemoteAction::Menu:
         if (m_playing)
