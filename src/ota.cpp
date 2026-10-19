@@ -569,7 +569,9 @@ QString otaPipelineScript(const QString &conf, const QString &channel)
 QString otaPreviewScript(const QString &conf, const QString &channel, const QString &tsPath, const QString &jpgPath)
 {
     // Sem mpv e sem tela cheia: o guia continua na frente. -t solta o sintonizador.
-    const QString run = QStringLiteral("set -o pipefail; dvbv5-zap -a 0 -c %1 -p %2 -r -t 8 -o %3; "
+    // -P grava todos os PIDs. Sem isso o arquivo só tem áudio e vídeo, e o EIT
+    // (0x12 e, no ISDB, 0x26/0x27) e o SDT (0x11) não entram.
+    const QString run = QStringLiteral("set -o pipefail; dvbv5-zap -a 0 -c %1 -P -r -t 8 -o %3 %2; "
                                        "ffmpeg -y -i %3 -frames:v 1 -q:v 3 %4")
                             .arg(shellQuote(conf), shellQuote(channel), shellQuote(tsPath), shellQuote(jpgPath));
     return QStringLiteral("sh -c %1").arg(shellQuote(run));
@@ -603,6 +605,21 @@ QString bandScanSeed()
                           "\tISDBT_LAYER_ENABLED = 7\n");
 }
 
+QString bandFullScanSeed()
+{
+    QString seed;
+    for (int channel = 14; channel <= 51; ++channel) {
+        const int hz = 473142857 + (channel - 14) * 6000000;
+        seed += QStringLiteral("[UHF %1]\n"
+                               "\tDELIVERY_SYSTEM = ISDBT\n"
+                               "\tFREQUENCY = %2\n"
+                               "\tBANDWIDTH_HZ = 6000000\n")
+                    .arg(channel)
+                    .arg(hz);
+    }
+    return seed;
+}
+
 QStringList bandScanArguments(const QString &seedPath, const QString &outPath)
 {
     return {QStringLiteral("-a"), QStringLiteral("0"), QStringLiteral("-o"), outPath, seedPath};
@@ -616,6 +633,11 @@ QString bandRescanPrompt(const QString &typed)
     if (!(channel.minor < 0 || channel.minor == 1))
         return {};
     return QStringLiteral("A Band não está na varredura. OK busca o canal físico 23 (527 MHz). Voltar cancela.");
+}
+
+QString bandFullRescanPrompt()
+{
+    return QStringLiteral("O canal físico 23 não tem sinal. OK varre a faixa de UHF. Voltar cancela.");
 }
 
 namespace {

@@ -50,6 +50,9 @@ QString samsungWebsocketUrl(const SamsungConfig &config, bool secure);
 QString samsungConnectToken(const QByteArray &message);
 bool samsungAuthDenied(const QByteArray &message);
 int samsungPairingWaitMs();
+int samsungKeyWaitMs();
+// Com token, tempo esgotado não pede Allow. Sem token, o texto continua o do pareamento.
+QString samsungTimeoutMessage(bool tokenPresent);
 bool samsungUpgradeToSecure(bool secure, bool denied);
 bool samsungRetryWithoutToken(bool secure, bool hadToken, bool stripped, bool denied);
 bool samsungShouldHoldPairing(bool secure, bool tokenPresent, bool denied);

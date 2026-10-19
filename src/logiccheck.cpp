@@ -153,6 +153,10 @@ int runLogicSelfCheck()
     if (!bandScanSeed().contains(QStringLiteral("527142857")) || !bandScanSeed().contains(QStringLiteral("6000000"))
         || !bandScanSeed().contains(QStringLiteral("ISDBT")))
         return fail("band scan seed");
+    const QString fullSeed = bandFullScanSeed();
+    if (!fullSeed.contains(QStringLiteral("473142857")) || !fullSeed.contains(QStringLiteral("527142857"))
+        || !fullSeed.contains(QStringLiteral("[UHF 51]")) || !bandFullRescanPrompt().contains(QStringLiteral("faixa")))
+        return fail("band full scan");
     const QStringList scanArgs = bandScanArguments(QStringLiteral("/tmp/band-initial.conf"), QStringLiteral("/tmp/band-scan.conf"));
     if (!scanArgs.contains(QStringLiteral("dvbv5-scan")) && scanArgs.first() != QLatin1String("-a"))
         return fail("band scan args");
@@ -216,10 +220,13 @@ int runLogicSelfCheck()
     const QString script = otaPipelineScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Globo HD"));
     const QString preview = otaPreviewScript(QStringLiteral("/tmp/channels.conf"), QStringLiteral("Band 1-seg"),
                                              QStringLiteral("/tmp/preview.ts"), QStringLiteral("/tmp/preview.jpg"));
-    if (!preview.contains(QStringLiteral("dvbv5-zap")) || !preview.contains(QStringLiteral("-t 8"))
-        || !preview.contains(QStringLiteral("ffmpeg")) || preview.contains(QStringLiteral("mpv"))
-        || preview.contains(QStringLiteral("--fs")))
+    if (!preview.contains(QStringLiteral("dvbv5-zap")) || !preview.contains(QStringLiteral("-P"))
+        || !preview.contains(QStringLiteral("-t 8")) || !preview.contains(QStringLiteral("ffmpeg"))
+        || preview.contains(QStringLiteral("mpv")) || preview.contains(QStringLiteral("--fs")))
         return fail("ota preview stays off the player");
+    const QByteArray isdbEit = wrapTsSection(buildEitSection(0x4E, 0, 30, QStringLiteral("Jornal")), 0x27);
+    if (parseEpgFromTs(isdbEit).nowTitle != QStringLiteral("Jornal"))
+        return fail("isdb eit pid");
     const QByteArray present = buildEitSection(0x4E, 0, 30, QStringLiteral("Jornal da Band"));
     const QByteArray following = buildEitSection(0x4E, 1, 30, QStringLiteral("Sessão"));
     const QByteArray schedule = buildEitSection(0x50, 0, 30, QStringLiteral("Programa da tarde"));
@@ -336,13 +343,14 @@ int runLogicSelfCheck()
         return fail("band logo");
     const ArtPaths sbtByNumber = liveChannelArt(artDir, QStringLiteral("SISTEMA BRASILEIRO DE TELEVISAO"), artDir,
                                                 QStringLiteral("4.1"));
-    if (!sbtByNumber.mark || sbtByNumber.artwork.isEmpty() || networkMarkFor(QStringLiteral("NGT"), QStringLiteral("3.1"))
-        != QString())
+    if (!sbtByNumber.mark || sbtByNumber.artwork.isEmpty()
+        || networkMarkFor(QStringLiteral("NGT"), QStringLiteral("3.1")) != QLatin1String("ngt")
+        || networkMarkFor(QStringLiteral("TV Gazeta"), QString()) != QLatin1String("gazeta")
+        || networkMarkFor(QStringLiteral("Novo Tempo"), QString()) != QLatin1String("novotempo"))
         return fail("virtual number logo");
     const ArtPaths ngtCard = liveChannelArt(artDir, QStringLiteral("NGT"), artDir, QStringLiteral("3.1"));
-    const ArtPaths ngtPlain = makeChannelCard(artDir, QStringLiteral("NGT"));
-    if (ngtCard.mark || ngtCard.artwork != ngtPlain.artwork)
-        return fail("ngt stays a name card");
+    if (!ngtCard.mark || !QFile::exists(QDir(artDir).filePath(QStringLiteral("logos/ngt.png"))))
+        return fail("ngt logo file");
     const QString logoDir = QDir(artDir).filePath(QStringLiteral("logos"));
     QDir().mkpath(logoDir);
     QImage fileLogo(80, 40, QImage::Format_RGB32);
@@ -456,6 +464,10 @@ int runLogicSelfCheck()
     if (parseUpnpVolume(QByteArrayLiteral("<CurrentVolume>17</CurrentVolume>")) != 17
         || parseUpnpVolume(QByteArrayLiteral("<u>nope</u>")) != -1)
         return fail("upnp volume");
+    if (samsungKeyWaitMs() < 5000 || samsungTimeoutMessage(true) == samsungTimeoutMessage(false)
+        || samsungTimeoutMessage(true).contains(QStringLiteral("aceite"))
+        || !samsungTimeoutMessage(false).contains(QStringLiteral("aceite")))
+        return fail("samsung key wait");
     if (parseUpnpMute(QByteArrayLiteral("<CurrentMute>1</CurrentMute>")) != 1
         || parseUpnpMute(QByteArrayLiteral("<CurrentMute>0</CurrentMute>")) != 0
         || parseUpnpMute(QByteArrayLiteral("<CurrentMute>true</CurrentMute>")) != 1

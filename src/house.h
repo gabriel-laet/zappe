@@ -109,7 +109,8 @@ private:
         bool x11 = false;
         bool evdev = false;
         bool loggedFinal = false;
-        QString logged;
+        bool printed = false;
+        int id = 0;
     };
 
     void watchCommand(TvKey key);
@@ -124,6 +125,8 @@ private:
     bool tracing() const;
     void rememberTrace(const TvTrace &line);
     void publishTrace(int index);
+    void scheduleTraceLog(int id);
+    void writeTraceOnce(int index);
     QString formatTrace(const TvTrace &line) const;
     bool take(RemoteAction action);
     void onSettings(int index, int verb);
@@ -141,7 +144,7 @@ private:
     void commitDial();
     void refreshFocusedArt();
     void applyEpg(const QString &channel, const QString &nowTitle, const QString &nextTitle);
-    void startBandScan();
+    void startBandScan(bool full = false);
     void finishBandScan();
 
     Guide *m_guide = nullptr;
@@ -191,9 +194,11 @@ private:
     QString m_refreshTitle;
     qint64 m_refreshAt = 0;
     bool m_bandOffer = false;
+    bool m_bandFull = false;
     qint64 m_bandConsumed = 0;
     QProcess *m_bandScan = nullptr;
     QVector<TvTrace> m_traces;
+    int m_traceSeq = 0;
     QStringList m_tvLog;
     QString m_linkLogged;
     qint64 m_traceUntil = 0;

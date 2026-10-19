@@ -349,7 +349,8 @@ EpgSnapshot parseEpgFromTs(const QByteArray &ts)
         ++synced;
         const int pid = ((u8(ts, at + 1) & 0x1f) << 8) | u8(ts, at + 2);
         pidCounts[pid] += 1;
-        if (pid != 0x11 && pid != 0x12)
+        // 0x11 SDT, 0x12 EIT. No ISDB o EIT de fato também sai em 0x26 e 0x27.
+        if (pid != 0x11 && pid != 0x12 && pid != 0x26 && pid != 0x27)
             continue;
         const int header = u8(ts, at + 3);
         const int cc = header & 0x0f;

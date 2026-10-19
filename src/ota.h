@@ -40,9 +40,12 @@ QString fullsegGapReason(const QVector<OtaService> &services, const QString &net
 int bandPhysicalChannel();
 int bandFrequencyHz();
 QString bandScanSeed();
+// UHF 14–51. A faixa inteira quando o físico 23 não devolve serviço.
+QString bandFullScanSeed();
 QStringList bandScanArguments(const QString &seedPath, const QString &outPath);
 // Texto do toast quando 13 ou 13.1 não está na varredura. Vazio nos outros números.
 QString bandRescanPrompt(const QString &typed);
+QString bandFullRescanPrompt();
 // Acrescenta seções novas sem repetir o nome. O texto existente fica no começo.
 QString mergeChannelConfig(const QString &existing, const QString &scanned);
 QString primaryChannelConfigPath();

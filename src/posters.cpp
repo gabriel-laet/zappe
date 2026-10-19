@@ -495,6 +495,12 @@ QString networkMarkId(const QString &name)
         return QStringLiteral("cultura");
     if (folded.contains(QStringLiteral("tv brasil")) || folded.contains(QStringLiteral("tvbrasil")))
         return QStringLiteral("tvbrasil");
+    if (folded.contains(QStringLiteral("novo tempo")) || folded.contains(QStringLiteral("novotempo")))
+        return QStringLiteral("novotempo");
+    if (folded.contains(QStringLiteral("gazeta")))
+        return QStringLiteral("gazeta");
+    if (folded.contains(QStringLiteral("ngt")))
+        return QStringLiteral("ngt");
     return {};
 }
 
@@ -523,6 +529,10 @@ QString networkMarkFor(const QString &name, const QString &number)
         return QStringLiteral("cultura");
     case 9:
         return QStringLiteral("redetv");
+    case 11:
+        return QStringLiteral("gazeta");
+    case 3:
+        return QStringLiteral("ngt");
     default:
         return {};
     }
@@ -539,10 +549,11 @@ struct NetworkMark {
 const NetworkMark *networkMark(const QString &id)
 {
     static const NetworkMark marks[] = {
-        {"globo", "GLOBO", "#2457A6"},     {"sbt", "SBT", "#E10600"},
-        {"record", "RECORD", "#B00020"},   {"band", "BAND", "#D71920"},
-        {"cultura", "CULTURA", "#0E7A3D"}, {"redetv", "REDETV", "#F15A22"},
-        {"tvbrasil", "TV BRASIL", "#0055A5"},
+        {"globo", "GLOBO", "#2457A6"},         {"sbt", "SBT", "#E10600"},
+        {"record", "RECORD", "#B00020"},       {"band", "BAND", "#D71920"},
+        {"cultura", "CULTURA", "#0E7A3D"},     {"redetv", "REDETV", "#F15A22"},
+        {"tvbrasil", "TV BRASIL", "#0055A5"},  {"gazeta", "GAZETA", "#6B2D8B"},
+        {"ngt", "NGT", "#0B6E4F"},             {"novotempo", "NOVO TEMPO", "#1A4F8B"},
     };
     for (const NetworkMark &item : marks) {
         if (id == QLatin1String(item.id))
@@ -567,6 +578,37 @@ QString findNetworkAsset(const QString &dataDir, const QString &id)
         }
     }
     return {};
+}
+
+QString ensureNetworkLogoFile(const QString &dataDir, const QString &id)
+{
+    const QString existing = findNetworkAsset(dataDir, id);
+    if (!existing.isEmpty())
+        return existing;
+    const NetworkMark *mark = networkMark(id);
+    if (!mark)
+        return {};
+    const QString dir = QDir(dataDir).filePath(QStringLiteral("logos"));
+    if (!QDir().mkpath(dir))
+        return {};
+    const QString path = QDir(dir).filePath(id + QStringLiteral(".png"));
+    QImage image(880, 360, QImage::Format_ARGB32);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    QFont font(uiFamily());
+    const QString label = QString::fromLatin1(mark->label);
+    font.setPixelSize(label.size() > 8 ? 72 : 120);
+    font.setWeight(QFont::Black);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 2);
+    painter.setFont(font);
+    painter.setPen(Qt::white);
+    painter.drawText(image.rect().adjusted(24, 0, -24, 0), Qt::AlignCenter, label);
+    painter.end();
+    if (!image.save(path, "PNG"))
+        return {};
+    return path;
 }
 
 ArtPaths paintNetworkMark(const QString &cacheDir, const NetworkMark &mark, const QString &assetPath)
@@ -611,7 +653,7 @@ ArtPaths paintNetworkMark(const QString &cacheDir, const NetworkMark &mark, cons
         painter.setBrush(color.darker(140));
         painter.drawRoundedRect(QRectF(72, 168, 420, 220), 36, 36);
         QFont font(uiFamily());
-        font.setPixelSize(qstrcmp(mark.id, "tvbrasil") == 0 ? 64 : 92);
+        font.setPixelSize(qstrlen(mark.label) > 8 ? 64 : 92);
         font.setWeight(QFont::Black);
         font.setLetterSpacing(QFont::AbsoluteSpacing, 1.5);
         painter.setFont(font);
@@ -638,7 +680,7 @@ ArtPaths liveChannelArt(const QString &cacheDir, const QString &name, const QStr
 {
     const QString id = networkMarkFor(name, number);
     static QSet<QString> logged;
-    const QString asset = findNetworkAsset(dataDir, id);
+    const QString asset = ensureNetworkLogoFile(dataDir, id);
     if (!logged.contains(name)) {
         logged.insert(name);
         if (id.isEmpty()) {

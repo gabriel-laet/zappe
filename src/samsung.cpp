@@ -168,6 +168,18 @@ int samsungPairingWaitMs()
     return 45000;
 }
 
+int samsungKeyWaitMs()
+{
+    return 5000;
+}
+
+QString samsungTimeoutMessage(bool tokenPresent)
+{
+    if (tokenPresent)
+        return QStringLiteral("tempo esgotado");
+    return QStringLiteral("aceite o Zappe na TV");
+}
+
 bool samsungUpgradeToSecure(bool secure, bool denied)
 {
     return !secure && denied;
@@ -656,7 +668,7 @@ void SamsungClient::openSocket(TvKey key, bool secure, bool pairOnly)
     if (m_stripToken)
         config.token.clear();
     const bool tokenPresent = !config.token.trimmed().isEmpty();
-    const int waitMs = (secure && !tokenPresent) ? samsungPairingWaitMs() : 1800;
+    const int waitMs = (secure && !tokenPresent) ? samsungPairingWaitMs() : samsungKeyWaitMs();
     m_scheme = secure ? QStringLiteral("wss") : QStringLiteral("ws");
     emit statusChanged();
     std::fprintf(stderr, "zappe: samsung: abrindo %s://%s:%d token=%s secure=%s espera=%d\n", secure ? "wss" : "ws",
@@ -683,7 +695,7 @@ void SamsungClient::openSocket(TvKey key, bool secure, bool pairOnly)
     connect(timer, &QTimer::timeout, this, [=] {
         std::fprintf(stderr, "zappe: samsung: tempo esgotado secure=%s\n", secure ? "sim" : "não");
         const SocketFollow follow = secure ? SocketFollow::Finish : SocketFollow::TrySecure;
-        done(QStringLiteral("aceite o Zappe na TV"), follow, key, pairOnly);
+        done(samsungTimeoutMessage(tokenPresent), follow, key, pairOnly);
     });
     connect(socket, &QWebSocket::textMessageReceived, this, [=](const QString &message) {
         const QByteArray raw = message.toUtf8();

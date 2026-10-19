@@ -84,7 +84,7 @@ Window {
             anchors.rightMargin: 80
             anchors.topMargin: 36
             height: 64
-            opacity: win.splashOn ? 0 : 1
+            opacity: win.splashOn || guide.page === "settings" ? 0 : 1
             Behavior on opacity { NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease } }
 
             Row {

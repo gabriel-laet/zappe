@@ -465,6 +465,7 @@ void House::goHome()
         return;
     m_lastBack = now;
     m_bandOffer = false;
+    m_bandFull = false;
     if (m_guide && !m_guide->dialText().isEmpty()) {
         m_guide->clearDial();
         if (m_dialTimer)
@@ -493,6 +494,7 @@ void House::goBack()
     m_lastBack = now;
     if (m_bandOffer) {
         m_bandOffer = false;
+        m_bandFull = false;
         return;
     }
     if (m_guide && !m_guide->dialText().isEmpty()) {
@@ -798,6 +800,7 @@ void House::commitDial()
         const QString offer = bandRescanPrompt(typed);
         if (!offer.isEmpty()) {
             m_bandOffer = true;
+            m_bandFull = false;
             toast(offer);
             return;
         }
@@ -814,13 +817,15 @@ bool House::acceptBandScan()
         // O evdev e o Qt entregam o mesmo OK. O segundo não abre o card.
         return now - m_bandConsumed < 400;
     }
+    const bool full = m_bandFull;
     m_bandOffer = false;
+    m_bandFull = false;
     m_bandConsumed = now;
-    startBandScan();
+    startBandScan(full);
     return true;
 }
 
-void House::startBandScan()
+void House::startBandScan(bool full)
 {
     if (m_bandScan && m_bandScan->state() != QProcess::NotRunning) {
         toast(QStringLiteral("A busca da Band já está em andamento."));
@@ -837,14 +842,14 @@ void House::startBandScan()
     }
     const QString dir = m_dataDir.isEmpty() ? resolveDataDir() : m_dataDir;
     QDir().mkpath(dir);
-    const QString seedPath = QDir(dir).filePath(QStringLiteral("band-initial.conf"));
-    const QString outPath = QDir(dir).filePath(QStringLiteral("band-scan.conf"));
+    const QString seedPath = QDir(dir).filePath(full ? QStringLiteral("band-full.conf") : QStringLiteral("band-initial.conf"));
+    const QString outPath = QDir(dir).filePath(full ? QStringLiteral("band-full-scan.conf") : QStringLiteral("band-scan.conf"));
     QFile seed(seedPath);
     if (!seed.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         toast(QStringLiteral("Não consegui gravar a busca da Band."));
         return;
     }
-    seed.write(bandScanSeed().toUtf8());
+    seed.write((full ? bandFullScanSeed() : bandScanSeed()).toUtf8());
     seed.close();
     QFile::remove(outPath);
     if (!m_bandScan) {
@@ -857,9 +862,15 @@ void House::startBandScan()
         connect(m_bandScan, &QProcess::finished, this, [this](int, QProcess::ExitStatus) { finishBandScan(); });
     }
     m_bandScan->setProperty("outPath", outPath);
+    m_bandScan->setProperty("full", full);
     m_bandScan->start(bin, bandScanArguments(seedPath, outPath));
-    toast(QStringLiteral("Buscando a Band no canal físico %1…").arg(bandPhysicalChannel()));
-    std::fprintf(stderr, "zappe: ota: rescan físico %d (%d Hz)\n", bandPhysicalChannel(), bandFrequencyHz());
+    if (full) {
+        toast(QStringLiteral("Varrendo a faixa de UHF…"));
+        std::fprintf(stderr, "zappe: ota: rescan faixa UHF 14-51\n");
+    } else {
+        toast(QStringLiteral("Buscando a Band no canal físico %1…").arg(bandPhysicalChannel()));
+        std::fprintf(stderr, "zappe: ota: rescan físico %d (%d Hz)\n", bandPhysicalChannel(), bandFrequencyHz());
+    }
 }
 
 void House::finishBandScan()
@@ -870,9 +881,18 @@ void House::finishBandScan()
     if (out.open(QIODevice::ReadOnly))
         scanned = QString::fromUtf8(out.readAll());
     const QVector<OtaService> found = parseOtaServices(scanned);
+    const bool full = m_bandScan && m_bandScan->property("full").toBool();
     if (found.isEmpty()) {
-        toast(QStringLiteral("A busca no canal físico %1 não achou canal.").arg(bandPhysicalChannel()));
-        std::fprintf(stderr, "zappe: ota: rescan físico %d sem serviço\n", bandPhysicalChannel());
+        if (!full) {
+            m_bandOffer = true;
+            m_bandFull = true;
+            toast(bandFullRescanPrompt());
+            std::fprintf(stderr, "zappe: ota: rescan físico %d sem serviço; oferecendo a faixa\n",
+                         bandPhysicalChannel());
+            return;
+        }
+        toast(QStringLiteral("A varredura da faixa não achou canal."));
+        std::fprintf(stderr, "zappe: ota: rescan faixa sem serviço\n");
         return;
     }
     const QString dest = primaryChannelConfigPath();
@@ -1113,21 +1133,38 @@ QString House::formatTrace(const TvTrace &line) const
 
 void House::publishTrace(int index)
 {
-    if (index >= 0 && index < m_traces.size()) {
-        const QString text = formatTrace(m_traces[index]);
-        if (m_traces[index].logged != text) {
-            m_traces[index].logged = text;
-            std::fprintf(stderr, "zappe: tv: %s\n", qPrintable(text));
-        }
-    }
     QStringList view;
     view.reserve(m_traces.size());
     for (const TvTrace &line : m_traces)
         view.append(formatTrace(line));
-    if (view == m_tvLog)
+    if (view != m_tvLog) {
+        m_tvLog = std::move(view);
+        emit tvLogChanged();
+    }
+    if (index >= 0 && index < m_traces.size())
+        scheduleTraceLog(m_traces[index].id);
+}
+
+void House::scheduleTraceLog(int id)
+{
+    QTimer::singleShot(220, this, [this, id] {
+        for (int i = 0; i < m_traces.size(); ++i) {
+            if (m_traces[i].id == id) {
+                writeTraceOnce(i);
+                return;
+            }
+        }
+    });
+}
+
+void House::writeTraceOnce(int index)
+{
+    if (index < 0 || index >= m_traces.size() || m_traces[index].printed)
         return;
-    m_tvLog = std::move(view);
-    emit tvLogChanged();
+    if (m_traces[index].waitKey != -1 || m_traces[index].result == QStringLiteral("…"))
+        return;
+    m_traces[index].printed = true;
+    std::fprintf(stderr, "zappe: tv: %s\n", qPrintable(formatTrace(m_traces[index])));
 }
 
 void House::rememberTrace(const TvTrace &incoming)
@@ -1135,6 +1172,8 @@ void House::rememberTrace(const TvTrace &incoming)
     TvTrace line = incoming;
     if (line.at <= 0)
         line.at = QDateTime::currentMSecsSinceEpoch();
+    line.id = ++m_traceSeq;
+    line.printed = false;
     m_traces.prepend(line);
     while (m_traces.size() > 40)
         m_traces.removeLast();
@@ -1252,6 +1291,7 @@ void House::finishWait(int waitKey, const QString &result)
         m_traces[i].loggedFinal = true;
         m_traces[i].waitKey = -1;
         publishTrace(i);
+        writeTraceOnce(i);
         return;
     }
 }
@@ -1277,6 +1317,7 @@ void House::onTvReported(const QString &message)
         m_traces[i].loggedFinal = true;
         m_traces[i].waitKey = -1;
         publishTrace(i);
+        writeTraceOnce(i);
         return;
     }
 }

@@ -10,7 +10,7 @@ ATONGX 115 / 114 / 113 / 116
   → KEY_VOLUP / KEY_VOLDOWN / KEY_MUTE / KEY_POWER
 ```
 
-A Tizen só mostra o **Allow** no websocket seguro (`wss://<ip>:8002/...&token=`) e só enquanto o socket fica aberto. Sem token, o app abre essa URL na hora (ao subir e ao atualizar Ajustes), ignora o certificado autoassinado e espera o Allow por 45 segundos. `unauthorized` nesse socket não fecha a conexão: fechar cedo some com o pedido na TV. Um token recusado é tentado de novo uma vez, sem o token, para o Allow voltar. A porta `ws://:8001` entra se a segura não conectar. Cada passo vai para o stderr (`kiosk.log`): abertura, token presente ou não, certificado, evento, espera do Allow, tecla, arquivo gravado. O token em si não é logado.
+A Tizen só mostra o **Allow** no websocket seguro (`wss://<ip>:8002/...&token=`) e só enquanto o socket fica aberto. Sem token, o app abre essa URL na hora (ao subir e ao atualizar Ajustes), ignora o certificado autoassinado e espera o Allow por 45 segundos. `unauthorized` nesse socket não fecha a conexão: fechar cedo some com o pedido na TV. Um token recusado é tentado de novo uma vez, sem o token, para o Allow voltar. A porta `ws://:8001` entra se a segura não conectar. A tecla espera cerca de 5 segundos. Se já existe token e a espera estoura, o aviso é tempo esgotado — não pede Allow de novo. Sem token, o texto continua pedindo o Allow. Cada passo vai para o stderr (`kiosk.log`): abertura, token presente ou não, certificado, evento, espera do Allow, tecla, arquivo gravado. O token em si não é logado.
 
 O nome no pareamento é **Zappe** (`WmFwcGU=` em base64). O token volta no evento `ms.channel.connect` e é gravado em `~/.local/share/zappe/samsung.json` com permissão `0600`. Não commitar esse arquivo.
 
@@ -86,6 +86,6 @@ A tela mostra ao vivo o esquema (`ws` ou `wss`), se há token (sim ou não, nunc
 evdev 113 KEY_MUTE / x11 121 VolumeMute -> mute -> KEY_MUTE -> ok 40 ms
 ```
 
-A ordem é a tecla recebida (evdev e, se a janela viu, o X11), a ação, o comando enviado à Samsung e a resposta ou o erro, com a latência. A mesma linha vai para o stderr (`kiosk.log`) com o prefixo `zappe: tv:`. A ligação também entra nesse log quando muda.
+A ordem é a tecla recebida (evdev e, se a janela viu, o X11), a ação, o comando enviado à Samsung e a resposta ou o erro, com a latência. A mesma linha vai para o stderr (`kiosk.log`) com o prefixo `zappe: tv:`, uma vez por tecla, já com a resposta. A ligação também entra nesse log quando muda.
 
 Os botões são Reparar (apaga o token e abre o `wss` de novo para o Allow), Testar mudo, Vol+, Vol- e HDMI (circula 1, 2 e 3). Voltar registra a própria tecla e sai só desta tela, de volta para Ajustes. Home continua indo para o primeiro card.
