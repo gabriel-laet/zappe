@@ -497,8 +497,32 @@ WhisperLayout whisperLayout(const QString &dataDir)
     layout.root = root;
     layout.binDir = QDir(root).filePath(QStringLiteral("bin"));
 
+    const QStringList q8Names = {QStringLiteral("models/ggml-small-q8_0.bin"),
+                                 QStringLiteral("ggml-small-q8_0.bin")};
+    QString q8;
+    for (const QString &name : q8Names) {
+        const QString path = QDir(root).filePath(name);
+        if (QFile::exists(path)) {
+            q8 = path;
+            break;
+        }
+    }
+
+    // ZAPPE_WHISPER_MODEL=ggml-small.bin is the old f16 drop-in. q8 wins when
+    // that file is present. Any other existing path is still honored.
+    // ZAPPE_WHISPER_BIN only selects the CLI fallback, never the resident server.
     const QString explicitModel = qEnvironmentVariable("ZAPPE_WHISPER_MODEL").trimmed();
-    if (!explicitModel.isEmpty() && QFile::exists(explicitModel)) {
+    const bool pinsF16 = QFileInfo(explicitModel).fileName() == QLatin1String("ggml-small.bin");
+    if (!q8.isEmpty() && (explicitModel.isEmpty() || pinsF16 || !QFile::exists(explicitModel))) {
+        if (pinsF16) {
+            static bool announced = false;
+            if (!announced) {
+                announced = true;
+                std::fprintf(stderr, "zappe: voz: modelo q8 no lugar de %s\n", qPrintable(explicitModel));
+            }
+        }
+        layout.model = q8;
+    } else if (!explicitModel.isEmpty() && QFile::exists(explicitModel)) {
         layout.model = explicitModel;
     } else {
         const QStringList names = {QStringLiteral("models/ggml-small-q8_0.bin"),

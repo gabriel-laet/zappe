@@ -260,6 +260,48 @@ int runLogicSelfCheck()
     if (whisperEnv.value(QStringLiteral("ENABLE_GAMESCOPE_WSI")) != QLatin1String("0")
         || whisperEnv.value(QStringLiteral("HOME")) != QLatin1String("/tmp/zappe"))
         return fail("whisper gamescope wsi");
+    {
+        QTemporaryDir voiceDir;
+        if (!voiceDir.isValid())
+            return fail("whisper dir");
+        const QString root = QDir(voiceDir.path()).filePath(QStringLiteral("whisper"));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("models")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("bin")));
+        const QString q8 = QDir(root).filePath(QStringLiteral("models/ggml-small-q8_0.bin"));
+        const QString f16 = QDir(root).filePath(QStringLiteral("models/ggml-small.bin"));
+        const QString custom = QDir(root).filePath(QStringLiteral("models/ggml-tiny.bin"));
+        const QString server = QDir(root).filePath(QStringLiteral("bin/whisper-server"));
+        const auto touch = [](const QString &path) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly))
+                return false;
+            file.write("x");
+            return true;
+        };
+        if (!touch(q8) || !touch(f16) || !touch(custom) || !touch(server))
+            return fail("whisper files");
+        if (!QFile::setPermissions(server, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner))
+            return fail("whisper server mode");
+        qputenv("ZAPPE_WHISPER_MODEL", f16.toUtf8());
+        qputenv("ZAPPE_WHISPER_BIN", "/tmp/zappe-not-the-server/whisper-cli");
+        qunsetenv("ZAPPE_WHISPER_SERVER");
+        qunsetenv("ZAPPE_WHISPER_DIR");
+        const WhisperLayout pinned = whisperLayout(voiceDir.path());
+        qputenv("ZAPPE_WHISPER_MODEL", "ggml-small.bin");
+        const WhisperLayout named = whisperLayout(voiceDir.path());
+        qputenv("ZAPPE_WHISPER_MODEL", custom.toUtf8());
+        const WhisperLayout honored = whisperLayout(voiceDir.path());
+        qunsetenv("ZAPPE_WHISPER_MODEL");
+        qunsetenv("ZAPPE_WHISPER_BIN");
+        if (pinned.model != q8 || named.model != q8)
+            return fail("q8 over f16");
+        if (pinned.serverDisabled || pinned.serverBin != server)
+            return fail("resident server");
+        if (pinned.serverBin.contains(QStringLiteral("whisper-cli")))
+            return fail("bin replaced server");
+        if (honored.model != custom)
+            return fail("explicit model");
+    }
     const QByteArray wav = wavFromPcm(QByteArray(8, '\x01'), 16000);
     if (wav.size() != 52 || !wav.startsWith("RIFF") || wav.mid(8, 4) != QByteArray("WAVE"))
         return fail("wav header");

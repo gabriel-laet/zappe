@@ -27,7 +27,7 @@ zappe: voz: final 1500 ms ac=314 "aumenta o volume"
 | `bin/whisper-cli` | reserva |
 | `models/ggml-small-q8_0.bin` | modelo |
 
-Se o q8 não estiver lá, o app ainda aceita `ggml-small.bin`, `ggml-base.bin`, `ggml-tiny.bin` e as variantes `q5_1`. `ZAPPE_WHISPER_MODEL` aponta um arquivo explícito.
+Se o q8 não estiver lá, o app ainda aceita `ggml-small.bin`, `ggml-base.bin`, `ggml-tiny.bin` e as variantes `q5_1`. `ZAPPE_WHISPER_MODEL` aponta um arquivo explícito, menos quando o nome é `ggml-small.bin` e o q8 já existe: aí o q8 fica, e o log diz `modelo q8 no lugar de`. Esse era o drop-in `/etc/systemd/system/zappe-kiosk.service.d/whisper.conf`, que também fixava `ZAPPE_WHISPER_BIN`. O instalador apaga essas duas linhas (ou o arquivo, se não sobrar ajuste) nesse drop-in e no de usuário em `~/.config/systemd/user/zappe-kiosk.service.d/`. `ZAPPE_WHISPER_BIN` só escolhe o `whisper-cli` de reserva. O `whisper-server` continua residente.
 
 Instalação (baixa o q8, compila o whisper.cpp com `GGML_VULKAN` e pede `vulkan-intel` e `spirv-headers`):
 
@@ -54,4 +54,4 @@ A gramática é curta, em `src/voice.cpp`. Uma palavra perto de um comando conhe
 | play / pausar | play/pause |
 | buscar dark na netflix | busca no streaming |
 
-`ZAPPE_VOICE_FAKE="abrir netflix"` devolve esse texto ao soltar o botão, sem microfone. `ZAPPE_VOICE_SECONDS` é o teto da gravação (2–8, padrão 8); ao estourar, a passagem final roda sozinha. `ZAPPE_ALSA_DEVICE` escolhe o `arecord -D`. `ZAPPE_WHISPER_BIN` aponta o `whisper-cli`. `ZAPPE_WHISPER_PORT` muda a porta (padrão 8178).
+`ZAPPE_VOICE_FAKE="abrir netflix"` devolve esse texto ao soltar o botão, sem microfone. `ZAPPE_VOICE_SECONDS` é o teto da gravação (2–8, padrão 8); ao estourar, a passagem final roda sozinha. `ZAPPE_ALSA_DEVICE` escolhe o `arecord -D`. `ZAPPE_WHISPER_BIN` aponta só o `whisper-cli` de reserva. `ZAPPE_WHISPER_PORT` muda a porta (padrão 8178).

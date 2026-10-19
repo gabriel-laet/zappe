@@ -54,7 +54,7 @@ Opcionais:
 - `ttf-inter` — a interface usa Inter quando a família existe.
 - `dvbv5-tools` e `mpv` — TV aberta.
 - `socat` — pause do mpv pelo socket.
-- Whisper — `packaging/appliance/install-whisper.sh` (Vulkan, `ggml-small-q8_0.bin`).
+- Whisper — `packaging/appliance/install-whisper.sh` (Vulkan, `ggml-small-q8_0.bin`). O script tira o drop-in que fixava `ggml-small.bin`.
 
 O usuário do kiosk precisa dos grupos `video`, `input` e `render`.
 
@@ -249,7 +249,8 @@ journalctl --user -u zappe-update.service -n 50
 | `ZAPPE_OTA_CHANNELS` | lista de `channels.conf` |
 | `ZAPPE_SAMSUNG_HOST` | IP da TV (padrão `192.168.3.6`) |
 | `ZAPPE_SAMSUNG_DISABLE` | não fala com a TV |
-| `ZAPPE_WHISPER_BIN` / `ZAPPE_WHISPER_MODEL` | whisper-cli e o arquivo do modelo |
+| `ZAPPE_WHISPER_BIN` | só o whisper-cli de reserva; não troca o servidor |
+| `ZAPPE_WHISPER_MODEL` | arquivo do modelo; `ggml-small.bin` cede ao q8 |
 | `ZAPPE_WHISPER_SERVER` | binário do servidor, ou `off` para só o CLI |
 | `ZAPPE_WHISPER_PORT` | porta local do servidor (padrão 8178) |
 | `ZAPPE_WHISPER_URL` | URL de um whisper-server que já está no ar |
