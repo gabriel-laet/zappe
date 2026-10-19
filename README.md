@@ -27,7 +27,7 @@ Não há segundo gamescope. O gamescope ignora posição de janela e mostra o qu
 | TV aberta | `channels.conf`, HD primeiro. 1-seg só fica se não houver fullseg. |
 | Controle | evdev do ATONGX. `event4` (air mouse) com grab exclusivo. |
 | Samsung | Power, volume, mudo, HDMI e estado da UN43TU7020. |
-| Voz | Whisper pt-BR, modelo base e, se não houver, tiny. |
+| Voz | Whisper pt-BR no Vulkan, modelo small q8, servidor residente. |
 | Áudio | PipeWire `output:hdmi-stereo` no card `alsa_card.pci-0000_00_1f.3`. |
 | Update | `zappe-update` recompila com CMake e reinicia a unit de sistema `zappe-kiosk.service`. |
 
@@ -45,7 +45,8 @@ sudo pacman -S --needed \
   xorg-server-xvfb \
   google-chrome \
   pipewire pipewire-pulse \
-  alsa-utils
+  alsa-utils \
+  vulkan-intel spirv-headers vulkan-headers glslang ffmpeg
 ```
 
 Opcionais:
@@ -53,7 +54,7 @@ Opcionais:
 - `ttf-inter` — a interface usa Inter quando a família existe.
 - `dvbv5-tools` e `mpv` — TV aberta.
 - `socat` — pause do mpv pelo socket.
-- Whisper — `packaging/appliance/install-whisper.sh` (modelo `ggml-base.bin`; para o menor, aponte `ZAPPE_WHISPER_MODEL` em `ggml-tiny.bin`).
+- Whisper — `packaging/appliance/install-whisper.sh` (Vulkan, `ggml-small-q8_0.bin`). O script tira o drop-in que fixava `ggml-small.bin`.
 
 O usuário do kiosk precisa dos grupos `video`, `input` e `render`.
 
@@ -225,7 +226,7 @@ Uma fileira antiga do harvest com `status` `error`, `teach` ou `harvesting`, ou 
 
 ## Voz
 
-Mic 582 grava com `arecord` e transcreve com `whisper-cli -l pt`. A ordem do modelo é `ggml-base.bin`, depois `ggml-tiny.bin`. `ZAPPE_WHISPER_MODEL` aponta outro arquivo. `ZAPPE_VOICE_FAKE="abrir netflix"` pula o microfone. Frases: abrir um streaming, voltar, volume, mudo, ir para Globo / Record / SBT. Ver [`docs/voice.md`](docs/voice.md).
+Segurar o mic 582 grava com `arecord` e transcreve no `whisper-server` (Vulkan, modelo carregado). Sem o servidor, cai no `whisper-cli` com os mesmos flags. O `-ac` segue o tamanho do clipe. Silêncio nas pontas sai antes da transcrição, e uma palavra próxima de um comando conhecido é corrigida (`Almento` vira `aumenta`). `ZAPPE_VOICE_FAKE="abrir netflix"` pula o microfone e entrega o texto ao soltar. Ver [`docs/voice.md`](docs/voice.md).
 
 ## Marca
 
@@ -233,7 +234,7 @@ Mic 582 grava com `arecord` e transcreve com `whisper-cli -l pt`. A ordem do mod
 
 ## Update
 
-`zappe-update.timer` olha `origin/main` a cada 20 minutos. Árvore suja não é atualizada. O build é `cmake --build`. O binário vai para `~/bin/zappe`. Se existir a unit de sistema `zappe-kiosk.service`, o restart é `sudo -n systemctl restart zappe-kiosk.service`. Sem ela, reinicia a unit de usuário. O perfil do Chrome não é tocado.
+`zappe-update.timer` olha `origin/main` a cada 20 minutos. Árvore suja não é atualizada. O build é `cmake --build`. O binário vai para `~/bin/zappe`. Em seguida roda `install-whisper.sh`; se o Vulkan ou o download falhar, o app atualiza mesmo assim. Se existir a unit de sistema `zappe-kiosk.service`, o restart é `sudo -n systemctl restart zappe-kiosk.service`. Sem ela, reinicia a unit de usuário. O perfil do Chrome não é tocado.
 
 ```bash
 systemctl --user start zappe-update.service
@@ -262,8 +263,14 @@ journalctl --user -u zappe-update.service -n 50
 | `ZAPPE_OTA_CHANNELS` | lista de `channels.conf` |
 | `ZAPPE_SAMSUNG_HOST` | IP da TV (padrão `192.168.3.6`) |
 | `ZAPPE_SAMSUNG_DISABLE` | não fala com a TV |
-| `ZAPPE_WHISPER_BIN` / `ZAPPE_WHISPER_MODEL` | Whisper |
-| `ZAPPE_VOICE_FAKE` | transcrição falsa |
+| `ZAPPE_WHISPER_BIN` | só o whisper-cli de reserva; não troca o servidor |
+| `ZAPPE_WHISPER_MODEL` | arquivo do modelo; `ggml-small.bin` cede ao q8 |
+| `ZAPPE_WHISPER_SERVER` | binário do servidor, ou `off` para só o CLI |
+| `ZAPPE_WHISPER_PORT` | porta local do servidor (padrão 8178) |
+| `ZAPPE_WHISPER_URL` | URL de um whisper-server que já está no ar |
+| `ZAPPE_WHISPER_DIR` | pasta com `bin/` e `models/` |
+| `ZAPPE_VOICE_FAKE` | transcrição falsa, entregue ao soltar o botão |
+| `ZAPPE_VOICE_SECONDS` | teto do botão segurado (2–8, padrão 8) |
 
 ## Captura de tela
 

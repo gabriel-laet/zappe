@@ -154,6 +154,13 @@ systemctl --user daemon-reload || true
 printf '%s\n' "${remote_sha}" > "${INSTALLED_SHA}"
 log "wrote ${INSTALLED_SHA}"
 
+if [[ -f "${ZAPPE_SRC}/packaging/appliance/install-whisper.sh" ]]; then
+  log "whisper: install-whisper.sh"
+  if ! bash "${ZAPPE_SRC}/packaging/appliance/install-whisper.sh"; then
+    log "whisper: install-whisper.sh failed; app update continues"
+  fi
+fi
+
 if systemctl cat "${ZAPPE_UNIT}" >/dev/null 2>&1; then
   if sudo -n systemctl restart "${ZAPPE_UNIT}"; then
     log "restarted system ${ZAPPE_UNIT}"

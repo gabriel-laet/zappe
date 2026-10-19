@@ -175,6 +175,11 @@ House::House(QObject *parent)
         emit changed();
         toast(message);
     });
+    connect(m_voice, &VoiceSession::partial, this, [this](const QString &transcript) {
+        m_listening = true;
+        m_listeningText = transcript;
+        emit changed();
+    });
     connect(m_voice, &VoiceSession::finished, this, [this](const QString &transcript) {
         m_listening = false;
         m_listeningText = transcript;
@@ -184,6 +189,7 @@ House::House(QObject *parent)
     connect(m_remote, &RemoteWatcher::action, this, &House::onRemote);
     connect(m_remote, &RemoteWatcher::keyCode, this, &House::onEvdevKey);
     connect(m_remote, &RemoteWatcher::dialKey, this, &House::onDial);
+    connect(m_remote, &RemoteWatcher::voiceHold, this, &House::onVoiceHold);
     connect(m_ota, &OtaPlayer::epgReady, this, &House::applyEpg);
     connect(m_chrome, &ChromeSession::exited, this, [this] { updateKeyHold(); });
     connect(m_mirror, &MirrorSession::playerReady, this, [this] {
@@ -217,6 +223,7 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
     m_window = window;
     m_dataDir = dataDir;
     m_samsung->setDataDir(dataDir);
+    m_voice->warm(dataDir);
     connect(m_guide, &Guide::focusChanged, this, [this] {
         if (!m_focusTimer) {
             m_focusTimer = new QTimer(this);
@@ -950,6 +957,16 @@ void House::applyEpg(const QString &channel, const QString &nowTitle, const QStr
     }
 }
 
+void House::onVoiceHold(bool down)
+{
+    if (!m_voice)
+        return;
+    if (down)
+        m_voice->press(m_dataDir);
+    else
+        m_voice->release();
+}
+
 void House::onRemote(int remoteAction)
 {
     const auto action = RemoteAction(remoteAction);
@@ -1062,7 +1079,6 @@ void House::onRemote(int remoteAction)
         mute();
         break;
     case RemoteAction::Voice:
-        m_voice->listen(m_dataDir);
         break;
     case RemoteAction::Power:
         watchCommand(TvKey::Power);

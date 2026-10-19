@@ -181,20 +181,36 @@ protected:
                     continue;
                 input_event event{};
                 while (::read(fds[i], &event, sizeof(event)) == ssize_t(sizeof(event))) {
-                    if (event.type != EV_KEY || event.value != 1)
+                    if (event.type != EV_KEY)
                         continue;
                     const int code = event.code;
+                    const RemoteAction action = actionForEvdev(code);
+                    if (action == RemoteAction::Voice) {
+                        if (event.value != 0 && event.value != 1)
+                            continue;
+                        if (event.value == 1) {
+                            QMetaObject::invokeMethod(m_owner, [owner = m_owner, code] {
+                                emit owner->keyCode(code);
+                            }, Qt::QueuedConnection);
+                        }
+                        const bool down = event.value == 1;
+                        QMetaObject::invokeMethod(m_owner, [owner = m_owner, down] {
+                            emit owner->voiceHold(down);
+                        }, Qt::QueuedConnection);
+                        continue;
+                    }
+                    if (event.value != 1)
+                        continue;
                     QMetaObject::invokeMethod(m_owner, [owner = m_owner, code] {
                         emit owner->keyCode(code);
                     }, Qt::QueuedConnection);
-                    const int dial = dialFromEvdev(event.code);
+                    const int dial = dialFromEvdev(code);
                     if (dial >= 0) {
                         QMetaObject::invokeMethod(m_owner, [owner = m_owner, dial] {
                             emit owner->dialKey(dial);
                         }, Qt::QueuedConnection);
                         continue;
                     }
-                    const RemoteAction action = actionForEvdev(event.code);
                     if (action == RemoteAction::Unmapped || action == RemoteAction::Ignore) {
                         if (action == RemoteAction::Ignore)
                             std::fprintf(stderr, "zappe: tecla %d ignorada\n", event.code);

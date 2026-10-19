@@ -82,6 +82,7 @@ public slots:
     void onRemote(int remoteAction);
     void onDial(int value);
     void onEvdevKey(int code);
+    void onVoiceHold(bool down);
 
 signals:
     void changed();

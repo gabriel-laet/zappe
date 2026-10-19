@@ -23,6 +23,9 @@ signals:
     void keyCode(int code);
     // 0–9 ou 10 para o ponto. O nó exclusivo ainda entrega o número.
     void dialKey(int value);
+    // O microfone segura: pressiona começa, solta fecha. As outras teclas
+    // continuam só no toque.
+    void voiceHold(bool down);
 
 private:
     class Worker;
