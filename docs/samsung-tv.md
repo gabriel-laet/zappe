@@ -5,11 +5,14 @@ O mini-PC controla a TV pela rede. Volume, mudo, força e entrada HDMI usam o De
 ```text
 ATONGX 115 / 114 / 113 / 116
   → src/samsung.cpp
-  → ws://192.168.3.6:8001/api/v2/channels/samsung.remote.control
+  → wss://192.168.3.6:8002/api/v2/channels/samsung.remote.control?name=<base64>
+  → Allow na TV, se ainda não houver token
   → KEY_VOLUP / KEY_VOLDOWN / KEY_MUTE / KEY_POWER
 ```
 
-A porta segura `wss://:8002` é a segunda tentativa. O nome no pareamento é **Zappe**. O token volta no evento `ms.channel.connect` e é gravado em `~/.local/share/zappe/samsung.json` com permissão `0600`. Não commitar esse arquivo.
+A Tizen só mostra o **Allow** no websocket seguro (`wss://<ip>:8002/...&token=`) e só enquanto o socket fica aberto. Sem token, o app abre essa URL na hora (ao subir e ao atualizar Ajustes), ignora o certificado autoassinado e espera o Allow por 45 segundos. `unauthorized` nesse socket não fecha a conexão: fechar cedo some com o pedido na TV. Um token recusado é tentado de novo uma vez, sem o token, para o Allow voltar. A porta `ws://:8001` entra se a segura não conectar. A tecla espera cerca de 5 segundos. Se já existe token e a espera estoura, o aviso é tempo esgotado — não pede Allow de novo. Sem token, o texto continua pedindo o Allow. Cada passo vai para o stderr (`kiosk.log`): abertura, token presente ou não, certificado, evento, espera do Allow, tecla, arquivo gravado. O token em si não é logado.
+
+O nome no pareamento é **Zappe** (`WmFwcGU=` em base64). O token volta no evento `ms.channel.connect` e é gravado em `~/.local/share/zappe/samsung.json` com permissão `0600`. Não commitar esse arquivo.
 
 ## Configurar
 
@@ -31,7 +34,7 @@ Edite o arquivo na máquina (não no git):
 | `mac` | MAC da TV, para Wake-on-LAN. Vazio desliga o WoL. |
 | `cec` | Vazio tenta `/dev/cec0`. `off` não manda HDMI-CEC. |
 
-Na TV, aceite **Zappe** em Gerenciador de dispositivos / Device Connect. Sem isso o websocket responde `unauthorized` e o app avisa na tela.
+Na TV, aceite **Zappe** no pedido Allow (Gerenciador de dispositivos / Device Connect). Sem isso o websocket responde `unauthorized`. O app segura o socket seguro até o pedido aparecer; não fecha no primeiro `unauthorized`.
 
 O MAC está em Configurações → Rede → Status da conexão, ou no roteador. Formato `aa:bb:cc:dd:ee:ff`. Wake-on-LAN precisa estar ligado na TV (rede em standby).
 
@@ -60,7 +63,7 @@ Volume e mudo são `KEY_VOLUP`, `KEY_VOLDOWN` e `KEY_MUTE`. Se a TV não respond
 
 A entrada não usa `KEY_SOURCE` (isso só circula a fonte). Ajustes manda `KEY_HDMI1`, `KEY_HDMI2` ou `KEY_HDMI3`. A UN43TU7020 tem três HDMI.
 
-O volume numérico não vem no websocket. Com a TV ligada o app pergunta o UPnP `GetVolume` na porta `9197`. Se a TV não responder, Ajustes mostra **indisponível**.
+O volume numérico não vem no websocket. Com a TV ligada o app pergunta o UPnP `GetVolume` e o `GetMute` na porta `9197`. Se a TV não responder, Ajustes mostra **indisponível** no volume e **—** no mudo.
 
 ## Ajustes
 
@@ -73,3 +76,16 @@ Menu → Ajustes → seção **TV**:
 | Volume | Esquerda e direita. |
 | Mudo | OK. |
 | Entrada HDMI | Laterais escolhem 1–3, OK envia. |
+| Testar TV | OK abre o diagnóstico. |
+
+## Testar TV
+
+A tela mostra ao vivo o esquema (`ws` ou `wss`), se há token (sim ou não, nunca o valor), o último erro, a força, o volume e o mudo. Cada tecla pressionada vira uma linha:
+
+```text
+evdev 113 KEY_MUTE / x11 121 VolumeMute -> mute -> KEY_MUTE -> ok 40 ms
+```
+
+A ordem é a tecla recebida (evdev e, se a janela viu, o X11), a ação, o comando enviado à Samsung e a resposta ou o erro, com a latência. A mesma linha vai para o stderr (`kiosk.log`) com o prefixo `zappe: tv:`, uma vez por tecla, já com a resposta. A ligação também entra nesse log quando muda.
+
+Os botões são Reparar (apaga o token e abre o `wss` de novo para o Allow), Testar mudo, Vol+, Vol- e HDMI (circula 1, 2 e 3). Voltar registra a própria tecla e sai só desta tela, de volta para Ajustes. Home continua indo para o primeiro card.

@@ -24,7 +24,7 @@ Não há segundo gamescope. O gamescope ignora posição de janela e mostra o qu
 | Chrome | Um perfil, porta CDP 9222. Catálogo num Xvfb; kiosk no gamescope só no Play. |
 | Roteiros | `data/logins.json`. URL, seletores e passos que pedem e-mail, senha, código ou perfil. |
 | Pedido de dado | Overlay na tela e, se configurado, POST num webhook. Sem URL, o webhook fica desligado. |
-| TV aberta | `channels.conf`, HD primeiro, 1Seg fora. |
+| TV aberta | `channels.conf`, HD primeiro. 1-seg só fica se não houver fullseg. |
 | Controle | evdev do ATONGX. `event4` (air mouse) com grab exclusivo. |
 | Samsung | Power, volume, mudo, HDMI e estado da UN43TU7020. |
 | Voz | Whisper pt-BR, modelo base e, se não houver, tiny. |
@@ -174,7 +174,7 @@ Configuração, fora do git:
 
 `ZAPPE_LOGIN_WEBHOOK` e `ZAPPE_LOGIN_WEBHOOK_TOKEN` cobrem o arquivo. URL vazia deixa o webhook desligado; a tela e o arquivo `login-inbox.json` (`{"requestId","value"}`) continuam valendo. Os seletores são ponto de partida e podem falhar no site real.
 
-Voltar nunca encerra o app. Na home não faz nada. Numa tela interna, volta um nível. No catálogo de um streaming, volta para a lista de apps. No player do espelho, fecha o Chrome e o guia volta para a frente, mesmo com o Chrome em foco. Na TV aberta, volta para o guia. A tecla do controle é `KEY_BACK` (evdev 158, `XF86Back`), não Escape. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
+Voltar nunca encerra o app. Escape e Del voltam um nível: na home não fazem nada, numa tela interna fecham essa tela, no catálogo de um streaming voltam para a lista de apps. Home volta para a grade e deixa o foco no primeiro card, também no meio de uma fileira ou saindo do canal. No player do espelho, os dois fecham o Chrome e o guia volta para a frente, mesmo com o Chrome em foco. Na TV aberta, os dois fecham o mpv. A tecla Home do controle da sala é `KEY_BACK` (evdev 158, `XF86Back`). `KEY_HOMEPAGE` (172) e `KEY_HOME` (102) fazem o mesmo. Para injetar com xdotool, mande `XF86Back` para a janela do app. Ver [`docs/atongx-input.md`](docs/atongx-input.md).
 
 ## Controle
 
@@ -186,25 +186,36 @@ Mapa em `data/atongx-map.json`. O app grava o mesmo contrato.
 | Play / Pause | 164 | play/pause |
 | Setas | 103, 108, 105, 106 | foco |
 | OK | 28 | ativar |
-| Home | 158 | voltar (não fecha o app) |
+| Home | 158, 172, 102 | grade, foco no primeiro card |
+| Del / Escape | 14, 1 | voltar um nível |
 | Menu | 127 | menu |
 | Page Up / Down | 104, 109 | troca de fileira |
 | Volume | 115, 114 | Samsung |
 | Mute | 113 | Samsung |
-| Del | 14 | voltar |
 | Mic | 582 | Whisper |
+| Números | 2–11, 71–83 | sintonia (7.1, 13). O ponto é 52 ou 83 |
 
 O nó `event4` do air mouse recebe `EVIOCGRAB`. O cursor desse nó é descartado. O nó da tecla Power também: o logind não desliga o mini-PC. Detalhe em [`docs/atongx-input.md`](docs/atongx-input.md) e [`docs/samsung-tv.md`](docs/samsung-tv.md).
 
 IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo sem segredo está em `packaging/appliance/examples/samsung.json`.
 
+Em Ajustes → TV, **Testar TV** abre o diagnóstico: ligação `ws` ou `wss`, token presente ou não, último erro, volume, mudo e força. Cada tecla do controle vira uma linha (tecla recebida, ação, comando na Samsung, resposta e latência) na tela e no `kiosk.log` — uma linha por tecla. Reparar apaga o token e pede Allow de novo. Voltar sai só dessa tela. O valor do token não entra no log. Com token gravado, um tempo esgotado não pede Allow; a espera da tecla é de 5 segundos.
+
+O logo da rede, quando o nome ou o virtual casa, é um arquivo em `~/.local/share/zappe/logos/{id}.png`. Se não houver arquivo, o app gera o wordmark e guarda ali. Globo, SBT, Record, Band, Cultura, RedeTV, TV Brasil, Gazeta, NGT e Novo Tempo entram nessa lista.
+
 ## TV aberta
 
-Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Nomes 1Seg saem. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
+Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Um serviço 1-seg (o nome ou `ISDBT_LAYER_ENABLED = 1`, só a camada A) sai quando o mesmo canal tem fullseg. Se a Band só veio assim, ela permanece na fileira e o log diz que o fullseg não foi gravado. Sem nenhuma seção da Band, o log diz uma vez que a varredura não gravou a Band: o virtual é 13.1 e o físico em São Paulo continua o 23 (527 MHz), não o 13. Digitar 13 oferece OK para um `dvbv5-scan` só nessa frequência; Voltar cancela. Se o 23 não devolve serviço, o próximo OK varre a faixa de UHF 14 a 51. Os serviços novos entram no `channels.conf` sem repetir o nome. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.
+
+O número virtual vem de `LOGICAL_CHANNEL_NUMBER`, `VCHANNEL` ou `LCN`, senão de um número no nome. Sem número no arquivo, os majors habituais entram: Band 13.1, Record 7.1, Globo 5.1, SBT 4.1, Cultura 2.1, RedeTV 9.1. Digitar no controle (13, ou 7.1) mostra o número na tela e sintoniza depois de pouco mais de um segundo. Voltar apaga o número antes de sair da tela.
+
+Com o canal em foco, a capa atualiza na hora. Se esse canal já está no ar, é um `screenshot-to-file` e o vídeo não para. Se outro canal está no ar, o sintonizador não é trocado. Se está livre, um `dvbv5-zap` curto grava um TS, o `ffmpeg` tira um frame e o guia continua na frente. O mesmo TS entrega o EPG. A gravação usa `dvbv5-zap -P`, então entram o SDT (PID 0x11), o EIT (0x12) e, no ISDB, 0x26 e 0x27, não só áudio e vídeo. EIT presente/seguinte (e a grade, se o presente não vier) e o nome no SDT. O log `ota: epg` sai sempre, com os PIDs e as tabelas lidas, mesmo quando o título vem vazio. O guia e a tela de sintonia mostram "Agora" e "A seguir".
+
+Sem frame, a capa é o logo da rede. O app procura `~/.local/share/zappe/logos/{id}.png` (ou `.jpg` / `.webp`, e a pasta `ota-logos`) e, se o arquivo existe, desenha ele inteiro na cor da rede. Sem arquivo, gera o wordmark, grava em `logos/{id}.png` e usa esse arquivo — o log deixa de dizer `arquivo=nenhum`. Globo, SBT, Record, Band, Cultura, RedeTV, TV Brasil, Gazeta, NGT e Novo Tempo têm marca. O virtual 5.1, 4.1, 7.1, 13.1, 2.1, 9.1, 11.1 e 3.1 escolhe a marca quando o nome não cita a rede. O granulado não cobre o logo.
 
 OK num canal ao vivo sintoniza na hora: o card aperta e um overlay mostra o nome, a arte, um spinner e uma barra de até 10 segundos. A imagem do mpv esconde o overlay. Se falhar ou estourar o tempo, o overlay explica e oferece OK para tentar de novo e Voltar para fechar.
 
-Sem um frame gravado, o card é o nome do canal num degradê, não o desenho genérico das outras capas. Enquanto o mpv já está no ar, o app pede um `screenshot-to-file` pelo socket IPC (8 segundos depois da imagem, e de novo a cada 3 minutos). O JPEG fica em `~/.local/share/zappe/ota-frames/` e vale por 12 horas. Isso não abre outro sintonizador e não pausa o vídeo. Quando o card usa esse frame, o granulado e as manchas de cor saem de cima da foto. Na próxima vez que o guia mostra o canal, a capa é esse frame.
+Sem um frame gravado, o card é o monograma da rede ou, fora dessa lista, o nome do canal num degradê, não o desenho genérico das outras capas. Enquanto o mpv já está no ar, o app pede um `screenshot-to-file` pelo socket IPC (8 segundos depois da imagem, e de novo a cada 3 minutos). O JPEG fica em `~/.local/share/zappe/ota-frames/` e vale por 12 horas. Isso não abre outro sintonizador e não pausa o vídeo. Quando o card usa esse frame, o granulado e as manchas de cor saem de cima da foto. Na próxima vez que o guia mostra o canal, a capa é esse frame.
 
 Voltar no canal fecha o mpv e devolve o guia, mesmo com o mpv em foco. O app trata Back (evdev 158) e Escape (evdev 1) como sair do canal. Enquanto o canal está no ar, o app também captura no X o keycode 166 (`XF86Back`), então `xdotool key 166` fecha o mpv mesmo com ele em foco. O `input.conf` do mpv usa `BACK` e `GO_BACK` (o nome que o mpv dá a essa tecla; `XF86Back` ele ignora) e o keycode `0x21FF26`. Quando o processo termina, o guia volta para a frente.
 

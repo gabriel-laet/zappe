@@ -21,6 +21,7 @@ set(QML_FILES
   qml/FpsOverlay.qml
   qml/SideMenu.qml
   qml/SettingsView.qml
+  qml/TvTestView.qml
   qml/VolumeHud.qml
   qml/Toast.qml
   qml/LoginPrompt.qml
@@ -47,6 +48,7 @@ qt_add_executable(zappe
   src/audio.cpp
   src/voice.cpp
   src/ota.cpp
+  src/epg.cpp
   src/samsung.cpp
   src/chrome.cpp
   src/cdp.cpp

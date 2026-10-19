@@ -19,6 +19,10 @@ public:
 
 signals:
     void action(int remoteAction);
+    // Todo EV_KEY com value 1, inclusive número e tecla sem ação.
+    void keyCode(int code);
+    // 0–9 ou 10 para o ponto. O nó exclusivo ainda entrega o número.
+    void dialKey(int value);
 
 private:
     class Worker;

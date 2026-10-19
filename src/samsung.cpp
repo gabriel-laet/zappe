@@ -1,5 +1,7 @@
 #include "samsung.h"
 
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHostAddress>
@@ -11,6 +13,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSslError>
 #include <QTimer>
 #include <QUrl>
 #include <QWebSocket>
@@ -140,6 +143,121 @@ QString samsungWebsocketUrl(const SamsungConfig &config, bool secure)
     return url;
 }
 
+QString samsungConnectToken(const QByteArray &message)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(message);
+    if (!doc.isObject())
+        return {};
+    const QJsonObject obj = doc.object();
+    if (obj.value(QStringLiteral("event")).toString() != QLatin1String("ms.channel.connect"))
+        return {};
+    return obj.value(QStringLiteral("data")).toObject().value(QStringLiteral("token")).toString().trimmed();
+}
+
+bool samsungAuthDenied(const QByteArray &message)
+{
+    const QJsonDocument doc = QJsonDocument::fromJson(message);
+    if (!doc.isObject())
+        return false;
+    const QString event = doc.object().value(QStringLiteral("event")).toString();
+    return event == QLatin1String("ms.channel.unauthorized") || event == QLatin1String("ms.channel.timeOut");
+}
+
+int samsungPairingWaitMs()
+{
+    return 45000;
+}
+
+int samsungKeyWaitMs()
+{
+    return 5000;
+}
+
+QString samsungTimeoutMessage(bool tokenPresent)
+{
+    if (tokenPresent)
+        return QStringLiteral("tempo esgotado");
+    return QStringLiteral("aceite o Zappe na TV");
+}
+
+bool samsungUpgradeToSecure(bool secure, bool denied)
+{
+    return !secure && denied;
+}
+
+bool samsungRetryWithoutToken(bool secure, bool hadToken, bool stripped, bool denied)
+{
+    return secure && hadToken && !stripped && denied;
+}
+
+bool samsungShouldHoldPairing(bool secure, bool tokenPresent, bool denied)
+{
+    return secure && !tokenPresent && denied;
+}
+
+bool saveSamsungToken(const QString &dataDir, const QString &host, const QString &name, const QString &token)
+{
+    const QString trimmed = token.trimmed();
+    if (dataDir.trimmed().isEmpty() || trimmed.isEmpty())
+        return false;
+    QDir().mkpath(dataDir);
+    QJsonObject obj;
+    QFile existing(dataDir + QStringLiteral("/samsung.json"));
+    if (existing.open(QIODevice::ReadOnly)) {
+        const QJsonDocument current = QJsonDocument::fromJson(existing.readAll());
+        if (current.isObject())
+            obj = current.object();
+        existing.close();
+    }
+    if (!host.trimmed().isEmpty())
+        obj.insert(QStringLiteral("host"), host.trimmed());
+    if (!name.trimmed().isEmpty())
+        obj.insert(QStringLiteral("name"), name.trimmed());
+    obj.insert(QStringLiteral("token"), trimmed);
+    QSaveFile out(dataDir + QStringLiteral("/samsung.json"));
+    if (!out.open(QIODevice::WriteOnly))
+        return false;
+    out.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
+    if (!out.commit())
+        return false;
+    QFile::setPermissions(dataDir + QStringLiteral("/samsung.json"), QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
+}
+
+bool clearSamsungToken(const QString &dataDir)
+{
+    if (dataDir.trimmed().isEmpty())
+        return false;
+    const QString path = dataDir + QStringLiteral("/samsung.json");
+    QFile existing(path);
+    if (!existing.open(QIODevice::ReadOnly))
+        return false;
+    const QJsonDocument current = QJsonDocument::fromJson(existing.readAll());
+    existing.close();
+    if (!current.isObject())
+        return false;
+    QJsonObject obj = current.object();
+    obj.remove(QStringLiteral("token"));
+    QSaveFile out(path);
+    if (!out.open(QIODevice::WriteOnly))
+        return false;
+    out.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
+    if (!out.commit())
+        return false;
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    return true;
+}
+
+QString tvTraceLine(const QString &key, const QString &action, const QString &command, const QString &result)
+{
+    const auto field = [](const QString &value) {
+        const QString trimmed = value.trimmed();
+        return trimmed.isEmpty() ? QStringLiteral("—") : trimmed;
+    };
+    return field(key) + QStringLiteral(" -> ") + field(action) + QStringLiteral(" -> ") + field(command)
+           + QStringLiteral(" -> ") + field(result);
+}
+
 QByteArray samsungKeyPayload(TvKey key)
 {
     QJsonObject params;
@@ -199,6 +317,21 @@ int parseUpnpVolume(const QByteArray &body)
     if (value < 0 || value > 100)
         return -1;
     return value;
+}
+
+int parseUpnpMute(const QByteArray &body)
+{
+    const QRegularExpression re(QStringLiteral("CurrentMute[^A-Za-z0-9]{0,40}(true|false|0|1)"),
+                                QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = re.match(QString::fromUtf8(body));
+    if (!match.hasMatch())
+        return -1;
+    const QString value = match.captured(1).toLower();
+    if (value == QLatin1String("1") || value == QLatin1String("true"))
+        return 1;
+    if (value == QLatin1String("0") || value == QLatin1String("false"))
+        return 0;
+    return -1;
 }
 
 bool parseMac(const QString &raw, quint8 out[6])
@@ -349,6 +482,26 @@ QString SamsungClient::volumeLabel() const
     return QString::number(m_volume);
 }
 
+QString SamsungClient::muteLabel() const
+{
+    if (m_muted < 0)
+        return QStringLiteral("—");
+    return m_muted > 0 ? QStringLiteral("mudo") : QStringLiteral("com som");
+}
+
+bool SamsungClient::tokenPresent() const
+{
+    return !loadSamsungConfig(m_dataDir).token.trimmed().isEmpty();
+}
+
+int SamsungClient::latencyMs() const
+{
+    if (m_activeStarted <= 0)
+        return 0;
+    const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - m_activeStarted;
+    return elapsed < 0 ? 0 : int(elapsed);
+}
+
 QString SamsungClient::statusLine() const
 {
     return QStringLiteral("%1 · volume %2").arg(powerLabel(), volumeLabel());
@@ -359,59 +512,173 @@ void SamsungClient::send(TvKey key)
     sendKey(key, false);
 }
 
-void SamsungClient::sendKey(TvKey key, bool quietPowerError)
+void SamsungClient::sendKey(TvKey key, bool quietPowerError, qint64 started)
 {
+    if (started <= 0)
+        started = QDateTime::currentMSecsSinceEpoch();
     const SamsungConfig config = loadSamsungConfig(m_dataDir);
     if (config.disabled) {
-        emit failed(int(key), QStringLiteral("Controle Samsung desligado."));
+        const QString message = QStringLiteral("Controle Samsung desligado.");
+        m_lastError = message;
+        m_scheme = QStringLiteral("—");
+        emit statusChanged();
+        emit commandFinished(int(key), false, message, 0);
+        emit failed(int(key), message);
         return;
     }
     if (m_busy) {
         m_queued.key = key;
         m_queued.quietPowerError = quietPowerError;
+        m_queued.started = started;
         m_hasQueued = true;
         return;
     }
     m_busy = true;
     m_quietPowerError = quietPowerError;
-    sendOn(key, false);
+    m_activeStarted = started;
+    const bool secureFirst = config.token.trimmed().isEmpty();
+    sendOn(key, secureFirst);
 }
 
-void SamsungClient::finishSocket(const QString &error, bool trySecure, TvKey key)
+void SamsungClient::finishSocket(const QString &error, SocketFollow follow, TvKey key, bool quiet)
 {
-    if (!m_busy)
+    if (!m_busy && !m_pairing)
         return;
-    if (trySecure && !error.isEmpty()) {
+    if (follow == SocketFollow::TrySecure && !error.isEmpty()) {
+        m_lastError = error;
+        m_scheme = QStringLiteral("wss");
+        emit statusChanged();
+        std::fprintf(stderr, "zappe: samsung: porta simples recusou; abrindo wss para o Allow\n");
         sendOn(key, true);
         return;
     }
+    if (follow == SocketFollow::RetryBare && !error.isEmpty()) {
+        m_lastError = error;
+        m_scheme = QStringLiteral("wss");
+        emit statusChanged();
+        m_stripToken = true;
+        std::fprintf(stderr, "zappe: samsung: token recusado; abrindo de novo sem token\n");
+        sendOn(key, true);
+        return;
+    }
+    const int waited = latencyMs();
+    const bool repairing = m_repairing;
     m_busy = false;
+    m_pairing = false;
+    m_stripToken = false;
+    m_repairing = false;
     if (!error.isEmpty()) {
-        if (!(key == TvKey::Power && m_quietPowerError))
+        m_lastError = error;
+        if (quiet)
+            std::fprintf(stderr, "zappe: samsung: pareamento não concluiu (%s)\n", qPrintable(error));
+        else if (!(key == TvKey::Power && m_quietPowerError))
             emit failed(int(key), error);
         else
             std::fprintf(stderr, "zappe: KEY_POWER não confirmou (%s); Wake-on-LAN/CEC seguem valendo\n",
                          qPrintable(error));
+        if (repairing)
+            emit repairFinished(false, error, waited);
+        else if (!quiet)
+            emit commandFinished(int(key), false, error, waited);
     } else {
-        emit sent(int(key));
-        if (key == TvKey::VolumeUp || key == TvKey::VolumeDown || key == TvKey::Mute || key == TvKey::Power)
-            QTimer::singleShot(350, this, [this] { refresh(); });
+        m_lastError.clear();
+        if (quiet)
+            std::fprintf(stderr, "zappe: samsung: pareado\n");
+        else {
+            emit sent(int(key));
+            if (key == TvKey::VolumeUp || key == TvKey::VolumeDown || key == TvKey::Mute || key == TvKey::Power)
+                QTimer::singleShot(350, this, [this] { refresh(); });
+        }
+        if (repairing)
+            emit repairFinished(true, QStringLiteral("ok"), waited);
+        else if (!quiet)
+            emit commandFinished(int(key), true, QStringLiteral("ok"), waited);
     }
+    emit statusChanged();
     if (m_hasQueued) {
         const Pending next = m_queued;
         m_hasQueued = false;
-        sendKey(next.key, next.quietPowerError);
+        sendKey(next.key, next.quietPowerError, next.started);
+        return;
     }
+    if (m_repairPending)
+        beginRepair();
+}
+
+void SamsungClient::setDataDir(const QString &dataDir)
+{
+    m_dataDir = dataDir;
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    m_scheme = config.disabled ? QStringLiteral("—")
+                               : (config.token.trimmed().isEmpty() ? QStringLiteral("wss") : QStringLiteral("ws"));
+    emit statusChanged();
+    ensurePaired();
+}
+
+void SamsungClient::ensurePaired()
+{
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    if (config.disabled || !config.token.trimmed().isEmpty())
+        return;
+    if (m_busy || m_pairing)
+        return;
+    m_busy = true;
+    m_pairing = true;
+    m_activeStarted = QDateTime::currentMSecsSinceEpoch();
+    std::fprintf(stderr, "zappe: samsung: sem token; o pareamento seguro vai pedir Allow na TV\n");
+    openSocket(TvKey::VolumeUp, true, true);
+}
+
+void SamsungClient::repair()
+{
+    qunsetenv("ZAPPE_SAMSUNG_TOKEN");
+    clearSamsungToken(m_dataDir);
+    m_repairStarted = QDateTime::currentMSecsSinceEpoch();
+    m_scheme = QStringLiteral("wss");
+    m_lastError.clear();
+    emit statusChanged();
+    if (m_busy) {
+        m_repairPending = true;
+        return;
+    }
+    beginRepair();
+}
+
+void SamsungClient::beginRepair()
+{
+    m_repairPending = false;
+    m_repairing = true;
+    m_pairing = true;
+    m_busy = true;
+    m_stripToken = true;
+    m_activeStarted = m_repairStarted > 0 ? m_repairStarted : QDateTime::currentMSecsSinceEpoch();
+    std::fprintf(stderr, "zappe: samsung: sem token; o pareamento seguro vai pedir Allow na TV\n");
+    openSocket(TvKey::VolumeUp, true, true);
 }
 
 void SamsungClient::sendOn(TvKey key, bool secure)
 {
-    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    openSocket(key, secure, m_pairing);
+}
+
+void SamsungClient::openSocket(TvKey key, bool secure, bool pairOnly)
+{
+    SamsungConfig config = loadSamsungConfig(m_dataDir);
+    const bool hadToken = !config.token.trimmed().isEmpty();
+    if (m_stripToken)
+        config.token.clear();
+    const bool tokenPresent = !config.token.trimmed().isEmpty();
+    const int waitMs = (secure && !tokenPresent) ? samsungPairingWaitMs() : samsungKeyWaitMs();
+    m_scheme = secure ? QStringLiteral("wss") : QStringLiteral("ws");
+    emit statusChanged();
+    std::fprintf(stderr, "zappe: samsung: abrindo %s://%s:%d token=%s secure=%s espera=%d\n", secure ? "wss" : "ws",
+                 qPrintable(config.host), secure ? config.securePort : config.port, tokenPresent ? "sim" : "não",
+                 secure ? "sim" : "não", waitMs);
     auto *socket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
     const auto once = std::make_shared<bool>(true);
-    const auto done = [this, socket, timer, once](const QString &error, bool trySecure, TvKey sentKey) {
+    const auto done = [this, socket, timer, once](const QString &error, SocketFollow follow, TvKey sentKey, bool quiet) {
         if (!*once)
             return;
         *once = false;
@@ -419,46 +686,66 @@ void SamsungClient::sendOn(TvKey key, bool secure)
         socket->close();
         socket->deleteLater();
         timer->deleteLater();
-        finishSocket(error, trySecure, sentKey);
+        finishSocket(error, follow, sentKey, quiet);
     };
-    connect(timer, &QTimer::timeout, this, [=] { done(QStringLiteral("tempo esgotado"), !secure, key); });
+    connect(socket, &QWebSocket::sslErrors, this, [socket](const QList<QSslError> &) {
+        std::fprintf(stderr, "zappe: samsung: certificado aceito\n");
+        socket->ignoreSslErrors();
+    });
+    connect(timer, &QTimer::timeout, this, [=] {
+        std::fprintf(stderr, "zappe: samsung: tempo esgotado secure=%s\n", secure ? "sim" : "não");
+        const SocketFollow follow = secure ? SocketFollow::Finish : SocketFollow::TrySecure;
+        done(samsungTimeoutMessage(tokenPresent), follow, key, pairOnly);
+    });
     connect(socket, &QWebSocket::textMessageReceived, this, [=](const QString &message) {
-        const QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8());
+        const QByteArray raw = message.toUtf8();
+        const QJsonDocument doc = QJsonDocument::fromJson(raw);
         const QString event = doc.object().value(QStringLiteral("event")).toString();
-        if (event == QLatin1String("ms.channel.unauthorized") || event == QLatin1String("ms.channel.timeOut")) {
-            done(QStringLiteral("aceite o Zappe no Device Connect"), false, key);
+        if (!event.isEmpty())
+            std::fprintf(stderr, "zappe: samsung: evento %s\n", qPrintable(event));
+        if (samsungAuthDenied(raw)) {
+            if (samsungUpgradeToSecure(secure, true)) {
+                done(QStringLiteral("aceite o Zappe na TV"), SocketFollow::TrySecure, key, false);
+                return;
+            }
+            if (samsungRetryWithoutToken(secure, hadToken, m_stripToken, true)) {
+                done(QStringLiteral("aceite o Zappe na TV"), SocketFollow::RetryBare, key, false);
+                return;
+            }
+            if (samsungShouldHoldPairing(secure, tokenPresent, true)) {
+                std::fprintf(stderr, "zappe: samsung: aguardando Allow na TV; o socket continua aberto\n");
+                return;
+            }
+            done(QStringLiteral("aceite o Zappe na TV"), SocketFollow::Finish, key, pairOnly);
             return;
         }
         if (event != QLatin1String("ms.channel.connect"))
             return;
-        const QJsonValue token = doc.object().value(QStringLiteral("data")).toObject().value(QStringLiteral("token"));
-        if (token.isString() && !token.toString().isEmpty() && !m_dataDir.isEmpty()) {
-            QJsonObject obj;
-            QFile existing(m_dataDir + QStringLiteral("/samsung.json"));
-            if (existing.open(QIODevice::ReadOnly)) {
-                const QJsonDocument current = QJsonDocument::fromJson(existing.readAll());
-                if (current.isObject())
-                    obj = current.object();
-            }
-            if (!obj.contains(QStringLiteral("host")))
-                obj.insert(QStringLiteral("host"), config.host);
-            obj.insert(QStringLiteral("token"), token.toString());
-            if (!obj.contains(QStringLiteral("name")))
-                obj.insert(QStringLiteral("name"), config.name);
-            QSaveFile out(m_dataDir + QStringLiteral("/samsung.json"));
-            if (out.open(QIODevice::WriteOnly)) {
-                out.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
-                out.commit();
-                QFile::setPermissions(m_dataDir + QStringLiteral("/samsung.json"),
-                                      QFileDevice::ReadOwner | QFileDevice::WriteOwner);
-            }
+        const QString token = samsungConnectToken(raw);
+        if (!token.isEmpty()) {
+            if (saveSamsungToken(m_dataDir, config.host, config.name, token))
+                std::fprintf(stderr, "zappe: samsung: token gravado em %s/samsung.json\n", qPrintable(m_dataDir));
+            else
+                std::fprintf(stderr, "zappe: samsung: conectado, token não gravado\n");
+        } else {
+            std::fprintf(stderr, "zappe: samsung: conectado sem token novo\n");
         }
-        socket->sendTextMessage(QString::fromUtf8(samsungKeyPayload(key)));
-        QTimer::singleShot(180, this, [=] { done({}, false, key); });
+        const bool sendKeyNow = !pairOnly || m_hasQueued;
+        const TvKey wire = m_hasQueued ? m_queued.key : key;
+        if (sendKeyNow) {
+            socket->sendTextMessage(QString::fromUtf8(samsungKeyPayload(wire)));
+            std::fprintf(stderr, "zappe: samsung: tecla %s enviada\n", tvKeyCode(wire));
+            m_hasQueued = false;
+        }
+        QTimer::singleShot(180, this, [=] { done({}, SocketFollow::Finish, wire, !sendKeyNow); });
     });
     connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QWebSocket::error), this,
-            [=](QAbstractSocket::SocketError) { done(socket->errorString(), !secure, key); });
-    timer->start(1800);
+            [=](QAbstractSocket::SocketError) {
+                std::fprintf(stderr, "zappe: samsung: erro de socket (%s)\n", qPrintable(socket->errorString()));
+                const SocketFollow follow = secure ? SocketFollow::Finish : SocketFollow::TrySecure;
+                done(socket->errorString(), follow, key, pairOnly);
+            });
+    timer->start(waitMs);
     socket->open(QUrl(samsungWebsocketUrl(config, secure)));
 }
 
@@ -470,6 +757,7 @@ void SamsungClient::togglePower()
 void SamsungClient::refresh()
 {
     beginProbe(false);
+    ensurePaired();
 }
 
 void SamsungClient::nudgeHdmi(int delta)
@@ -501,6 +789,8 @@ void SamsungClient::beginProbe(bool toggle)
         m_controlOff = true;
         m_power = TvPower::Unknown;
         m_volume = -1;
+        m_muted = -1;
+        m_scheme = QStringLiteral("—");
         emit statusChanged();
         if (toggle)
             emit failed(int(TvKey::Power), QStringLiteral("Controle Samsung desligado."));
@@ -529,11 +819,15 @@ void SamsungClient::applyProbe(bool httpOk, const TvProbe &probe, bool toggle)
     m_probed = true;
     m_reachable = httpOk;
     m_power = httpOk ? probe.power : TvPower::Unknown;
-    if (!httpOk || m_power != TvPower::On)
+    if (!httpOk || m_power != TvPower::On) {
         m_volume = -1;
+        m_muted = -1;
+    }
     emit statusChanged();
-    if (httpOk && m_power == TvPower::On)
+    if (httpOk && m_power == TvPower::On) {
         queryVolume();
+        queryMute();
+    }
     if (!toggle)
         return;
 
@@ -591,6 +885,37 @@ void SamsungClient::queryVolume()
         if (volume == m_volume)
             return;
         m_volume = volume;
+        emit statusChanged();
+    });
+}
+
+void SamsungClient::queryMute()
+{
+    const SamsungConfig config = loadSamsungConfig(m_dataDir);
+    if (config.disabled)
+        return;
+    if (!m_net)
+        m_net = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("http://%1:9197/upnp/control/RenderingControl1").arg(config.host)));
+    request.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("text/xml; charset=\"utf-8\""));
+    request.setRawHeader("SOAPACTION", "\"urn:schemas-upnp-org:service:RenderingControl:1#GetMute\"");
+    request.setTransferTimeout(800);
+    const QByteArray soap = QByteArrayLiteral(
+        "<?xml version=\"1.0\"?>"
+        "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" "
+        "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body>"
+        "<u:GetMute xmlns:u=\"urn:schemas-upnp-org:service:RenderingControl:1\">"
+        "<InstanceID>0</InstanceID><Channel>Master</Channel></u:GetMute>"
+        "</s:Body></s:Envelope>");
+    QNetworkReply *reply = m_net->post(request, soap);
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const bool ok = reply->error() == QNetworkReply::NoError;
+        const QByteArray body = reply->isReadable() ? reply->readAll() : QByteArray();
+        reply->deleteLater();
+        const int muted = ok ? parseUpnpMute(body) : -1;
+        if (muted == m_muted)
+            return;
+        m_muted = muted;
         emit statusChanged();
     });
 }

@@ -1,7 +1,9 @@
 #include "guide.h"
 
+#include "branding.h"
 #include "display.h"
 #include "mirror.h"
+#include "ota.h"
 #include "posters.h"
 #include "util.h"
 
@@ -339,6 +341,8 @@ QString Guide::pageForMenu(int index)
 
 void Guide::setPage(const QString &page)
 {
+    if (page != QLatin1String("settings"))
+        closeTvTest();
     if (page == m_page)
         return;
     m_page = page;
@@ -359,6 +363,8 @@ void Guide::setMenuIndex(int index)
         return;
     m_menuIndex = index;
     if (page != m_page) {
+        if (page != QLatin1String("settings"))
+            closeTvTest();
         m_page = page;
         clampFocusToPage();
         emit pageChanged();
@@ -406,6 +412,17 @@ void Guide::move(int dShelf, int dIndex)
     }
     if (m_detailOpen) {
         moveDetail(dShelf, dIndex);
+        return;
+    }
+    if (m_tvTest) {
+        const int step = dShelf != 0 ? dShelf : dIndex;
+        if (step != 0) {
+            const int next = std::clamp(m_tvTestIndex + (step > 0 ? 1 : -1), 0, 4);
+            if (next != m_tvTestIndex) {
+                m_tvTestIndex = next;
+                emit tvTestChanged();
+            }
+        }
         return;
     }
     if (m_page == QLatin1String("settings")) {
@@ -481,8 +498,8 @@ void Guide::moveDetail(int dShelf, int dIndex)
 
 void Guide::moveSettings(int dShelf, int dIndex)
 {
-    // 0 resolução, 1 marca, 2 estado, 3 força, 4 volume, 5 mudo, 6 HDMI.
-    constexpr int kLast = 6;
+    // 0 resolução, 1 marca, 2 estado, 3 força, 4 volume, 5 mudo, 6 HDMI, 7 Testar TV.
+    constexpr int kLast = 7;
     if (dShelf != 0) {
         const int next = std::clamp(m_settingsIndex + dShelf, 0, kLast);
         if (next != m_settingsIndex) {
@@ -495,7 +512,7 @@ void Guide::moveSettings(int dShelf, int dIndex)
             nudgeResolution(dIndex);
         else if (m_settingsIndex == 1)
             setBrandingEnabled(dIndex > 0);
-        else
+        else if (m_settingsIndex != 7)
             emit settingsCommand(m_settingsIndex, dIndex > 0 ? 1 : -1);
     }
 }
@@ -537,11 +554,17 @@ void Guide::activate()
         emit menuChanged();
         return;
     }
+    if (m_tvTest) {
+        emit tvTestCommand(m_tvTestIndex);
+        return;
+    }
     if (m_page == QLatin1String("settings") && !m_detailOpen) {
         if (m_settingsIndex == 0)
             nudgeResolution(m_resolution == QLatin1String("1080p") ? 1 : -1);
         else if (m_settingsIndex == 1)
             setBrandingEnabled(!m_brandingOn);
+        else if (m_settingsIndex == 7)
+            openTvTest();
         else
             emit settingsCommand(m_settingsIndex, 0);
         return;
@@ -660,6 +683,38 @@ void Guide::ensureFocusableShelf()
     }
 }
 
+void Guide::home()
+{
+    if (!coalesce(QStringLiteral("home")))
+        return;
+    closeTvTest();
+    const bool detailWas = m_detailOpen;
+    const bool menuWas = m_menuOpen;
+    m_detailOpen = false;
+    m_menuOpen = false;
+    m_menuIndex = 0;
+    m_mirrorService.clear();
+    if (m_page != QLatin1String("home"))
+        setPage(QStringLiteral("home"));
+    int shelf = 0;
+    for (int i = 0; i < shelfCount(); ++i) {
+        if (shelfShown(i)) {
+            shelf = i;
+            break;
+        }
+    }
+    m_shelf = shelf;
+    m_index = 0;
+    clampIndex();
+    ++m_layoutEpoch;
+    emit layoutChanged();
+    publishFocus();
+    if (detailWas)
+        emit detailChanged();
+    if (menuWas)
+        emit menuChanged();
+}
+
 void Guide::back()
 {
     if (!coalesce(QStringLiteral("back")))
@@ -689,12 +744,81 @@ void Guide::back()
         ensureFocusableShelf();
         return;
     }
+    if (m_tvTest) {
+        closeTvTest();
+        return;
+    }
     if (m_page != QLatin1String("home")) {
         setPage(QStringLiteral("home"));
         ensureFocusableShelf();
         return;
     }
     ensureFocusableShelf();
+}
+
+void Guide::openTvTest()
+{
+    if (m_page != QLatin1String("settings"))
+        setPage(QStringLiteral("settings"));
+    if (m_tvTest)
+        return;
+    m_tvTest = true;
+    m_tvTestIndex = 0;
+    emit tvTestChanged();
+}
+
+void Guide::closeTvTest()
+{
+    if (!m_tvTest)
+        return;
+    m_tvTest = false;
+    emit tvTestChanged();
+}
+
+void Guide::pushDial(const QString &glyph)
+{
+    const QString next = appendDialText(m_dialText, glyph);
+    if (next == m_dialText)
+        return;
+    m_dialText = next;
+    emit dialChanged();
+}
+
+void Guide::clearDial()
+{
+    if (m_dialText.isEmpty())
+        return;
+    m_dialText.clear();
+    emit dialChanged();
+}
+
+void Guide::refreshLiveChannels()
+{
+    CatalogFile catalog;
+    catalog.path = m_catalogPath;
+    catalog.shelves = m_baseShelves;
+    const QString data = m_dataDir.isEmpty() ? resolveDataDir() : m_dataDir;
+    mergeLiveChannels(catalog, listOtaChannels());
+    decorateCatalog(catalog, data, cacheDir());
+    m_baseShelves = std::move(catalog.shelves);
+    publishShelves(false);
+}
+
+void Guide::noteLiveEpg(const QString &href, const QString &line)
+{
+    if (href.isEmpty() || line.isEmpty())
+        return;
+    bool changed = false;
+    for (ShelfData &shelf : m_baseShelves) {
+        for (RowData &row : shelf.rows) {
+            if (row.href != href)
+                continue;
+            row.synopsis = line;
+            changed = true;
+        }
+    }
+    if (changed)
+        publishShelves(false);
 }
 
 void Guide::noteLiveFrame(const QString &href, const QString &artwork, const QString &ambient, const QString &color)

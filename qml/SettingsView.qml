@@ -41,7 +41,8 @@ Item {
         contentY: {
             var idx = guide.settingsIndex
             var item = idx === 0 ? resCard : idx === 1 ? brandCard : idx === 2 ? statusCard
-                       : idx === 3 ? powerCard : idx === 4 ? volCard : idx === 5 ? muteCard : hdmiCard
+                       : idx === 3 ? powerCard : idx === 4 ? volCard : idx === 5 ? muteCard
+                       : idx === 6 ? hdmiCard : testCard
             var target = item.y - 12
             var maxY = Math.max(0, contentHeight - height)
             return Math.max(0, Math.min(target, maxY))
@@ -379,6 +380,35 @@ Item {
                                 font.weight: 600
                             }
                         }
+                    }
+                }
+            }
+
+            Rectangle {
+                id: testCard
+                width: 920
+                height: 88
+                radius: 22
+                color: guide.settingsIndex === 7 ? "#1c1c1e" : "#141416"
+                border.width: guide.settingsIndex === 7 ? 3 : 1
+                border.color: guide.settingsIndex === 7 ? "#f5f5f7" : "#2c2c30"
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 28
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 4
+                    Text {
+                        text: "Testar TV"
+                        color: "#f5f5f7"
+                        font.family: guide.uiFont
+                        font.pixelSize: 26
+                        font.weight: 600
+                    }
+                    Text {
+                        text: "OK abre o diagnóstico"
+                        color: "#8e8e93"
+                        font.family: guide.uiFont
+                        font.pixelSize: 16
                     }
                 }
             }

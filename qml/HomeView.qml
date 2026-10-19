@@ -10,7 +10,7 @@ Item {
         x: 80
         y: 118
         width: parent.width - 160
-        height: 112
+        height: 168
         opacity: guide.detailOpen ? 0 : 1
         Behavior on opacity {
             NumberAnimation { duration: Motion.fadeMs; easing.type: Motion.ease }
@@ -66,6 +66,17 @@ Item {
                 font.pixelSize: 24
             }
         }
+        Text {
+            anchors.top: heroTitle.bottom
+            anchors.topMargin: 52
+            width: parent.width
+            visible: guide.focusSynopsis.length > 0
+            text: guide.focusSynopsis
+            color: "#d1d1d6"
+            font.family: guide.uiFont
+            font.pixelSize: 22
+            elide: Text.ElideRight
+        }
     }
 
     Flickable {
@@ -74,7 +85,7 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.top: parent.top
-        anchors.topMargin: 252
+        anchors.topMargin: 308
         contentWidth: width
         contentHeight: column.height + 96
         clip: true
