@@ -27,6 +27,7 @@
 #include <QJsonObject>
 #include <QBuffer>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QTemporaryDir>
 
 #include <cstdio>
@@ -252,6 +253,13 @@ int runLogicSelfCheck()
         || flag(serverArgs, "-bo") != QLatin1String("1") || flag(serverArgs, "--host") != QLatin1String("127.0.0.1")
         || flag(serverArgs, "--port") != QLatin1String("8178"))
         return fail("server flags");
+    QProcessEnvironment gamescope;
+    gamescope.insert(QStringLiteral("ENABLE_GAMESCOPE_WSI"), QStringLiteral("1"));
+    gamescope.insert(QStringLiteral("HOME"), QStringLiteral("/tmp/zappe"));
+    const QProcessEnvironment whisperEnv = whisperChildEnvironment(gamescope);
+    if (whisperEnv.value(QStringLiteral("ENABLE_GAMESCOPE_WSI")) != QLatin1String("0")
+        || whisperEnv.value(QStringLiteral("HOME")) != QLatin1String("/tmp/zappe"))
+        return fail("whisper gamescope wsi");
     const QByteArray wav = wavFromPcm(QByteArray(8, '\x01'), 16000);
     if (wav.size() != 52 || !wav.startsWith("RIFF") || wav.mid(8, 4) != QByteArray("WAVE"))
         return fail("wav header");

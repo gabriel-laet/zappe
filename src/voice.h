@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QObject>
+#include <QProcessEnvironment>
 #include <QString>
 #include <QStringList>
 
@@ -43,6 +44,10 @@ int whisperServerPort();
 
 QStringList whisperCliArgs(const QString &model, const QString &wav, int audioCtx);
 QStringList whisperServerArgs(const QString &model, int port);
+
+// O gamescope exporta ENABLE_GAMESCOPE_WSI=1. A layer aborta o Whisper
+// (vkroots.h, exit 134). O filho precisa ver 0.
+QProcessEnvironment whisperChildEnvironment(const QProcessEnvironment &parent);
 
 // PCM s16le mono. Sem fala, devolve o clipe inteiro.
 SilenceTrim trimSilencePcm(const qint16 *samples, int count, int sampleRate);

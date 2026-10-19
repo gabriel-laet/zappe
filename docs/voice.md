@@ -6,7 +6,7 @@ O áudio sai do `arecord` em PCM cru (`S16_LE`, 16 kHz, mono). Cada pedido ganha
 
 ## Servidor residente
 
-O `whisper-server` sobe com o app, em Vulkan, e fica com o modelo na memória. A porta local é **8178** (`127.0.0.1` só). Cada clipe manda o seu `-ac` no campo `audio_ctx`: `duração_ms / 20 + 64`, preso entre 256 e 1500. Junto vão `-t 4`, `-bs 1` e `-bo 1`.
+O `whisper-server` sobe com o app, em Vulkan, e fica com o modelo na memória. A porta local é **8178** (`127.0.0.1` só). O gamescope deixa `ENABLE_GAMESCOPE_WSI=1` no ambiente; essa layer aborta o Whisper (`vkroots.h`, saída 134). O servidor e o `whisper-cli` nascem com `ENABLE_GAMESCOPE_WSI=0`. Cada clipe manda o seu `-ac` no campo `audio_ctx`: `duração_ms / 20 + 64`, preso entre 256 e 1500. Junto vão `-t 4`, `-bs 1` e `-bo 1`.
 
 Se o servidor não responder, o mesmo clipe vai para o `whisper-cli` com `-l pt -nt -t 4 -bs 1 -bo 1 -ac N`.
 

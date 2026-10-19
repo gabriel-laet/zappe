@@ -12,6 +12,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QTimer>
@@ -360,6 +361,13 @@ QStringList whisperCliArgs(const QString &model, const QString &wav, int audioCt
             voicePrompt()};
 }
 
+QProcessEnvironment whisperChildEnvironment(const QProcessEnvironment &parent)
+{
+    QProcessEnvironment env = parent;
+    env.insert(QStringLiteral("ENABLE_GAMESCOPE_WSI"), QStringLiteral("0"));
+    return env;
+}
+
 QStringList whisperServerArgs(const QString &model, int port)
 {
     return {QStringLiteral("-m"),
@@ -699,6 +707,7 @@ void VoiceSession::spawnServer()
     m_spawned = true;
     auto *proc = new QProcess(this);
     proc->setWorkingDirectory(QDir::tempPath());
+    proc->setProcessEnvironment(whisperChildEnvironment(QProcessEnvironment::systemEnvironment()));
     proc->setProcessChannelMode(QProcess::MergedChannels);
     connect(proc, &QProcess::finished, this, [this, proc](int code, QProcess::ExitStatus status) {
         if (m_server == proc)
@@ -891,6 +900,7 @@ void VoiceSession::runCli(const QString &wav, bool finalPass, int generation, in
     }
     m_inflight = true;
     auto *whisper = new QProcess(this);
+    whisper->setProcessEnvironment(whisperChildEnvironment(QProcessEnvironment::systemEnvironment()));
     connect(whisper, &QProcess::finished, this,
             [this, whisper, finalPass, generation, requestId, startedMs, audioCtx](int code, QProcess::ExitStatus status) {
                 const QByteArray out = whisper->readAllStandardOutput();
