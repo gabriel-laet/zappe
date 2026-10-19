@@ -18,6 +18,7 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QKeyEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -39,7 +40,10 @@ House::House(QObject *parent)
     , m_mirror(new MirrorSession(this))
     , m_xback(new XBackGrab(this))
 {
-    connect(m_xback, &XBackGrab::pressed, this, &House::goHome);
+    connect(m_xback, &XBackGrab::pressed, this, [this] {
+        noteX11Key(166, int(Qt::Key_Back));
+        goHome();
+    });
     connect(m_chrome, &ChromeSession::failed, this, [this](const QString &message) {
         if (m_loading && !m_loadingFailed)
             failLoading(message);
@@ -157,6 +161,10 @@ House::House(QObject *parent)
                                                           QStringLiteral("@DEFAULT_SINK@"), QStringLiteral("+0%")});
     });
     connect(m_samsung, &SamsungClient::reported, this, [this](const QString &message) { toast(message); });
+    connect(m_samsung, &SamsungClient::reported, this, &House::onTvReported);
+    connect(m_samsung, &SamsungClient::commandFinished, this, &House::onCommandFinished);
+    connect(m_samsung, &SamsungClient::repairFinished, this, &House::onRepairFinished);
+    connect(m_samsung, &SamsungClient::statusChanged, this, &House::logLink);
     connect(m_voice, &VoiceSession::started, this, [this] {
         m_listening = true;
         m_listeningText = QStringLiteral("Ouvindo…");
@@ -174,6 +182,7 @@ House::House(QObject *parent)
         handleVoice(transcript);
     });
     connect(m_remote, &RemoteWatcher::action, this, &House::onRemote);
+    connect(m_remote, &RemoteWatcher::keyCode, this, &House::onEvdevKey);
     connect(m_remote, &RemoteWatcher::dialKey, this, &House::onDial);
     connect(m_ota, &OtaPlayer::epgReady, this, &House::applyEpg);
     connect(m_chrome, &ChromeSession::exited, this, [this] { updateKeyHold(); });
@@ -218,6 +227,8 @@ void House::start(Guide *guide, QQuickWindow *window, const QString &dataDir)
         m_focusTimer->start();
     });
     connect(m_guide, &Guide::settingsCommand, this, &House::onSettings);
+    connect(m_guide, &Guide::tvTestCommand, this, &House::runTvTest);
+    connect(m_guide, &Guide::tvTestChanged, this, &House::syncTvTrace);
     connect(m_guide, &Guide::pageChanged, this, [this] {
         if (m_guide && m_guide->page() == QLatin1String("settings"))
             m_samsung->refresh();
@@ -719,13 +730,16 @@ void House::volume(int delta)
 {
     if (m_guide)
         m_guide->adjustVolume(delta > 0 ? 5 : -5);
-    m_samsung->send(delta > 0 ? TvKey::VolumeUp : TvKey::VolumeDown);
+    const TvKey key = delta > 0 ? TvKey::VolumeUp : TvKey::VolumeDown;
+    watchCommand(key);
+    m_samsung->send(key);
 }
 
 void House::mute()
 {
     if (m_guide)
         m_guide->toggleMute();
+    watchCommand(TvKey::Mute);
     m_samsung->send(TvKey::Mute);
 }
 
@@ -921,9 +935,11 @@ void House::onRemote(int remoteAction)
     const auto action = RemoteAction(remoteAction);
     if (action == RemoteAction::Ignore || action == RemoteAction::Unmapped)
         return;
+    noteRemoteAction(action);
     if (!take(action))
         return;
     if (action == RemoteAction::Power) {
+        watchCommand(TvKey::Power);
         m_samsung->togglePower();
         return;
     }
@@ -1029,6 +1045,7 @@ void House::onRemote(int remoteAction)
         m_voice->listen(m_dataDir);
         break;
     case RemoteAction::Power:
+        watchCommand(TvKey::Power);
         m_samsung->togglePower();
         break;
     case RemoteAction::Ignore:
@@ -1066,6 +1083,282 @@ void House::onSettings(int index, int verb)
         else
             m_samsung->nudgeHdmi(verb > 0 ? 1 : -1);
         break;
+    default:
+        break;
+    }
+}
+
+namespace {
+
+QString traceResult(bool ok, const QString &detail, int latencyMs)
+{
+    if (ok)
+        return QStringLiteral("ok %1 ms").arg(latencyMs);
+    return QStringLiteral("erro ") + detail + QLatin1Char(' ') + QString::number(latencyMs) + QStringLiteral(" ms");
+}
+
+} // namespace
+
+bool House::tracing() const
+{
+    if (m_guide && m_guide->tvTest())
+        return true;
+    return QDateTime::currentMSecsSinceEpoch() < m_traceUntil;
+}
+
+QString House::formatTrace(const TvTrace &line) const
+{
+    return tvTraceLine(line.key, line.action, line.command, line.result);
+}
+
+void House::publishTrace(int index)
+{
+    if (index >= 0 && index < m_traces.size()) {
+        const QString text = formatTrace(m_traces[index]);
+        if (m_traces[index].logged != text) {
+            m_traces[index].logged = text;
+            std::fprintf(stderr, "zappe: tv: %s\n", qPrintable(text));
+        }
+    }
+    QStringList view;
+    view.reserve(m_traces.size());
+    for (const TvTrace &line : m_traces)
+        view.append(formatTrace(line));
+    if (view == m_tvLog)
+        return;
+    m_tvLog = std::move(view);
+    emit tvLogChanged();
+}
+
+void House::rememberTrace(const TvTrace &incoming)
+{
+    TvTrace line = incoming;
+    if (line.at <= 0)
+        line.at = QDateTime::currentMSecsSinceEpoch();
+    m_traces.prepend(line);
+    while (m_traces.size() > 40)
+        m_traces.removeLast();
+    publishTrace(0);
+}
+
+void House::onEvdevKey(int code)
+{
+    if (!tracing())
+        return;
+    const QString label = QStringLiteral("evdev %1 %2").arg(code).arg(describeEvdevKey(code));
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QString known;
+    if (dialFromEvdev(code) >= 0)
+        known = QStringLiteral("canal");
+    else {
+        const RemoteAction action = actionForEvdev(code);
+        if (action == RemoteAction::Unmapped || action == RemoteAction::Ignore)
+            known = QString::fromLatin1(actionName(action));
+    }
+    if (!m_traces.isEmpty() && !m_traces[0].evdev && m_traces[0].x11 && now - m_traces[0].at < 180) {
+        TvTrace &line = m_traces[0];
+        line.key = label + QStringLiteral(" / ") + line.key;
+        line.evdev = true;
+        if (line.action.isEmpty())
+            line.action = known;
+        publishTrace(0);
+        return;
+    }
+    TvTrace line;
+    line.key = label;
+    line.action = known;
+    line.evdev = true;
+    line.at = now;
+    rememberTrace(line);
+}
+
+void House::noteX11Key(int scan, int qtKey)
+{
+    if (!tracing())
+        return;
+    const QString label = QStringLiteral("x11 %1 %2").arg(scan).arg(describeX11Key(scan, qtKey));
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const QString action = actionNameForQt(scan, qtKey);
+    if (!m_traces.isEmpty() && now - m_traces[0].at < 180) {
+        TvTrace &line = m_traces[0];
+        if (line.key.contains(label))
+            return;
+        if (!line.x11) {
+            line.key = line.key.isEmpty() ? label : line.key + QStringLiteral(" / ") + label;
+            line.x11 = true;
+            if (line.action.isEmpty())
+                line.action = action;
+            publishTrace(0);
+            return;
+        }
+    }
+    TvTrace line;
+    line.key = label;
+    line.action = action;
+    line.x11 = true;
+    line.at = now;
+    rememberTrace(line);
+}
+
+void House::noteRemoteAction(RemoteAction action)
+{
+    if (!tracing())
+        return;
+    const QString name = QString::fromLatin1(actionName(action));
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!m_traces.isEmpty() && now - m_traces[0].at < 250) {
+        if (m_traces[0].action.isEmpty()) {
+            m_traces[0].action = name;
+            publishTrace(0);
+            return;
+        }
+        if (m_traces[0].action == name)
+            return;
+    }
+    TvTrace line;
+    line.action = name;
+    line.at = now;
+    rememberTrace(line);
+}
+
+void House::watchCommand(TvKey key)
+{
+    if (!tracing())
+        return;
+    const QString command = QString::fromLatin1(tvKeyCode(key));
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!m_traces.isEmpty() && m_traces[0].command.isEmpty() && now - m_traces[0].at < 250) {
+        m_traces[0].command = command;
+        m_traces[0].result = QStringLiteral("…");
+        m_traces[0].waitKey = int(key);
+        m_traces[0].loggedFinal = false;
+        publishTrace(0);
+        return;
+    }
+    TvTrace line;
+    line.command = command;
+    line.result = QStringLiteral("…");
+    line.waitKey = int(key);
+    line.at = now;
+    rememberTrace(line);
+}
+
+void House::finishWait(int waitKey, const QString &result)
+{
+    for (int i = m_traces.size() - 1; i >= 0; --i) {
+        if (m_traces[i].waitKey != waitKey || m_traces[i].loggedFinal)
+            continue;
+        m_traces[i].result = result;
+        m_traces[i].loggedFinal = true;
+        m_traces[i].waitKey = -1;
+        publishTrace(i);
+        return;
+    }
+}
+
+void House::onCommandFinished(int key, bool ok, const QString &detail, int latencyMs)
+{
+    finishWait(key, traceResult(ok, detail, latencyMs));
+}
+
+void House::onRepairFinished(bool ok, const QString &detail, int latencyMs)
+{
+    finishWait(-2, traceResult(ok, detail, latencyMs));
+}
+
+void House::onTvReported(const QString &message)
+{
+    for (int i = m_traces.size() - 1; i >= 0; --i) {
+        if (m_traces[i].waitKey != int(TvKey::Power) || m_traces[i].loggedFinal)
+            continue;
+        if (message.contains(QStringLiteral("Device Connect")))
+            return;
+        m_traces[i].result = message;
+        m_traces[i].loggedFinal = true;
+        m_traces[i].waitKey = -1;
+        publishTrace(i);
+        return;
+    }
+}
+
+void House::logLink()
+{
+    if (!tracing() || !m_samsung)
+        return;
+    const QString error = m_samsung->lastError().isEmpty() ? QStringLiteral("nenhum") : m_samsung->lastError();
+    const QString text = QStringLiteral("zappe: tv: ligação %1 token=%2 erro=%3 volume=%4 mudo=%5 força=%6")
+                             .arg(m_samsung->scheme(),
+                                  m_samsung->tokenPresent() ? QStringLiteral("sim") : QStringLiteral("não"), error,
+                                  m_samsung->volumeLabel(), m_samsung->muteLabel(), m_samsung->powerLabel());
+    if (text == m_linkLogged)
+        return;
+    m_linkLogged = text;
+    std::fprintf(stderr, "%s\n", qPrintable(text));
+}
+
+void House::syncTvTrace()
+{
+    const bool open = m_guide && m_guide->tvTest();
+    if (open) {
+        if (m_tvTimer && m_tvTimer->isActive())
+            return;
+        m_linkLogged.clear();
+        if (!m_tvTimer) {
+            m_tvTimer = new QTimer(this);
+            m_tvTimer->setInterval(2000);
+            connect(m_tvTimer, &QTimer::timeout, this, [this] {
+                if (m_samsung && m_guide && m_guide->tvTest())
+                    m_samsung->refresh();
+            });
+        }
+        m_tvTimer->start();
+        if (m_samsung)
+            m_samsung->refresh();
+        logLink();
+        return;
+    }
+    m_traceUntil = QDateTime::currentMSecsSinceEpoch() + 300;
+    if (m_tvTimer)
+        m_tvTimer->stop();
+}
+
+void House::runTvTest(int index)
+{
+    if (!m_samsung)
+        return;
+    switch (index) {
+    case 0: {
+        TvTrace line;
+        line.key = QStringLiteral("botão Reparar");
+        line.action = QStringLiteral("reparar");
+        line.command = QStringLiteral("wss sem token");
+        line.result = QStringLiteral("…");
+        line.waitKey = -2;
+        rememberTrace(line);
+        m_samsung->repair();
+        break;
+    }
+    case 1:
+        watchCommand(TvKey::Mute);
+        m_samsung->send(TvKey::Mute);
+        break;
+    case 2:
+        watchCommand(TvKey::VolumeUp);
+        m_samsung->send(TvKey::VolumeUp);
+        break;
+    case 3:
+        watchCommand(TvKey::VolumeDown);
+        m_samsung->send(TvKey::VolumeDown);
+        break;
+    case 4: {
+        const int port = m_samsung->hdmiPort();
+        const int next = port >= 3 ? 1 : port + 1;
+        m_samsung->nudgeHdmi(next - port);
+        const TvKey key = next == 2 ? TvKey::Hdmi2 : next >= 3 ? TvKey::Hdmi3 : TvKey::Hdmi1;
+        watchCommand(key);
+        m_samsung->sendHdmi();
+        break;
+    }
     default:
         break;
     }

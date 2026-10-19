@@ -3,6 +3,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QKeyEvent>
 
 namespace zappe {
 
@@ -132,6 +133,144 @@ const char *actionName(RemoteAction action)
         break;
     }
     return "unmapped";
+}
+
+QString describeEvdevKey(int code)
+{
+    switch (code) {
+    case 1:
+        return QStringLiteral("KEY_ESC");
+    case 14:
+        return QStringLiteral("KEY_BACKSPACE");
+    case 28:
+        return QStringLiteral("KEY_ENTER");
+    case 102:
+        return QStringLiteral("KEY_HOME");
+    case 103:
+        return QStringLiteral("KEY_UP");
+    case 104:
+        return QStringLiteral("KEY_PAGEUP");
+    case 105:
+        return QStringLiteral("KEY_LEFT");
+    case 106:
+        return QStringLiteral("KEY_RIGHT");
+    case 108:
+        return QStringLiteral("KEY_DOWN");
+    case 109:
+        return QStringLiteral("KEY_PAGEDOWN");
+    case 113:
+        return QStringLiteral("KEY_MUTE");
+    case 114:
+        return QStringLiteral("KEY_VOLUMEDOWN");
+    case 115:
+        return QStringLiteral("KEY_VOLUMEUP");
+    case 116:
+        return QStringLiteral("KEY_POWER");
+    case 127:
+        return QStringLiteral("KEY_MENU");
+    case 158:
+        return QStringLiteral("KEY_BACK");
+    case 164:
+        return QStringLiteral("KEY_PLAYPAUSE");
+    case 172:
+        return QStringLiteral("KEY_HOMEPAGE");
+    case 582:
+        return QStringLiteral("KEY_VOICE");
+    default:
+        break;
+    }
+    const int dial = dialFromEvdev(code);
+    if (dial == 10)
+        return QStringLiteral("KEY_DOT");
+    if (dial >= 0)
+        return QStringLiteral("KEY_%1").arg(dial);
+    return QStringLiteral("KEY_%1").arg(code);
+}
+
+QString describeX11Key(int scan, int qtKey)
+{
+    if (scan == 166)
+        return QStringLiteral("XF86Back");
+    switch (qtKey) {
+    case Qt::Key_Escape:
+        return QStringLiteral("Escape");
+    case Qt::Key_Backspace:
+        return QStringLiteral("Backspace");
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+        return QStringLiteral("Return");
+    case Qt::Key_Select:
+        return QStringLiteral("Select");
+    case Qt::Key_Left:
+        return QStringLiteral("Left");
+    case Qt::Key_Right:
+        return QStringLiteral("Right");
+    case Qt::Key_Up:
+        return QStringLiteral("Up");
+    case Qt::Key_Down:
+        return QStringLiteral("Down");
+    case Qt::Key_Back:
+        return QStringLiteral("Back");
+    case Qt::Key_Home:
+        return QStringLiteral("Home");
+    case Qt::Key_HomePage:
+        return QStringLiteral("HomePage");
+    case Qt::Key_Menu:
+        return QStringLiteral("Menu");
+    case Qt::Key_VolumeUp:
+        return QStringLiteral("VolumeUp");
+    case Qt::Key_VolumeDown:
+        return QStringLiteral("VolumeDown");
+    case Qt::Key_VolumeMute:
+        return QStringLiteral("VolumeMute");
+    case Qt::Key_PageUp:
+        return QStringLiteral("PageUp");
+    case Qt::Key_PageDown:
+        return QStringLiteral("PageDown");
+    default:
+        break;
+    }
+    if (qtKey >= Qt::Key_0 && qtKey <= Qt::Key_9)
+        return QStringLiteral("KEY_%1").arg(qtKey - Qt::Key_0);
+    return QStringLiteral("Qt_%1").arg(qtKey);
+}
+
+QString actionNameForQt(int scan, int qtKey)
+{
+    if (scan == 166 || qtKey == Qt::Key_Back || qtKey == Qt::Key_Home || qtKey == Qt::Key_HomePage)
+        return QStringLiteral("home");
+    switch (qtKey) {
+    case Qt::Key_Escape:
+    case Qt::Key_Backspace:
+        return QStringLiteral("back");
+    case Qt::Key_Left:
+        return QStringLiteral("left");
+    case Qt::Key_Right:
+        return QStringLiteral("right");
+    case Qt::Key_Up:
+        return QStringLiteral("up");
+    case Qt::Key_Down:
+        return QStringLiteral("down");
+    case Qt::Key_PageUp:
+        return QStringLiteral("pageUp");
+    case Qt::Key_PageDown:
+        return QStringLiteral("pageDown");
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_Select:
+        return QStringLiteral("ok");
+    case Qt::Key_Menu:
+        return QStringLiteral("menu");
+    case Qt::Key_VolumeUp:
+        return QStringLiteral("volumeUp");
+    case Qt::Key_VolumeDown:
+        return QStringLiteral("volumeDown");
+    case Qt::Key_VolumeMute:
+        return QStringLiteral("mute");
+    default:
+        break;
+    }
+    return {};
 }
 
 QVector<MapBinding> loadMapBindings(const QByteArray &json, QString *error)

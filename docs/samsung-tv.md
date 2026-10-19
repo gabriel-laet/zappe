@@ -63,7 +63,7 @@ Volume e mudo são `KEY_VOLUP`, `KEY_VOLDOWN` e `KEY_MUTE`. Se a TV não respond
 
 A entrada não usa `KEY_SOURCE` (isso só circula a fonte). Ajustes manda `KEY_HDMI1`, `KEY_HDMI2` ou `KEY_HDMI3`. A UN43TU7020 tem três HDMI.
 
-O volume numérico não vem no websocket. Com a TV ligada o app pergunta o UPnP `GetVolume` na porta `9197`. Se a TV não responder, Ajustes mostra **indisponível**.
+O volume numérico não vem no websocket. Com a TV ligada o app pergunta o UPnP `GetVolume` e o `GetMute` na porta `9197`. Se a TV não responder, Ajustes mostra **indisponível** no volume e **—** no mudo.
 
 ## Ajustes
 
@@ -76,3 +76,16 @@ Menu → Ajustes → seção **TV**:
 | Volume | Esquerda e direita. |
 | Mudo | OK. |
 | Entrada HDMI | Laterais escolhem 1–3, OK envia. |
+| Testar TV | OK abre o diagnóstico. |
+
+## Testar TV
+
+A tela mostra ao vivo o esquema (`ws` ou `wss`), se há token (sim ou não, nunca o valor), o último erro, a força, o volume e o mudo. Cada tecla pressionada vira uma linha:
+
+```text
+evdev 113 KEY_MUTE / x11 121 VolumeMute -> mute -> KEY_MUTE -> ok 40 ms
+```
+
+A ordem é a tecla recebida (evdev e, se a janela viu, o X11), a ação, o comando enviado à Samsung e a resposta ou o erro, com a latência. A mesma linha vai para o stderr (`kiosk.log`) com o prefixo `zappe: tv:`. A ligação também entra nesse log quando muda.
+
+Os botões são Reparar (apaga o token e abre o `wss` de novo para o Allow), Testar mudo, Vol+, Vol- e HDMI (circula 1, 2 e 3). Voltar registra a própria tecla e sai só desta tela, de volta para Ajustes. Home continua indo para o primeiro card.

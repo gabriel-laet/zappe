@@ -183,6 +183,10 @@ protected:
                 while (::read(fds[i], &event, sizeof(event)) == ssize_t(sizeof(event))) {
                     if (event.type != EV_KEY || event.value != 1)
                         continue;
+                    const int code = event.code;
+                    QMetaObject::invokeMethod(m_owner, [owner = m_owner, code] {
+                        emit owner->keyCode(code);
+                    }, Qt::QueuedConnection);
                     const int dial = dialFromEvdev(event.code);
                     if (dial >= 0) {
                         QMetaObject::invokeMethod(m_owner, [owner = m_owner, dial] {

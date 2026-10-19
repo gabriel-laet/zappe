@@ -199,6 +199,8 @@ O nó `event4` do air mouse recebe `EVIOCGRAB`. O cursor desse nó é descartado
 
 IP, token e MAC da TV ficam em `~/.local/share/zappe/samsung.json`. O exemplo sem segredo está em `packaging/appliance/examples/samsung.json`.
 
+Em Ajustes → TV, **Testar TV** abre o diagnóstico: ligação `ws` ou `wss`, token presente ou não, último erro, volume, mudo e força. Cada tecla do controle vira uma linha (tecla recebida, ação, comando na Samsung, resposta e latência) na tela e no `kiosk.log`. Reparar apaga o token e pede Allow de novo. Voltar sai só dessa tela. O valor do token não entra no log.
+
 ## TV aberta
 
 Procura `~/tv/channels.conf`, `~/.config/zappe/channels.conf` e `~/.local/share/zappe/channels.conf`. `ZAPPE_OTA_CHANNELS` substitui a lista (caminhos separados por `:`). Um serviço 1-seg (o nome ou `ISDBT_LAYER_ENABLED = 1`, só a camada A) sai quando o mesmo canal tem fullseg. Se a Band só veio assim, ela permanece na fileira e o log diz que o fullseg não foi gravado. Sem nenhuma seção da Band, o log diz uma vez que a varredura não gravou a Band: o virtual é 13.1 e o físico em São Paulo é o 23 (527 MHz), não o 13. Digitar 13 oferece OK para um `dvbv5-scan` só nessa frequência; Voltar cancela. Os serviços novos entram no `channels.conf` sem repetir o nome. `Globo`, `Record` e `SBT` caem na variante HD quando ela existe. A fileira Ao vivo do catálogo é trocada por esses canais quando o arquivo existe.

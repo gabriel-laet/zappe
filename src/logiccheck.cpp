@@ -456,6 +456,34 @@ int runLogicSelfCheck()
     if (parseUpnpVolume(QByteArrayLiteral("<CurrentVolume>17</CurrentVolume>")) != 17
         || parseUpnpVolume(QByteArrayLiteral("<u>nope</u>")) != -1)
         return fail("upnp volume");
+    if (parseUpnpMute(QByteArrayLiteral("<CurrentMute>1</CurrentMute>")) != 1
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>0</CurrentMute>")) != 0
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>true</CurrentMute>")) != 1
+        || parseUpnpMute(QByteArrayLiteral("<CurrentMute>false</CurrentMute>")) != 0
+        || parseUpnpMute(QByteArrayLiteral("<u>nope</u>")) != -1)
+        return fail("upnp mute");
+    if (!clearSamsungToken(pairDir))
+        return fail("samsung clear");
+    const SamsungConfig cleared = loadSamsungConfig(pairDir);
+    QFile clearedFile(pairDir + QStringLiteral("/samsung.json"));
+    if (!clearedFile.open(QIODevice::ReadOnly))
+        return fail("samsung clear read");
+    const QByteArray clearedBody = clearedFile.readAll();
+    clearedFile.close();
+    if (!cleared.token.isEmpty() || cleared.host != QLatin1String("192.168.3.6")
+        || cleared.mac != QLatin1String("02:11:22:33:44:55") || clearedBody.contains("tok-test"))
+        return fail("samsung clear kept");
+    const QFileDevice::Permissions clearedPerms = QFile::permissions(pairDir + QStringLiteral("/samsung.json"));
+    if (clearedPerms & (QFileDevice::ReadGroup | QFileDevice::WriteGroup | QFileDevice::ExeGroup | QFileDevice::ReadOther
+                        | QFileDevice::WriteOther | QFileDevice::ExeOther))
+        return fail("samsung clear mode");
+    const QString trace = tvTraceLine(QStringLiteral("evdev 14 KEY_BACKSPACE"), QStringLiteral("back"), QString(), QString());
+    if (trace != QStringLiteral("evdev 14 KEY_BACKSPACE -> back -> — -> —")
+        || tvTraceLine(QString(), QString(), QString(), QString()) != QStringLiteral("— -> — -> — -> —"))
+        return fail("tv trace line");
+    if (describeEvdevKey(158) != QLatin1String("KEY_BACK") || describeEvdevKey(14) != QLatin1String("KEY_BACKSPACE")
+        || describeX11Key(166, 0) != QLatin1String("XF86Back"))
+        return fail("tv key names");
     quint8 mac[6] = {};
     if (!parseMac(QStringLiteral("02:11:22:33:44:55"), mac) || mac[0] != 0x02 || mac[5] != 0x55)
         return fail("mac");
@@ -998,6 +1026,32 @@ int runLogicSelfCheck()
     if (homeGuide.page() != QLatin1String("home") || homeGuide.menuOpen() || homeGuide.shelf() != 0 || homeGuide.index() != 0
         || homeGuide.focusTitle() != QLatin1String("Canal 0"))
         return fail("home focuses the first card");
+    homeGuide.move(0, 1);
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    homeGuide.openTvTest();
+    homeGuide.move(1, 0);
+    if (!homeGuide.tvTest() || homeGuide.tvTestIndex() != 1 || homeGuide.page() != QLatin1String("settings")
+        || homeGuide.index() != 1 || homeGuide.shelf() != 0)
+        return fail("tv test moves its own list");
+    homeGuide.back();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("back leaves the tv test");
+    homeGuide.openTvTest();
+    homeGuide.home();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("home") || homeGuide.index() != 0
+        || homeGuide.focusTitle() != QLatin1String("Canal 0"))
+        return fail("home closes the tv test");
+    homeGuide.setPreview(false, QStringLiteral("settings"), false, {});
+    for (int step = 0; step < 7; ++step)
+        homeGuide.move(1, 0);
+    if (homeGuide.settingsIndex() != 7)
+        return fail("tv test row");
+    homeGuide.activate();
+    if (!homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("tv test opens from settings");
+    homeGuide.back();
+    if (homeGuide.tvTest() || homeGuide.page() != QLatin1String("settings"))
+        return fail("back stays in settings");
 
     std::printf("logic-check: ok (map, 7 streamings, ota, voice, hdmi, samsung, chrome)\n");
     return 0;

@@ -21,6 +21,7 @@ set(QML_FILES
   qml/FpsOverlay.qml
   qml/SideMenu.qml
   qml/SettingsView.qml
+  qml/TvTestView.qml
   qml/VolumeHud.qml
   qml/Toast.qml
   qml/LoginPrompt.qml

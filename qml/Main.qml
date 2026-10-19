@@ -69,6 +69,11 @@ Window {
             z: 3
         }
 
+        TvTestView {
+            anchors.fill: parent
+            z: 8
+        }
+
         Item {
             id: header
             z: 4
@@ -243,6 +248,8 @@ Window {
                 event.accepted = true
                 return
             }
+            if (!event.isAutoRepeat)
+                house.noteX11Key(event.nativeScanCode, event.key)
             if (win.splashOn) {
                 win.splashOn = false
                 event.accepted = true

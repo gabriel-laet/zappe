@@ -30,6 +30,8 @@ class Guide : public QObject {
     Q_PROPERTY(bool menuOpen READ menuOpen NOTIFY menuChanged)
     Q_PROPERTY(int menuIndex READ menuIndex NOTIFY menuChanged)
     Q_PROPERTY(int settingsIndex READ settingsIndex NOTIFY settingsChanged)
+    Q_PROPERTY(bool tvTest READ tvTest NOTIFY tvTestChanged)
+    Q_PROPERTY(int tvTestIndex READ tvTestIndex NOTIFY tvTestChanged)
     Q_PROPERTY(QString resolution READ resolution NOTIFY settingsChanged)
     Q_PROPERTY(bool brandingOn READ brandingOn NOTIFY brandingChanged)
     Q_PROPERTY(bool brandCustom READ brandCustom CONSTANT)
@@ -106,6 +108,8 @@ public:
     bool menuOpen() const { return m_menuOpen; }
     int menuIndex() const { return m_menuIndex; }
     int settingsIndex() const { return m_settingsIndex; }
+    bool tvTest() const { return m_tvTest; }
+    int tvTestIndex() const { return m_tvTestIndex; }
     QString resolution() const { return m_resolution; }
     bool brandingOn() const { return m_brandingOn; }
     bool brandCustom() const { return m_loaded.source == QLatin1String("user"); }
@@ -158,6 +162,7 @@ public:
     Q_INVOKABLE void activate();
     Q_INVOKABLE void back();
     Q_INVOKABLE void home();
+    Q_INVOKABLE void openTvTest();
     Q_INVOKABLE void toggleMenu();
     Q_INVOKABLE void adjustVolume(int delta);
     Q_INVOKABLE void toggleMute();
@@ -183,9 +188,11 @@ signals:
     void pageChanged();
     void menuChanged();
     void settingsChanged();
-    // index: 0 resolução, 1 marca, 2 estado da TV, 3 força, 4 volume, 5 mudo, 6 HDMI.
+    // index: 0 resolução, 1 marca, 2 estado da TV, 3 força, 4 volume, 5 mudo, 6 HDMI, 7 Testar TV.
     // verb: 0 ativa, -1 esquerda, 1 direita.
     void settingsCommand(int index, int verb);
+    void tvTestChanged();
+    void tvTestCommand(int index);
     void brandingChanged();
     void savedChanged();
     void volumeChanged();
@@ -210,6 +217,7 @@ private:
     void moveShelves(int dShelf, int dIndex);
     void moveDetail(int dShelf, int dIndex);
     void moveSettings(int dShelf, int dIndex);
+    void closeTvTest();
     void activateDetail();
     void toggleSaved();
     void nudgeResolution(int direction);
@@ -257,6 +265,8 @@ private:
     bool m_menuOpen = false;
     int m_menuIndex = 0;
     int m_settingsIndex = 0;
+    bool m_tvTest = false;
+    int m_tvTestIndex = 0;
     QString m_resolution = QStringLiteral("1080p");
     QString m_dataDir;
     bool m_coalesce = false;
